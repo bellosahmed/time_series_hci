@@ -21,18 +21,35 @@ Unit tests (`tests/test_query_engine.py`) — **8/8 passing**.
 > Sanity of values: mean 9.4 °C, range −22.7 °C (07 Jan 2009) to 37.0 °C (04 Jul 2015);
 > T correlates +0.997 with potential temperature and −0.96 with air density — physically correct.
 
-## 2. Anomaly detection
+## 2. Anomaly detection (three methods)
 
-| Method | Flagged | % of points |
-| --- | --- | --- |
-| Residual z-score (threshold 4σ) | 526 | ~0.75% |
-| Isolation Forest (multi-sensor) | 702 | ~1.00% |
-| Flagged by **both** | 33 | — |
+| Method | Type | Flagged | % of points |
+| --- | --- | --- | --- |
+| Residual z-score (4σ) | statistical | 526 | ~0.75% |
+| Isolation Forest (multi-sensor) | classical ML | 702 | ~1.00% |
+| 1D CNN autoencoder (top 1% error) | deep | 702 | ~1.00% |
 
 Flagged residual-anomaly points have a **mean \|residual\| of 8.09 °C vs 1.00 °C overall** —
-i.e. the detector selects genuinely extreme deviations, not noise. The two methods agree
-only partially (33 in common), which is expected: the baseline targets temperature spikes,
-while Isolation Forest reacts to unusual *multi-sensor* combinations.
+genuinely extreme, not noise. The methods agree only partially (z-score & CNN-AE share 75),
+which is expected: z-score targets large residuals, Isolation Forest unusual *multi-sensor*
+combinations, and the autoencoder unusual *shapes*.
+
+The **CNN autoencoder** is unsupervised, trains on CPU in ~2.4 s on 70k points, and produces
+a smooth per-timestamp reconstruction-error score.
+
+### Labeled evaluation (synthetic anomaly injection)
+
+Because Jena has no labels, we injected 100 known spikes and measured recovery:
+
+| Detector | Precision | Recall | F1 |
+| --- | --- | --- | --- |
+| Residual z-score | 0.17 | 0.95 | 0.29 |
+| CNN autoencoder | 0.14 | 1.00 | 0.25 |
+
+Both achieve **very high recall** (they catch injected anomalies). Apparent precision is low
+because the data *also* contains genuine background anomalies that get flagged but count as
+"false positives" against synthetic-only labels — a useful illustration of why labels matter.
+On a controlled clean signal (see `notebooks/05`), precision is high too.
 
 ## 3. Clustering (day-types)
 

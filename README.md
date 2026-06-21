@@ -40,20 +40,29 @@ vN/
 
 ## What v1 implements
 
-The **computational core** is built and evaluated: preprocessing, behaviour analysis
-(rolling stats, STL decomposition, correlations), anomaly detection (residual z-score +
-Isolation Forest), clustering (day-types), and the exact **query engine**. RAG + LLM and
-the interface are deliberately deferred.
+Built and evaluated:
+- **Preprocessing** — load, clean (`-9999` sentinels), align to hourly
+- **Behaviour analysis** — rolling stats, STL decomposition, correlations
+- **Anomaly detection** — residual z-score, Isolation Forest, **1D CNN autoencoder** (deep)
+- **Clustering** — K-means day-types
+- **Query engine** — exact stats (the truth layer)
+- **Interface** — natural-language questions → trust-aware answers (computed/retrieved/inferred)
+- **RAG retriever** — local TF-IDF over a sensor knowledge base
+- **Multi-sensor reasoning** — explains anomalies via per-sensor z-scores
+- **Evaluation** — vs pandas ground truth + labeled (synthetic-anomaly) precision/recall
+
+Deferred to the write-up stage: the **local LLM (Ollama)** for phrasing explanations.
 
 Run it:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r v1/requirements.txt
+pip install -r v1/requirements.txt    # includes torch (CPU)
 cd v1
 python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
-pytest tests/          # 8/8 query-engine correctness tests
+pytest tests/                          # 16/16 tests
 ```
 
-Notebooks: `v1/notebooks/01_data_exploration.ipynb`, `v1/notebooks/02_evaluation.ipynb`.
-Evaluation summary: [`v1/EVALUATION.md`](v1/EVALUATION.md) — query engine **6/6 exact** vs pandas.
+Notebooks (`v1/notebooks/`): `01_data_exploration` · `02_evaluation` · `03_methods_demo`
+· `04_visualizations` · `05_interface_demo` · `06_deep_model`.
+Evaluation summary: [`v1/EVALUATION.md`](v1/EVALUATION.md).
