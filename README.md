@@ -37,8 +37,3 @@ vN/
 | `query_engine.py` | **exact** computations — the truth layer |
 | `rag_system.py` | context retrieval + local LLM explanation |
 | `main.py` | pipeline orchestration / entry point |
-
-## Status
-
-Planning complete; implementation starting. Dataset: any time-series source (must be time-indexed).
-See the project's Notion workspace for the full plan, knowledge base, and trackers.
