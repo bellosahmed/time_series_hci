@@ -43,7 +43,7 @@ vN/
 Built and evaluated:
 - **Preprocessing** — load, clean (`-9999` sentinels), align to hourly
 - **Behaviour analysis** — rolling stats, STL decomposition, correlations
-- **Anomaly detection** — residual z-score, Isolation Forest, **1D CNN autoencoder** (deep)
+- **Anomaly detection** — z-score, **ARIMA** (forecasting), Isolation Forest, and three deep models (**1D CNN AE, LSTM AE, LSTM forecaster**)
 - **Clustering** — K-means day-types
 - **Query engine** — exact stats (the truth layer)
 - **Interface** — natural-language questions → trust-aware answers (computed/retrieved/inferred)
@@ -64,5 +64,7 @@ pytest tests/                          # 16/16 tests
 ```
 
 Notebooks (`v1/notebooks/`): `01_data_exploration` · `02_evaluation` · `03_methods_demo`
-· `04_visualizations` · `05_interface_demo` · `06_deep_model`.
-Evaluation summary: [`v1/EVALUATION.md`](v1/EVALUATION.md).
+· `04_visualizations` · `05_interface_demo` · `06_deep_model` · `07_deep_comparison`
+· `08_model_comparison`.
+Docs: [`v1/EVALUATION.md`](v1/EVALUATION.md) · [`v1/MODELS.md`](v1/MODELS.md) (model comparison)
+· [`CLAUDE.md`](CLAUDE.md) (context & work index).
