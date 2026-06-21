@@ -34,14 +34,16 @@ SENSOR_ALIASES = {
 }
 
 INTENTS = {
-    "max": ["max", "maximum", "highest", "hottest", "peak", "warmest"],
-    "min": ["min", "minimum", "lowest", "coldest"],
-    "mean": ["mean", "average", "typical"],
-    "spread": ["std", "deviation", "variability", "spread", "variance"],
-    "correlation": ["correlation", "correlate", "related", "relationship", "relate", "versus", " vs "],
-    "missing": ["missing", "gap", "gaps", "absent"],
-    "anomaly": ["anomaly", "anomalies", "unusual", "abnormal", "weird", "strange", "outlier"],
-    "summary": ["summary", "summarise", "summarize", "describe", "overview"],
+    "max": ["max", "maximum", "highest", "hottest", "peak", "warmest", "top", "biggest", "most"],
+    "min": ["min", "minimum", "lowest", "coldest", "smallest", "least"],
+    "mean": ["mean", "average", "typical", "normally"],
+    "spread": ["std", "deviation", "variability", "spread", "variance", "vary", "fluctuate"],
+    "correlation": ["correlation", "correlate", "related", "relationship", "relate", "versus",
+                    " vs ", "depend", "affect", "influence", "connection"],
+    "missing": ["missing", "gap", "gaps", "absent", "incomplete"],
+    "anomaly": ["anomaly", "anomalies", "unusual", "abnormal", "weird", "strange", "outlier",
+                "odd", "spike", "wrong", "problem"],
+    "summary": ["summary", "summarise", "summarize", "describe", "overview", "tell me about"],
 }
 
 
@@ -106,9 +108,23 @@ class Interface:
         text = self._phrase(question, computed, context, inferred)
         return Answer(question, intent, text, value, sensors, computed, context, inferred)
 
-    def ask(self, question: str) -> Answer:
+    def _interpret(self, question: str):
+        """Return (intent, sensors). Keyword match first; LLM fallback for free phrasing."""
         intent = detect_intent(question)
         sensors = resolve_sensors(question, list(self.df.columns))
+        # If keywords couldn't classify and a local LLM is enabled, let it interpret.
+        if intent is None and self.use_llm and llm.is_available():
+            parsed = llm.classify(question, list(INTENTS.keys()), list(self.df.columns),
+                                  model=self.model)
+            if parsed:
+                intent = parsed["intent"] or intent
+                for s in parsed["sensors"]:
+                    if s not in sensors:
+                        sensors.append(s)
+        return intent, sensors
+
+    def ask(self, question: str) -> Answer:
+        intent, sensors = self._interpret(question)
         sensor = sensors[0] if sensors else "T (degC)"  # default to temperature
         ctx = self._context_for(sensor)
 

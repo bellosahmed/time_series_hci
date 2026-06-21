@@ -19,6 +19,7 @@ Setup (run once, locally):
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -67,6 +68,45 @@ def generate(prompt: str, model: str = DEFAULT_MODEL, system: str = SYSTEM_PROMP
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read()).get("response", "").strip()
+
+
+CLASSIFY_SYSTEM = (
+    "You convert a user's question about sensor data into a structured query. "
+    "Respond with ONLY compact JSON, no prose, no explanation."
+)
+
+
+def classify(question: str, intents: list[str], sensors: list[str],
+             model: str = DEFAULT_MODEL) -> dict | None:
+    """Use the LLM to map free text -> {intent, sensors}, choosing from allowed lists.
+
+    The LLM only *classifies*; the query engine still computes the answer. Returns
+    None if Ollama is unavailable or the reply can't be parsed/validated.
+    """
+    if not is_available():
+        return None
+    prompt = (
+        f"Question: {question}\n"
+        f"Allowed intents: {intents}\n"
+        f"Allowed sensor columns: {sensors}\n"
+        "Everyday words map to columns: temperature->T (degC), humidity->rh (%), "
+        "pressure->p (mbar), density->rho (g/m**3), wind->wv (m/s), dew->Tdew (degC).\n"
+        'Return JSON only: {"intent": <one allowed intent or null>, '
+        '"sensors": [<zero or more allowed columns>]}'
+    )
+    try:
+        out = generate(prompt, model=model, system=CLASSIFY_SYSTEM, timeout=30.0)
+        match = re.search(r"\{.*\}", out, re.S)
+        if not match:
+            return None
+        data = json.loads(match.group(0))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+        return None
+    intent = data.get("intent")
+    if intent not in intents:
+        intent = None
+    valid_sensors = [s for s in data.get("sensors", []) if s in sensors]
+    return {"intent": intent, "sensors": valid_sensors}
 
 
 def explain(question: str, computed: str, context: str | None = None,
