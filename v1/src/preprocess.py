@@ -11,6 +11,7 @@ for the Jena Climate dataset.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 # Jena Climate defaults
@@ -45,13 +46,23 @@ def missing_report(df: pd.DataFrame) -> pd.Series:
     return missing[missing > 0].sort_values(ascending=False)
 
 
-def clean(df: pd.DataFrame, method: str = "time") -> pd.DataFrame:
-    """Remove duplicate timestamps and interpolate missing numeric values.
+def clean(
+    df: pd.DataFrame,
+    method: str = "time",
+    sentinels: tuple[float, ...] = (-9999.0,),
+) -> pd.DataFrame:
+    """Remove duplicate timestamps, drop sentinel error codes, and interpolate gaps.
+
+    The Jena wind columns use ``-9999`` to mark a failed reading; left in place these
+    sentinels wreck means and correlations, so we convert them (and any other listed
+    sentinels) to NaN first.
 
     `method="time"` interpolates respecting the spacing of the datetime index.
-    Any leading/trailing gaps that interpolation can't fill are forward/back filled.
+    Any leading/trailing gaps interpolation can't fill are forward/back filled.
     """
     df = df[~df.index.duplicated(keep="first")].sort_index()
+    if sentinels:
+        df = df.replace(list(sentinels), np.nan)
     df = df.interpolate(method=method, limit_direction="both")
     df = df.ffill().bfill()
     return df
