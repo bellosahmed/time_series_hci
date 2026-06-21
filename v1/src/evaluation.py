@@ -22,6 +22,7 @@ class Scores:
     tp: int
     fp: int
     fn: int
+    tn: int = 0
 
 
 def inject_spikes(series: pd.Series, n: int = 50, magnitude: float = 5.0,
@@ -49,7 +50,14 @@ def score(pred: pd.Series, truth: pd.Series) -> Scores:
     tp = int((pred & truth).sum())
     fp = int((pred & ~truth).sum())
     fn = int((~pred & truth).sum())
+    tn = int((~pred & ~truth).sum())
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    return Scores(precision, recall, f1, tp, fp, fn)
+    return Scores(precision, recall, f1, tp, fp, fn, tn)
+
+
+def confusion(pred, truth) -> dict:
+    """Return the confusion-matrix counts as a dict (TP/FP/FN/TN)."""
+    sc = score(pred, truth)
+    return {"TP": sc.tp, "FP": sc.fp, "FN": sc.fn, "TN": sc.tn}

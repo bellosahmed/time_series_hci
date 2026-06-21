@@ -36,6 +36,24 @@ flag can be judged — precision is high, confirming the detectors are accurate:
 artifact of unlabeled background anomalies, not a model weakness — exactly the "evaluation is hard
 without labels" problem from the literature.
 
+### Confusion matrix (controlled clean signal)
+
+40 true anomalies injected into 2,160 points. TP = correctly flagged, FP = false alarm,
+FN = missed, TN = correctly left alone.
+
+| Model | TP | FP | FN | TN | Precision | Recall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Z-score | 33 | 6 | 7 | 2114 | 0.85 | 0.82 |
+| ARIMA | 40 | 1 | 0 | 2119 | 0.98 | 1.00 |
+| Isolation Forest | 40 | 0 | 0 | 2120 | 1.00 | 1.00 |
+| CNN Autoencoder | 40 | 4 | 0 | 2116 | 0.91 | 1.00 |
+| LSTM Autoencoder | 40 | 3 | 0 | 2117 | 0.91 | 1.00 |
+| LSTM Forecaster | 40 | 3 | 0 | 2117 | 0.93 | 1.00 |
+
+Isolation Forest is perfect here (no false alarms, no misses); z-score is the weakest (it misses a
+few spikes that STL partly absorbs). All deep models catch every anomaly with only a handful of
+false alarms. Computed with `evaluation.confusion()`.
+
 ## How to read this
 
 - **Statistical / ARIMA** — cheap, interpretable, seasonality-aware (after STL decomposition).

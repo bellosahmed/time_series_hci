@@ -1,12 +1,17 @@
 """Natural-language interface — the HCI layer.
 
 Routes a plain-English question to the exact query engine, attaches retrieved
-context, and returns a trust-aware answer. The routing is deterministic (keyword
-intent matching), so no LLM is needed to get the *right numbers* — an LLM can
-later improve the phrasing only.
+context, and returns a trust-aware answer. Routing is deterministic (keyword
+intent matching), so the *right numbers* never depend on an LLM.
+
+Phrasing can be done two ways:
+- **template** (default) — `rag_system.explain`, fully offline, no model.
+- **local LLM** — set `use_llm=True`; if a local Ollama server is running it
+  rephrases the *already-computed* facts into natural prose. It never changes
+  the numbers. Falls back to the template if Ollama is unavailable.
 
 Flow:  question -> interpret (intent + sensor) -> query engine (truth)
-                -> RAG context -> trust-aware answer
+                -> RAG context -> phrase (template or LLM) -> trust-aware answer
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from . import analysis, anomaly, query_engine as qe, rag_system
+from . import analysis, anomaly, llm, query_engine as qe, rag_system
 
 # Map everyday words to dataset columns.
 SENSOR_ALIASES = {
@@ -47,6 +52,9 @@ class Answer:
     text: str
     value: object = None
     sensors: list = field(default_factory=list)
+    computed: str = ""
+    context: str | None = None
+    inferred: str | None = None
 
 
 def resolve_sensors(question: str, columns) -> list[str]:
@@ -73,13 +81,30 @@ def detect_intent(question: str) -> str | None:
 class Interface:
     """Answer natural-language questions about a prepared DataFrame."""
 
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = "llama3.2"):
         self.df = df
         self.retriever = rag_system.Retriever()
+        self.use_llm = use_llm
+        self.model = model
 
     def _context_for(self, sensor: str) -> str | None:
         snip = self.retriever.for_sensor(sensor)
         return snip.text if snip else None
+
+    def _phrase(self, question, computed, context=None, inferred=None) -> str:
+        """Produce the answer text: local LLM if enabled+available, else template."""
+        if self.use_llm and llm.is_available():
+            try:
+                return llm.explain(question, computed=computed, context=context,
+                                   inferred=inferred, model=self.model)
+            except Exception:
+                pass  # fall back to template on any LLM error
+        return rag_system.explain(f"Q: {question}", computed=computed,
+                                  context=context, inferred=inferred)
+
+    def _reply(self, question, intent, value, sensors, computed, context=None, inferred=None):
+        text = self._phrase(question, computed, context, inferred)
+        return Answer(question, intent, text, value, sensors, computed, context, inferred)
 
     def ask(self, question: str) -> Answer:
         intent = detect_intent(question)
@@ -89,24 +114,19 @@ class Interface:
 
         if intent == "max":
             r = qe.get_max(self.df, sensor)
-            text = rag_system.explain(
-                f"Q: {question}",
-                computed=f"max {sensor} was {r.value:.2f} at {r.when}.", context=ctx)
-            return Answer(question, intent, text, r, [sensor])
+            return self._reply(question, intent, r, [sensor],
+                               computed=f"max {sensor} was {r.value:.2f} at {r.when}.", context=ctx)
 
         if intent == "min":
             r = qe.get_min(self.df, sensor)
-            text = rag_system.explain(
-                f"Q: {question}",
-                computed=f"min {sensor} was {r.value:.2f} at {r.when}.", context=ctx)
-            return Answer(question, intent, text, r, [sensor])
+            return self._reply(question, intent, r, [sensor],
+                               computed=f"min {sensor} was {r.value:.2f} at {r.when}.", context=ctx)
 
         if intent in ("mean", "spread"):
             r = qe.get_mean_std(self.df, sensor)
-            computed = f"{sensor} mean={r['mean']:.2f}, std={r['std']:.2f}, range={r['range']:.2f}."
-            return Answer(question, intent,
-                          rag_system.explain(f"Q: {question}", computed=computed, context=ctx),
-                          r, [sensor])
+            return self._reply(question, intent, r, [sensor],
+                               computed=f"{sensor} mean={r['mean']:.2f}, std={r['std']:.2f}, range={r['range']:.2f}.",
+                               context=ctx)
 
         if intent == "correlation":
             if len(sensors) < 2:
@@ -114,49 +134,40 @@ class Interface:
             a, b = sensors[0], sensors[1]
             c = qe.get_correlation(self.df, a, b)
             rel = "move together" if c > 0 else "move in opposite directions"
-            return Answer(question, intent,
-                          rag_system.explain(
-                              f"Q: {question}",
-                              computed=f"correlation({a}, {b}) = {c:.3f}.",
-                              inferred=f"They {rel}."),
-                          c, [a, b])
+            return self._reply(question, intent, c, [a, b],
+                               computed=f"correlation({a}, {b}) = {c:.3f}.", inferred=f"They {rel}.")
 
         if intent == "missing":
             n = qe.count_missing(self.df, sensor)
-            return Answer(question, intent,
-                          rag_system.explain(f"Q: {question}",
-                                             computed=f"{sensor} has {n} missing values.", context=ctx),
-                          n, [sensor])
+            return self._reply(question, intent, n, [sensor],
+                               computed=f"{sensor} has {n} missing values.", context=ctx)
 
         if intent == "anomaly":
             decomp = analysis.decompose(self.df[sensor], period=24)
             flags = anomaly.zscore_anomalies(decomp["resid"].dropna(), threshold=4.0)
             windows = qe.get_anomaly_windows(flags)
-            computed = f"{int(flags.sum())} anomalous {sensor} readings in {len(windows)} windows."
-            first = ("First window: "
-                     f"{windows[0]['start']} -> {windows[0]['end']}." if windows else "")
-            return Answer(question, intent,
-                          rag_system.explain(f"Q: {question}", computed=computed, context=first or ctx),
-                          windows, [sensor])
+            first = (f"First window: {windows[0]['start']} -> {windows[0]['end']}." if windows else None)
+            return self._reply(question, intent, windows, [sensor],
+                               computed=f"{int(flags.sum())} anomalous {sensor} readings in {len(windows)} windows.",
+                               context=first or ctx)
 
         if intent == "summary":
             s = qe.sensor_summary(self.df, sensor)
-            computed = (f"{sensor}: min={s['min']:.2f}, max={s['max']:.2f}, "
-                        f"mean={s['mean']:.2f}, std={s['std']:.2f}, missing={s['missing']}.")
-            return Answer(question, intent,
-                          rag_system.explain(f"Q: {question}", computed=computed, context=ctx),
-                          s, [sensor])
+            return self._reply(question, intent, s, [sensor],
+                               computed=(f"{sensor}: min={s['min']:.2f}, max={s['max']:.2f}, "
+                                         f"mean={s['mean']:.2f}, std={s['std']:.2f}, missing={s['missing']}."),
+                               context=ctx)
 
-        # Fallback
         return Answer(question, None,
                       "I couldn't map that to a known query. Try: max/min/mean/"
                       "correlation/missing/anomaly/summary of a sensor.", None, sensors)
 
 
-def repl(df: pd.DataFrame) -> None:  # pragma: no cover
+def repl(df: pd.DataFrame, use_llm: bool = False) -> None:  # pragma: no cover
     """Tiny interactive loop (the CLI HCI front-end)."""
-    iface = Interface(df)
-    print("Ask about the data (e.g. 'what was the max temperature?'). Ctrl-D to quit.")
+    iface = Interface(df, use_llm=use_llm)
+    mode = "LLM" if (use_llm and llm.is_available()) else "template"
+    print(f"Ask about the data ({mode} phrasing). e.g. 'what was the max temperature?'. Ctrl-D to quit.")
     while True:
         try:
             q = input("\n> ").strip()
