@@ -45,11 +45,26 @@ Because Jena has no labels, we injected 100 known spikes and measured recovery:
 | --- | --- | --- | --- |
 | Residual z-score | 0.17 | 0.95 | 0.29 |
 | CNN autoencoder | 0.14 | 1.00 | 0.25 |
+| LSTM autoencoder | 0.14 | 1.00 | 0.25 |
+| LSTM forecaster | 0.14 | 1.00 | 0.25 |
 
-Both achieve **very high recall** (they catch injected anomalies). Apparent precision is low
+All achieve **very high recall** (they catch injected anomalies). Apparent precision is low
 because the data *also* contains genuine background anomalies that get flagged but count as
 "false positives" against synthetic-only labels — a useful illustration of why labels matter.
 On a controlled clean signal (see `notebooks/05`), precision is high too.
+
+### Deep techniques compared (notebook 07)
+
+Three unsupervised deep detectors, all trained on CPU in 1–3 s on 70k points:
+
+| Technique | Idea | Reacts to |
+| --- | --- | --- |
+| **CNN autoencoder** | convolutional reconstruction | unusual window *shapes* |
+| **LSTM autoencoder** | recurrent reconstruction | unusual *ordered* sequences |
+| **LSTM forecaster** | predict next step, error = anomaly | sudden *jumps* (one step late) |
+
+They overlap substantially but not completely. The CNN-AE is the simplest/fastest default;
+the LSTM variants serve as comparison baselines.
 
 ## 3. Clustering (day-types)
 
