@@ -23,6 +23,10 @@ def test_explain_raises_without_server():
 def test_live_generation_if_available():
     if not llm.is_available():
         pytest.skip("Ollama not running.")
+    models = llm.list_models()
+    if not models:
+        pytest.skip("Ollama running but no models pulled.")
     out = llm.explain("What was the hottest temperature?",
-                      computed="max T (degC) was 37.04 at 2015-07-04 16:00.")
+                      computed="max T (degC) was 37.04 at 2015-07-04 16:00.",
+                      model=models[0])
     assert isinstance(out, str) and len(out) > 0
