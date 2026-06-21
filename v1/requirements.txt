@@ -11,5 +11,7 @@ torch
 # faiss-cpu / chromadb  (for a neural vector store later)
 # Interface
 # streamlit
+# Web UI
+flask
 # Testing
 pytest

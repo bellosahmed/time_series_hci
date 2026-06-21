@@ -7,6 +7,15 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-06-21
 
+### Web UI (Flask) — interactive chat in the browser
+- Built `v1/web/app.py` (Flask) + `v1/web/index.html`: chat page with **model selector**,
+  **Use-LLM toggle**, **clickable suggested questions**, and **trust-labelled answers**
+  (computed/context/inferred shown).
+- Reuses `interface`/`llm` directly; endpoints `/api/ask`, `/api/models`, `/api/suggestions`.
+- **Port note:** the user wanted :3000, but a **FastAPI app already occupies :3000** — app.py
+  auto-falls back to the next free port (currently **3030**). Run: `python3.12 v1/web/app.py [port]`.
+- Verified all endpoints return correct answers; numbers stay exact.
+
 ### Interface: removed the keyword limitation
 - **Problem:** the NL interface only understood fixed keywords (max/min/mean/correlation/missing/
   anomaly/summary).
