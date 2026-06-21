@@ -16,6 +16,12 @@ import numpy as np
 import pandas as pd
 
 
+def get_device():
+    """Return 'cuda' if a GPU is available, else 'cpu'."""
+    import torch
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def _windows_from_array(values: np.ndarray, window: int, step: int):
     """Return (X[N,1,window], start_positions) from a 1-D array."""
     starts = list(range(0, len(values) - window + 1, step))
@@ -62,14 +68,19 @@ def _build_model(window: int):
 
 
 def train_autoencoder(X: np.ndarray, epochs: int = 20, lr: float = 1e-3,
-                      batch_size: int = 128, seed: int = 42, verbose: bool = False):
-    """Train the autoencoder on windows X and return the fitted model."""
+                      batch_size: int = 128, seed: int = 42, verbose: bool = False,
+                      device: str | None = None):
+    """Train the autoencoder on windows X and return the fitted model.
+
+    Uses the GPU automatically when available (`device=None` -> auto).
+    """
     import torch
     from torch.utils.data import DataLoader, TensorDataset
 
+    device = device or get_device()
     torch.manual_seed(seed)
     window = X.shape[-1]
-    model = _build_model(window)
+    model = _build_model(window).to(device)
     tensor = torch.from_numpy(X.astype("float32"))
     loader = DataLoader(TensorDataset(tensor), batch_size=batch_size, shuffle=True)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
@@ -79,6 +90,7 @@ def train_autoencoder(X: np.ndarray, epochs: int = 20, lr: float = 1e-3,
     for epoch in range(epochs):
         total = 0.0
         for (batch,) in loader:
+            batch = batch.to(device)
             opt.zero_grad()
             loss = loss_fn(model(batch), batch)
             loss.backward()
@@ -98,14 +110,15 @@ def _squared_errors(model, X: np.ndarray) -> np.ndarray:
     """Element-wise squared error per window: returns [N, window]."""
     import torch
 
+    device = next(model.parameters()).device
     model.eval()
     with torch.no_grad():
-        recon = model(torch.from_numpy(X.astype("float32"))).numpy()
+        recon = model(torch.from_numpy(X.astype("float32")).to(device)).cpu().numpy()
     return ((X - recon) ** 2)[:, 0, :]
 
 
 def cnn_ae_scores(series: pd.Series, window: int = 24, epochs: int = 20,
-                  score_step: int = 1, seed: int = 42) -> pd.Series:
+                  score_step: int = 1, seed: int = 42, device: str | None = None) -> pd.Series:
     """Per-timestamp reconstruction-error score (higher = more anomalous).
 
     Trains on non-overlapping windows (fast), then scores with overlapping windows
@@ -116,7 +129,7 @@ def cnn_ae_scores(series: pd.Series, window: int = 24, epochs: int = 20,
     z = ((s - s.mean()) / s.std(ddof=0)).to_numpy("float32")
 
     X_train, _ = _windows_from_array(z, window, step=window)
-    model = train_autoencoder(X_train, epochs=epochs, seed=seed)
+    model = train_autoencoder(X_train, epochs=epochs, seed=seed, device=device)
 
     X_score, starts = _windows_from_array(z, window, step=score_step)
     sq = _squared_errors(model, X_score)                  # [N, window]
@@ -131,9 +144,9 @@ def cnn_ae_scores(series: pd.Series, window: int = 24, epochs: int = 20,
 
 def cnn_ae_anomalies(series: pd.Series, window: int = 24, epochs: int = 20,
                      quantile: float = 0.99, score_step: int = 1,
-                     seed: int = 42) -> pd.Series:
+                     seed: int = 42, device: str | None = None) -> pd.Series:
     """Flag timestamps whose per-point reconstruction error exceeds `quantile`."""
     scores = cnn_ae_scores(series, window=window, epochs=epochs,
-                           score_step=score_step, seed=seed)
+                           score_step=score_step, seed=seed, device=device)
     threshold = np.quantile(scores, quantile)
     return (scores > threshold).rename("cnn_ae_anomaly")

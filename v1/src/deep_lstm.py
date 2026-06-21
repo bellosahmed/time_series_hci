@@ -51,11 +51,17 @@ def _build_lstm_ae(hidden: int = 32, latent: int = 16):
     return LSTMAutoencoder()
 
 
-def _train(model, X_seq, epochs, lr, batch_size, seed, predict_y=None):
-    """Generic training loop. X_seq: [N, window, 1]. If predict_y given, supervised."""
+def _train(model, X_seq, epochs, lr, batch_size, seed, predict_y=None, device=None):
+    """Generic training loop. X_seq: [N, window, 1]. If predict_y given, supervised.
+
+    Uses the GPU automatically when available.
+    """
     import torch
     from torch.utils.data import DataLoader, TensorDataset
 
+    from .deep_anomaly import get_device
+    device = device or get_device()
+    model = model.to(device)
     torch.manual_seed(seed)
     xt = torch.from_numpy(X_seq.astype("float32"))
     ds = TensorDataset(xt, torch.from_numpy(predict_y.astype("float32"))) if predict_y is not None \
@@ -68,10 +74,10 @@ def _train(model, X_seq, epochs, lr, batch_size, seed, predict_y=None):
         for batch in loader:
             opt.zero_grad()
             if predict_y is not None:
-                xb, yb = batch
+                xb, yb = batch[0].to(device), batch[1].to(device)
                 loss = loss_fn(model(xb), yb)
             else:
-                (xb,) = batch
+                xb = batch[0].to(device)
                 loss = loss_fn(model(xb), xb)
             loss.backward()
             opt.step()
@@ -94,9 +100,10 @@ def lstm_ae_scores(series: pd.Series, window: int = 24, epochs: int = 10,
     _train(model, _to_seq(Xtr), epochs, 1e-3, 128, seed)
 
     Xsc, starts = _windows_from_array(z, window, step=score_step)
+    device = next(model.parameters()).device
     model.eval()
     with torch.no_grad():
-        recon = model(torch.from_numpy(_to_seq(Xsc).astype("float32"))).numpy()[:, :, 0]
+        recon = model(torch.from_numpy(_to_seq(Xsc).astype("float32")).to(device)).cpu().numpy()[:, :, 0]
     sq = (_to_seq(Xsc)[:, :, 0] - recon) ** 2          # [N, window]
 
     err_sum = np.zeros(len(z)); err_cnt = np.zeros(len(z))
@@ -151,9 +158,10 @@ def lstm_forecast_scores(series: pd.Series, window: int = 24, epochs: int = 10,
     _train(model, Xtr, epochs, 1e-3, 128, seed, predict_y=ytr)
 
     Xall, yall, targets = _forecast_pairs(z, window, step=1)
+    device = next(model.parameters()).device
     model.eval()
     with torch.no_grad():
-        pred = model(torch.from_numpy(Xall)).numpy().ravel()
+        pred = model(torch.from_numpy(Xall).to(device)).cpu().numpy().ravel()
     err = np.abs(yall.ravel() - pred)
 
     scores = pd.Series(0.0, index=series.index, name="lstm_forecast_score")

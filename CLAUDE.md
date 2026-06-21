@@ -35,10 +35,21 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 ## Environment (important)
 
 - The user's Jupyter runs on **Python 3.12** (`/usr/bin/python3.12`); deps installed there
-  (numpy, pandas, scikit-learn, statsmodels, matplotlib, torch CPU, pytest).
+  (numpy, pandas, scikit-learn, statsmodels, matplotlib, torch, pytest).
 - There is also a **3.14 venv** at `code/.venv` (no torch — torch is 3.12 only).
 - Notebooks pin to a **Python 3.12** kernel and have a self-bootstrap cell for robustness.
 - Run notebooks with **Restart & Run All**.
+
+### GPU (CUDA)
+
+- GPU: **NVIDIA GeForce RTX 5070 Laptop (Blackwell, sm_120, 8 GB)**, driver 595.71, CUDA 13.2.
+- Installed **torch 2.11.0+cu128** (CUDA 12.8 build, required for Blackwell sm_120):
+  `pip install torch --index-url https://download.pytorch.org/whl/cu128`.
+- All deep models are **device-aware** via `deep_anomaly.get_device()` (auto: cuda → cpu).
+  Pass `device="cpu"` / `device="cuda"` to override.
+- Verified: 21 tests pass on GPU; CPU and GPU give equivalent results (same anomaly count,
+  strong anomalies agree; borderline points differ slightly due to float/RNG differences across
+  hardware). Speedup is modest (~1.7x) because the models are small.
 
 ## Source modules (`v1/src/`)
 
