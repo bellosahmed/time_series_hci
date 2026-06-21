@@ -1,0 +1,53 @@
+"""Multi-sensor reasoning: explain *why* a moment looks anomalous.
+
+Instead of judging temperature alone, this looks at what every sensor did at a
+given timestamp (relative to its own normal range) and reports which sensors
+moved and in which direction. This is the basis for causal-style explanations
+like "temperature dropped while humidity rose" — the project's novelty.
+
+It only *describes* what the data shows (using exact z-scores); it does not
+invent causes. Any narrative phrasing can be added by the LLM later.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+
+
+def sensor_zscores(df: pd.DataFrame, when) -> pd.Series:
+    """Z-score of every sensor at timestamp `when` (vs its own mean/std)."""
+    row = df.loc[when]
+    z = (row - df.mean()) / df.std(ddof=0)
+    return z.sort_values(key=lambda s: s.abs(), ascending=False)
+
+
+def describe_moment(df: pd.DataFrame, when, top: int = 4, threshold: float = 1.5) -> str:
+    """Human-readable description of which sensors were unusual at `when`."""
+    z = sensor_zscores(df, when)
+    notable = z[z.abs() >= threshold].head(top)
+    if notable.empty:
+        return f"At {when}, no sensor was notably far from its normal level."
+    parts = []
+    for sensor, score in notable.items():
+        direction = "high" if score > 0 else "low"
+        parts.append(f"{sensor} unusually {direction} ({score:+.1f}σ)")
+    return f"At {when}: " + "; ".join(parts) + "."
+
+
+def co_movement(df: pd.DataFrame, when, target: str, top: int = 3) -> str:
+    """Explain the target's deviation in terms of correlated sensors moving together.
+
+    Combines an exact correlation with the actual co-direction at this moment.
+    """
+    z = sensor_zscores(df, when)
+    if target not in z:
+        return ""
+    tdir = "high" if z[target] > 0 else "low"
+    corr = df.corr(numeric_only=True)[target].drop(target)
+    others = corr.reindex(corr.abs().sort_values(ascending=False).index).head(top)
+    bits = []
+    for sensor, r in others.items():
+        relation = "moves with" if r > 0 else "moves opposite to"
+        odir = "high" if z.get(sensor, 0) > 0 else "low"
+        bits.append(f"{sensor} ({relation} temperature, r={r:+.2f}) was {odir}")
+    return f"{target} was {tdir}; " + "; ".join(bits) + "."
