@@ -63,8 +63,12 @@ python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
 pytest tests/                          # 16/16 tests
 ```
 
-Notebooks (`v1/notebooks/`): `01_data_exploration` · `02_evaluation` · `03_methods_demo`
-· `04_visualizations` · `05_interface_demo` · `06_deep_model` · `07_deep_comparison`
-· `08_model_comparison`.
-Docs: [`v1/EVALUATION.md`](v1/EVALUATION.md) · [`v1/MODELS.md`](v1/MODELS.md) (model comparison)
-· [`CLAUDE.md`](CLAUDE.md) (context & work index).
+**v1 layout:** `src/` (code) · `tests/` · `notebooks/` · `apps/` (chat.py + web) · `report/` (docs).
+See [`v1/README.md`](v1/README.md) for the full map.
+
+Notebooks (`v1/notebooks/`): `00_code_walkthrough` (tour of the code) · `01_data_exploration`
+· `02_evaluation` · `03_methods_demo` · `04_visualizations` · `05_interface_demo` · `06_deep_model`
+· `07_deep_comparison` · `08_model_comparison` — see `notebooks/README.md`.
+Docs (`v1/report/`): [`REPORT.md`](v1/report/REPORT.md) · [`EVALUATION.md`](v1/report/EVALUATION.md)
+· [`MODELS.md`](v1/report/MODELS.md) · [`FINETUNING.md`](v1/report/FINETUNING.md).
+Context index: [`CLAUDE.md`](CLAUDE.md).

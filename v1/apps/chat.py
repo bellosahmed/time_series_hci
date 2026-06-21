@@ -19,12 +19,13 @@ import argparse
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent          # .../code/v1
-sys.path.insert(0, str(HERE))                   # make `src` importable from anywhere
+HERE = Path(__file__).resolve().parent          # .../v1/apps
+V1 = HERE.parent                                 # .../v1
+sys.path.insert(0, str(V1))                      # make `src` importable from anywhere
 
 from src import preprocess, interface, llm
 
-DEFAULT_DATA = HERE.parent / "data" / "jena_climate_2009_2016.csv"
+DEFAULT_DATA = V1.parent / "data" / "jena_climate_2009_2016.csv"
 PREFERRED = "llama3.2:3b"
 
 

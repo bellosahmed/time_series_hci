@@ -72,6 +72,7 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 
 | Notebook | Contents |
 | --- | --- |
+| `00_code_walkthrough` | tour of every src module with runnable examples |
 | `01_data_exploration` | load, document, descriptive stats, seasonality |
 | `02_evaluation` | query-engine correctness vs pandas, anomaly/cluster checks |
 | `03_methods_demo` | query engine, anomaly detection, clustering explained |
@@ -84,12 +85,17 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 ## Models implemented
 
 Statistical (z-score) · Forecasting (ARIMA) · Classical ML (Isolation Forest) ·
-Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/MODELS.md`**.
+Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/report/MODELS.md`**.
 
 ## Tests (`v1/tests/`) — 21 passing
 
 `test_query_engine` · `test_interface` (interface + evaluation) · `test_deep_anomaly` ·
 `test_deep_lstm` · `test_forecasting`.
+
+## v1 layout (reorganised)
+
+`src/` (code) · `tests/` · `notebooks/` (00–08 + README) · `apps/` (chat.py + web/) ·
+`report/` (REPORT, EVALUATION, MODELS, FINETUNING). See `v1/README.md`.
 
 ## How to run
 
@@ -97,13 +103,18 @@ Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/MODELS.md`**.
 cd code/v1
 python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
 python -m pytest tests/
+python apps/chat.py --llm "what was the hottest temperature?"
+python apps/web/app.py            # website (prints the URL)
 ```
 
 ## Key docs
 
-- `README.md` — overview + run instructions
-- `v1/EVALUATION.md` — evaluation results (correctness, anomalies, labeled metrics)
-- `v1/MODELS.md` — model comparison table
+- `v1/README.md` — v1 map + how to run
+- `v1/notebooks/00_code_walkthrough.ipynb` — read the code as a notebook
+- `v1/report/REPORT.md` — MSc report draft
+- `v1/report/EVALUATION.md` — evaluation results
+- `v1/report/MODELS.md` — model comparison + confusion matrix
+- `v1/report/FINETUNING.md` — fine-tuning side note
 
 ## Conventions
 

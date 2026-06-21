@@ -1,11 +1,11 @@
 """Web UI for the time-series HCI interface.
 
 A small Flask server that reuses the existing `interface` / `llm` modules and serves
-an interactive chat page on http://localhost:3000.
+an interactive chat page on http://localhost:3000 (or the next free port).
 
 Run:
-    /usr/bin/python3.12 v1/web/app.py
-Then open http://localhost:3000 in a browser.
+    /usr/bin/python3.12 v1/apps/web/app.py
+Then open the printed http://localhost:<port> in a browser.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-HERE = Path(__file__).resolve().parent              # .../v1/web
-V1 = HERE.parent                                    # .../v1
+HERE = Path(__file__).resolve().parent              # .../v1/apps/web
+V1 = HERE.parent.parent                             # .../v1
 sys.path.insert(0, str(V1))
 DATA = V1.parent / "data" / "jena_climate_2009_2016.csv"
 

@@ -7,6 +7,14 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-06-21
 
+### v1 restructured + documented
+- Tidied the scattered v1 layout: `apps/` (chat.py + web/), `report/` (REPORT moved in from
+  `code/report/`, plus EVALUATION/MODELS/FINETUNING), `src` / `tests` / `notebooks` unchanged.
+- New docs: `v1/README.md` (folder map + how to run), `notebooks/README.md` (reading order),
+  and **`notebooks/00_code_walkthrough.ipynb`** — tours every src module with runnable examples.
+- Fixed path lines in moved `chat.py` / `web/app.py`; updated root README + CLAUDE.md.
+- Verified: chat.py + web import OK, 23 tests pass, walkthrough executes.
+
 ### Web UI (Flask) — interactive chat in the browser
 - Built `v1/web/app.py` (Flask) + `v1/web/index.html`: chat page with **model selector**,
   **Use-LLM toggle**, **clickable suggested questions**, and **trust-labelled answers**
