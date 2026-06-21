@@ -1,0 +1,16 @@
+pandas
+numpy
+scikit-learn
+statsmodels
+matplotlib
+seaborn
+# Deep learning (optional, add when needed)
+# torch
+# RAG + local LLM
+# faiss-cpu
+# chromadb
+# ollama
+# Interface
+# streamlit
+# Testing
+pytest
