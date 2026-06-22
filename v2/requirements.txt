@@ -1,0 +1,16 @@
+# v2 dependencies (install into Python 3.12)
+pandas
+numpy
+scikit-learn
+statsmodels
+scipy
+matplotlib
+torch              # GPU build: --index-url https://download.pytorch.org/whl/cu128
+flask
+sentence-transformers   # neural (BERT) retrieval; downloads all-MiniLM-L6-v2 once
+pytest
+# notebook tooling
+nbformat
+nbconvert
+ipykernel
+# local LLM (optional) is reached over HTTP — no Python package needed (Ollama)

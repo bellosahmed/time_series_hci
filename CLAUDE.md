@@ -2,12 +2,44 @@
 
 **Topic:** Time-Series Data Analysis Through a Natural HCI Interface
 A local, explainable, interactive time-series analytics system: exact numbers are computed by
-deterministic Python code; a local LLM (later) only *explains* them.
+deterministic Python code; a local LLM only *explains* them.
 
 > **Core principle:** Computation = code (the source of truth). LLM = explanation only — it never
 > calculates numbers.
 
-_Last updated: 21 June 2026._
+_Last updated: 22 June 2026._
+
+## Versions — DIFFERENT DOMAINS (do not conflate)
+
+| Version | Domain | Dataset | Series |
+| --- | --- | --- | --- |
+| **v1** | **Temperature / weather** | Jena Climate 2009–2016 | 14 sensors, hourly (70k rows) |
+| **v2** | **Global trade (supply chain)** | EU monthly international trade | 54 country-flows, monthly (292 rows) |
+
+The sections below marked **(v1)** describe the temperature system. The **(v2)** section describes the
+trade system. They share the *architecture* (preprocess → analyse → detect → reason → query → explain)
+but **not the data** — v1 is temperature, v2 is trade.
+
+---
+
+## v2 — EU global trade (current)
+
+- **Dataset:** `code/data/eu_trade_monthly.csv` — 292 months × 54 columns (27 EU countries ×
+  exports/imports), 2002–2026, € millions. Real anomalies: 2008 crisis, COVID-2020, 2022 energy.
+  Fetched via `code/v2/get_trade_data.py` (Eurostat API). Gitignored.
+- **Pipeline (`v2/src/`):** preprocess · analysis · anomaly · reasoning (multi-country shared-shock) ·
+  forecasting (SARIMA + backtest) · query_engine (truth layer) · interface · llm · rag_system
+  (BM25 + LSA + BERT + chunking) · clustering (countries) · deep_anomaly (autoencoder).
+- **Notebooks (`v2/notebooks/`):** 01_eda … 13_chunking_bert (documented, executed).
+- **Apps:** `v2/apps/web/` (Flask browser chat). **Tests:** 74 passing. **Verify:** `v2/verify_results.py`
+  (13/13). **Docs:** `v2/README.md`, `v2/report/` (REPORT, EVALUATION, VERIFICATION), `v2/GLOSSARY.md`,
+  `v2/DEEP_MODELS.md`.
+- **Key results:** detectors catch real 2008 & COVID; forecast backtest MAPE 4.0%; deep AE (0.21)
+  honestly loses to Isolation Forest (0.36); query engine == pandas; LLM keeps numbers exact.
+
+---
+
+## v1 — Temperature / Jena climate (below)
 
 ---
 
