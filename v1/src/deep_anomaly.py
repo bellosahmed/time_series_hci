@@ -22,6 +22,20 @@ def get_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _free_cuda(model=None) -> None:
+    """Release a model's GPU memory back to the driver (no-op on CPU).
+
+    Scoring the full multi-year series in one forward pass is what exhausts an
+    8 GB card; we already batch inference, and this returns the freed blocks so
+    training several deep models in one session (notebook 04) doesn't accumulate.
+    """
+    import torch
+    if model is not None:
+        model.to("cpu")
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def _windows_from_array(values: np.ndarray, window: int, step: int):
     """Return (X[N,1,window], start_positions) from a 1-D array."""
     starts = list(range(0, len(values) - window + 1, step))
@@ -106,14 +120,24 @@ def reconstruction_errors(model, X: np.ndarray) -> np.ndarray:
     return _squared_errors(model, X).mean(axis=1)
 
 
-def _squared_errors(model, X: np.ndarray) -> np.ndarray:
-    """Element-wise squared error per window: returns [N, window]."""
+def _squared_errors(model, X: np.ndarray, batch_size: int = 8192) -> np.ndarray:
+    """Element-wise squared error per window: returns [N, window].
+
+    Inference runs in mini-batches so the whole (overlapping-window) scoring set
+    is never resident on the GPU at once — this is what prevents CUDA out-of-memory
+    on the long Jena series.
+    """
     import torch
 
     device = next(model.parameters()).device
     model.eval()
+    chunks = []
     with torch.no_grad():
-        recon = model(torch.from_numpy(X.astype("float32")).to(device)).cpu().numpy()
+        for i in range(0, len(X), batch_size):
+            xb = torch.from_numpy(X[i:i + batch_size].astype("float32")).to(device)
+            chunks.append(model(xb).cpu().numpy())
+            del xb
+    recon = np.concatenate(chunks, axis=0)
     return ((X - recon) ** 2)[:, 0, :]
 
 
@@ -133,6 +157,7 @@ def cnn_ae_scores(series: pd.Series, window: int = 24, epochs: int = 20,
 
     X_score, starts = _windows_from_array(z, window, step=score_step)
     sq = _squared_errors(model, X_score)                  # [N, window]
+    _free_cuda(model)                                     # release GPU before returning
     err_sum = np.zeros(len(z))
     err_cnt = np.zeros(len(z))
     for i, start in enumerate(starts):

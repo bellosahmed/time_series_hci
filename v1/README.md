@@ -8,8 +8,8 @@ deterministic code (the **query engine**); a local LLM only *explains* them.
 | Folder | What's in it |
 | --- | --- |
 | `src/` | the code — importable Python modules (the logic) |
-| `tests/` | automated tests (24 total) |
-| `notebooks/` | Jupyter notebooks — exploration, evaluation, demos (see `notebooks/README.md`) |
+| `tests/` | automated tests (49 total: 48 pass, 1 skipped when Ollama is up) |
+| `notebooks/` | 5 Jupyter notebooks — walkthrough, EDA+viz, methods, interface, deep models (see `notebooks/README.md`) |
 | `apps/` | things you **run**: `chat.py` (CLI) and `web/` (browser app) |
 | `report/` | things you **read**: REPORT, EVALUATION, MODELS, FINETUNING |
 
@@ -57,6 +57,10 @@ python3.12 apps/web/app.py
 
 ## Docs (`report/`)
 - `REPORT.md` — the MSc report draft
-- `EVALUATION.md` — evaluation results (correctness, anomalies, labeled metrics)
+- `WRITEUP.md` — dissertation write-up **draft skeleton** (structure + measured evidence; expand later)
+- `EVALUATION.md` — evaluation results (correctness, anomalies, **quantitative rigor**)
+- `HCI_USER_STUDY.md` — **planned user-study protocol** (accuracy graded vs ground truth, SUS, trust)
 - `MODELS.md` — model comparison + confusion matrix
 - `FINETUNING.md` — side note on fine-tuning the LLM
+
+Run `python3.12 verify_results.py` for the **17/17** machine-verification of results.

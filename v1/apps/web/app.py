@@ -1,7 +1,7 @@
 """Web UI for the time-series HCI interface.
 
 A small Flask server that reuses the existing `interface` / `llm` modules and serves
-an interactive chat page on http://localhost:3000 (or the next free port).
+an interactive chat page on http://localhost:3030 (or the next free port).
 
 Run:
     /usr/bin/python3.12 v1/apps/web/app.py
@@ -34,14 +34,15 @@ print(f"Ready: {DF.shape[0]:,} rows, {DF.shape[1]} sensors.")
 
 SUGGESTIONS = [
     "What was the hottest temperature?",
-    "What is the coldest it got?",
-    "What is the average humidity?",
+    "What was the coldest it got in 2010?",
+    "Tell me the weather on 26 January 2015",
+    "Hottest in summer 2012",
+    "Is temperature rising over the years?",
+    "Was 2013 hotter than 2014?",
+    "How often was it above 35 degrees?",
+    "Are there any unusual readings in 2014?",
+    "Average humidity in 2015",
     "How does temperature relate to air density?",
-    "Are there any unusual temperature readings?",
-    "How many missing temperature values are there?",
-    "Give me a summary of temperature",
-    "Is humidity connected to how warm it is?",
-    "How warm did the air ever get?",
 ]
 
 
@@ -80,6 +81,7 @@ def ask():
             "computed": ans.computed,
             "context": ans.context,
             "inferred": ans.inferred,
+            "chart": ans.chart,
             "used_llm": use_llm and llm.is_available(),
         })
     except Exception as exc:  # keep the UI alive on any error
@@ -92,8 +94,8 @@ def _free(port: int) -> bool:
 
 
 if __name__ == "__main__":
-    # Port: CLI arg > PORT env > 3000. If the chosen port is busy, fall back to the next free one.
-    want = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", 3000))
+    # Port: CLI arg > PORT env > 3030 (avoids Open WebUI on 3000). Falls back to next free port.
+    want = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", 3030))
     port = want
     if not _free(port):
         for p in range(want + 1, want + 20):

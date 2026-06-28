@@ -5,6 +5,144 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-06-28
+
+### v1 review, fixes, and notebook consolidation (9 → 6)
+- **Scope:** this case study uses **v1 only** (temperature / Jena climate). Reviewed the whole v1
+  codebase, fixed issues, and consolidated the notebooks.
+- **Bugs / improvements (src):**
+  - `reasoning.co_movement` hardcoded the word "temperature" in its output — wrong label when the
+    queried sensor was anything else. Now uses the actual `target` sensor name.
+  - `interface.detect_intent` matched intent keywords as **substrings** ("most" inside "almost",
+    "top" inside "stop"). Switched to **word-boundary** regex matching (consistent with v2).
+  - Added `tests/test_reasoning.py` (2 tests) + 2 word-boundary asserts to `test_interface`.
+    **Tests: 23 → 25 passing** (1 skipped when Ollama is up).
+- **Notebooks consolidated 9 → 5** (re-executed clean on the `py312-tshci` GPU kernel):
+  - old `01_data_exploration` + `04_visualizations` → **`01_data_exploration_and_visualization`** (Part 1 EDA, Part 2 visual gallery)
+  - old `02_evaluation` + `03_methods_demo` → **`02_methods_and_evaluation`** (Part 1 methods, Part 2 correctness)
+  - old `06_deep_model` + `07_deep_comparison` + `08_model_comparison` → **`04_deep_models_comparison`** (Parts A/B/C)
+  - old `05_interface_demo` → **`03_interface_reasoning`**
+  - final order: 00 walkthrough · 01 EDA+viz · 02 methods+eval · 03 interface · 04 deep models
+- **Kernel:** registered `py312-tshci` (→ `/usr/bin/python3.12`, has torch+CUDA) because the old
+  `python3` kernel pointed at a missing `python` and `tshci` is the torch-less 3.14 venv.
+- **Docs synced:** `notebooks/README.md`, `v1/README.md`, `CLAUDE.md` (notebook table + test counts).
+
+### Interface: time-scoped + threshold questions (fixes "always 2015")
+- **Problem reported:** every "hottest/coldest" question returned the all-time record (37.04 °C,
+  2015-07-04) because the interface always called `get_max`/`get_min` over the **whole** dataset —
+  it never read a year or a value from the question.
+- **Fix (`src/interface.py` + `query_engine.py`):**
+  - `resolve_period()` — parses a year (`2013`), month+year (`july 2015`), or range
+    (`between 2012 and 2014`); `ask()` slices the dataframe to it before computing.
+  - `resolve_threshold()` + `query_engine.threshold_events()` — answers "how often above 30?",
+    "colder than -15 in 2012?" with exact counts + first/last occurrence.
+  - Every answer now states the period it used (`max … in 2013 was …`).
+- **Verified on real data:** hottest overall 37.04 (2015); in 2013 → 34.93; coldest 2010 → -17.71;
+  Jan 2012 → 11.97; above 35 °C → 18 times; below -15 in 2012 → 92 times.
+- **Tests:** +4 (`resolve_period`, `resolve_threshold`, year-scoped ask, threshold count) → **29 pass,
+  1 skip.** Web app suggestion chips updated; notebook 03 re-executed.
+
+### New docs + verification recheck
+- `v1/report/HCI_USER_STUDY.md` — full **user-study protocol** (within-subjects: spreadsheet vs
+  template vs AI; task success graded against ground truth; time, SUS, NASA-TLX, trust).
+- `v1/report/WRITEUP.md` — dissertation **draft skeleton** (structure + measured evidence embedded;
+  lit review/prose marked TODO — for later, not for marking yet).
+- **Verification rechecked twice:** test suite 48 pass / 1 skip; `verify_results.py` **17/17** on both
+  runs (exit 0); independent fresh-pandas spot-check matches the system exactly (max 37.04 @ 2015-07-04
+  16:00, min −22.65, mean 9.4447, >35 °C = 18).
+
+### Evaluation rigor (examiner-driven) + de-emphasised "novelty"
+- **Forecast backtest** (`forecasting.backtest`, rolling-origin, MAE/RMSE/**MASE**): on T, MAE 3.55 °C,
+  RMSE 4.28 °C, **MASE 0.83** (beats persistence). MAPE avoided (temp crosses 0 °C).
+- **Parameter sensitivity** (`anomaly.threshold_sensitivity` / `contamination_sensitivity`):
+  z-threshold 4.0 is the knee (526 flags, ~0.75%); contamination 0.01 conservative — choices justified.
+- **LLM faithfulness** (`llm.faithfulness`, rounding-tolerant): measures dropped vs **invented**
+  numbers. Live result: **0 invented** (no hallucinated figures — trust property holds); occasional
+  benign omission when summarising multi-value facts.
+- **Repeatable anomaly benchmark** (`evaluation.benchmark`, 10 seeds): strict P 0.77±0.13, R 0.66±0.07,
+  F1 0.71; point-adjusted similar — mean±std, not a single run.
+- **`verify_results.py` now 17/17** (added forecast-MASE, benchmark recall, LLM-no-invented checks).
+- **EVALUATION.md** gained a "Quantitative rigor" section with the measured numbers.
+- **De-emphasised novelty** (per user): softened the three "novelty" mentions to "cross-sensor
+  explanation feature"; saved a memory that the core objective is the evaluated explainable trust
+  system + HCI, not novelty.
+- **Tests:** +5 (backtest, threshold/contamination sensitivity, faithfulness, benchmark) → **48 pass, 1 skip.**
+
+### More: forecast, reasoning confidence, web charts, v1 verification
+- **Forecast intent** — `forecasting.forecast()` fits ARIMA on the last year of daily means and
+  returns a 14-day forecast with an 80% band; interface answers "what will it be next week?".
+- **Reasoning confidence** — `describe_moment` now adds a verdict: many sensors moving together →
+  "real weather event"; one alone → "possible sensor glitch".
+- **Web charts** — `Answer.chart` carries a downsampled series (+ markers / forecast band); the web
+  UI renders an inline SVG (anomaly markers, the extreme point, or history+forecast).
+- **`verify_results.py` for v1** — **14 independent checks** (query engine == pandas, scoped queries,
+  thresholds, known-event placement, reasoning verdict, forecast bounds, point-adjusted ≥ strict
+  recall, confusion sums to N). All pass.
+- **EVALUATION.md** — added an honest "Ground truth & honesty" section: exact stats are hard truth
+  (== pandas); anomaly accuracy is on synthetic labels + corroborated against known real events
+  (Jul 2015 heatwave, winter cold extremes).
+- **Tests:** +3 (forecast shape, forecast intent, reasoning verdict) → **43 pass, 1 skip.**
+
+### Capability + UX upgrades (reasoning novelty, trend, compare, cleaner web UI)
+- **Wired the multi-sensor reasoning (the project's novelty) into the interface.** Anomaly answers
+  now *explain why* via `reasoning.describe_moment` — e.g. "Tdew low (-2.9σ); T low (-2.7σ); rho high
+  (+2.5σ)". It was built but previously only used in a notebook, not the NL interface.
+- **New `trend` intent** — linear warming/cooling rate (e.g. "T (degC) rising at +0.40 per year").
+- **New `compare` intent** — two-period questions ("was 2013 hotter than 2014?"): exact stat per year
+  + which was warmer/colder. `resolve_compare()` fires on 2 years + a comparison word.
+- **Richer weather report** — added dew point.
+- **Robustness:** unknown-sensor questions now say "I don't track X" instead of defaulting to
+  temperature; the day-climatology label clamps to years actually present (no more spurious "2017");
+  `anomaly.anomaly_windows` now delegates to `query_engine.get_anomaly_windows` (one implementation).
+- **Evaluation honesty:** added `evaluation.point_adjust` + `score_point_adjusted` (the fairer
+  time-series anomaly metric, mirroring v2).
+- **Cleaner web UI** (`apps/web/index.html`): light, high-contrast, larger type; friendly trust labels
+  (📊 exact figures · ℹ️ background · 🧠 what it suggests) + a one-line trust banner; no duplicated
+  facts in template vs AI mode; refreshed suggestion chips.
+- **Tests:** +8 (compare, trend, missing-sensor, anomaly-reasoning, point-adjust, mocked `llm.plan`
+  ×2) → **40 pass, 1 skip.** Notebook 03 re-executed.
+- **Friendly dates:** added `query_engine.fmt_when` ("19 Aug 2012 13:00") used across answers and the
+  reasoning text instead of raw ISO timestamps.
+
+### Interface: specific-day "weather report" answers
+- **Ask:** questions like "tell me the weather in 26 january" should give a daily report.
+- **Added:** `resolve_day()` parses a specific date — "26 january", "january 26", "26th of jan 2015",
+  "26/01/2015", "2015-01-26"; year optional. New `weather` intent + `query_engine.weather_report()`
+  give a multi-sensor snapshot (temp avg/low/high, humidity, pressure, wind).
+- **No year → climatology:** "26 January" with no year reports across all years (e.g. 192 readings);
+  with a year it's that exact 24-hour day. Stats also scope to a day ("hottest on 26 January 2015").
+- **Verified:** 26 Jan 2015 → avg 1.1 °C (low -0.5, high 2.7), humidity ~93%; 5 Jul 2014 → avg 22.6 °C.
+  **+2 tests → 32 pass, 1 skip.** Web chips + notebook 03 updated.
+
+### Interface: LLM-as-parser so it isn't limited to a keyword list
+- **Ask:** make it understand *any* phrasing, not just fixed keywords.
+- **Design (trust-preserving):** the local LLM (`llm.plan`) translates free text into a **structured
+  plan** {intent, sensors, start/end dates, op, value} — it interprets language (seasons, ranges,
+  loose phrasing) but **never computes a number**; the query engine still does all the maths.
+- **Merge rule:** deterministic parser wins when confident (reliable keyword/explicit-year matches);
+  the LLM only *fills gaps* it left open. Prevents the small 3B model from flipping a good parse
+  (e.g. "typical"→mean becoming max).
+- **Seasons** added to the offline resolver too: spring/summer/autumn/fall, and winter rolls back to
+  the previous December (`winter 2013` = Dec 2012–Feb 2013).
+- **Verified (llama3.2:3b):** "how warm did it get during the summer of 2012?" → max 35.52 (summer
+  2012); "typical temperature toward the end of 2014" → mean 10.70 (2014); "brutally cold in early
+  2010" → anomaly scan in 2010. **30 tests pass, 1 skip.**
+
+### CUDA out-of-memory fix in notebook 04 (deep models)
+- **Symptom:** notebook 04 OOM'd on the 8 GB GPU when run interactively.
+- **Cause:** the scoring step pushed the *entire* ~70k-window tensor through the model in **one
+  forward pass**; the merged notebook also trains 3 models per session without freeing GPU memory,
+  so stale kernels left ~4.5 GB held and the big single allocation no longer fit.
+- **Fix (src):** batched inference — `deep_anomaly._squared_errors` and a new
+  `deep_lstm._predict_batched` run the forward pass in mini-batches (8192 / 4096), so peak GPU
+  memory is bounded regardless of series length. Added `deep_anomaly._free_cuda()` and call it after
+  each model's scoring to return memory to the driver.
+- **Notebook:** setup cell now clears the cache and prints GPU headroom on start.
+- **Result:** runs clean in ~35 s with only **3.2 GB free**; CNN-AE scores 70,129 points in 1.4 s.
+  Deep tests (5) + full suite (25 pass, 1 skip) green.
+
+---
+
 ## 2026-06-22
 
 ### v2 kick-off — new domain dataset: international trade (supply chain)

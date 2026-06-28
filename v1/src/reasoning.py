@@ -3,7 +3,7 @@
 Instead of judging temperature alone, this looks at what every sensor did at a
 given timestamp (relative to its own normal range) and reports which sensors
 moved and in which direction. This is the basis for causal-style explanations
-like "temperature dropped while humidity rose" — the project's novelty.
+like "temperature dropped while humidity rose" — a cross-sensor explanation feature.
 
 It only *describes* what the data shows (using exact z-scores); it does not
 invent causes. Any narrative phrasing can be added by the LLM later.
@@ -12,6 +12,8 @@ invent causes. Any narrative phrasing can be added by the LLM later.
 from __future__ import annotations
 
 import pandas as pd
+
+from .query_engine import fmt_when
 
 
 def sensor_zscores(df: pd.DataFrame, when) -> pd.Series:
@@ -26,12 +28,20 @@ def describe_moment(df: pd.DataFrame, when, top: int = 4, threshold: float = 1.5
     z = sensor_zscores(df, when)
     notable = z[z.abs() >= threshold].head(top)
     if notable.empty:
-        return f"At {when}, no sensor was notably far from its normal level."
+        return f"At {fmt_when(when)}, no sensor was notably far from its normal level."
     parts = []
     for sensor, score in notable.items():
         direction = "high" if score > 0 else "low"
         parts.append(f"{sensor} unusually {direction} ({score:+.1f}σ)")
-    return f"At {when}: " + "; ".join(parts) + "."
+    # Confidence: many sensors moving together = corroborated real event; one alone = possible fault.
+    n_notable = int((z.abs() >= threshold).sum())
+    if n_notable >= 3:
+        verdict = " Several sensors moved together, so this looks like a real weather event."
+    elif n_notable == 1:
+        verdict = " Only one sensor moved, so this may be a sensor glitch rather than real weather."
+    else:
+        verdict = ""
+    return f"At {fmt_when(when)}: " + "; ".join(parts) + "." + verdict
 
 
 def co_movement(df: pd.DataFrame, when, target: str, top: int = 3) -> str:
@@ -49,5 +59,5 @@ def co_movement(df: pd.DataFrame, when, target: str, top: int = 3) -> str:
     for sensor, r in others.items():
         relation = "moves with" if r > 0 else "moves opposite to"
         odir = "high" if z.get(sensor, 0) > 0 else "low"
-        bits.append(f"{sensor} ({relation} temperature, r={r:+.2f}) was {odir}")
+        bits.append(f"{sensor} ({relation} {target}, r={r:+.2f}) was {odir}")
     return f"{target} was {tdir}; " + "; ".join(bits) + "."

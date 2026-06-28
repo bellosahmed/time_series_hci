@@ -55,14 +55,20 @@ def list_models() -> list[str]:
 
 
 def generate(prompt: str, model: str = DEFAULT_MODEL, system: str = SYSTEM_PROMPT,
-             timeout: float = 60.0) -> str:
-    """Send a prompt to the local Ollama model and return its text reply."""
+             timeout: float = 60.0, max_tokens: int = 512) -> str:
+    """Send a prompt to the local Ollama model and return its text reply.
+
+    `max_tokens` (Ollama's `num_predict`) is a generous **safety ceiling**, not a tight
+    speed limit: it only stops pathological runaway generation. It's set well above what
+    a 1-2 sentence explanation or short plan needs, so it never clips a wanted answer —
+    correctness/completeness comes first.
+    """
     payload = json.dumps({
         "model": model,
         "prompt": prompt,
         "system": system,
         "stream": False,
-        "options": {"temperature": 0.2},   # low temp = faithful rephrasing
+        "options": {"temperature": 0.2, "num_predict": max_tokens},  # low temp + length cap
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/generate", data=payload,
                                  headers={"Content-Type": "application/json"})
@@ -109,12 +115,115 @@ def classify(question: str, intents: list[str], sensors: list[str],
     return {"intent": intent, "sensors": valid_sensors}
 
 
+PLAN_SYSTEM = (
+    "You translate a user's question about a weather time-series into a STRUCTURED query plan. "
+    "You DO NOT answer the question and you must NEVER output any data value, statistic, "
+    "temperature, count, or measurement from the data. You only describe WHAT to compute. "
+    "Respond with ONLY compact JSON, no prose."
+)
+
+
+def plan(question: str, intents: list[str], sensors: list[str],
+         model: str = DEFAULT_MODEL) -> dict | None:
+    """Use the LLM to turn free-form text into {intent, sensors, start, end, period, op, value}.
+
+    The model only *interprets language* (including seasons, ranges, and loose phrasing)
+    into a plan; the query engine still computes every number. Returns None if Ollama is
+    unavailable or the reply can't be parsed. All fields are validated by the caller.
+    """
+    if not is_available():
+        return None
+    prompt = (
+        f"Question: {question}\n"
+        f"Allowed intents: {intents}\n"
+        f"Allowed sensor columns: {sensors}\n"
+        "Everyday words map to columns: temperature->T (degC), humidity->rh (%), "
+        "pressure->p (mbar), density->rho (g/m**3), wind->wv (m/s), dew->Tdew (degC).\n"
+        "The data is hourly weather covering 2009-01 to 2016-12.\n"
+        "If the question implies a time window (a year, month, season, or range), express it "
+        "as start and end calendar dates (YYYY-MM-DD). Seasons: spring=Mar-May, summer=Jun-Aug, "
+        "autumn/fall=Sep-Nov, winter=Dec-Feb.\n"
+        "If the user compares against a numeric value, set op ('>' for above/hotter/more, "
+        "'<' for below/colder/less) and value (the number).\n"
+        'Return JSON ONLY: {"intent": <one allowed intent or null>, '
+        '"sensors": [<zero or more allowed columns>], '
+        '"start": <YYYY-MM-DD or null>, "end": <YYYY-MM-DD or null>, '
+        '"period": <short human label like "summer 2012" or null>, '
+        '"op": <">" or "<" or null>, "value": <number or null>}'
+    )
+    try:
+        out = generate(prompt, model=model, system=PLAN_SYSTEM, timeout=30.0)
+        match = re.search(r"\{.*\}", out, re.S)
+        if not match:
+            return None
+        data = json.loads(match.group(0))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    intent = data.get("intent")
+    op = data.get("op")
+    value = data.get("value")
+    return {
+        "intent": intent if intent in intents else None,
+        "sensors": [s for s in data.get("sensors", []) if s in sensors],
+        "start": data.get("start"),
+        "end": data.get("end"),
+        "period": data.get("period"),
+        "op": op if op in (">", "<") else None,
+        "value": float(value) if isinstance(value, (int, float)) else None,
+    }
+
+
+# Few-shot examples teach the model the desired style WITHOUT fine-tuning: keep every
+# number exact, be clear and friendly, and turn multi-sensor reasoning into a plain story
+# (real event vs. faulty sensor). Cheaper, safer, and more controllable than training.
+FEWSHOT = """Examples of the style to copy (keep every number and date exactly):
+
+Computed fact: max T (degC) was 37.04 on 4 Jul 2015 16:00.
+Answer: The hottest it ever got was 37.04°C, on 4 July 2015 at 4pm.
+
+Computed fact: T (degC) was above 35 18 times (0.03% of readings), first on 19 Aug 2012 15:00.
+Answer: It climbed above 35°C only 18 times — about 0.03% of all readings — the first on 19 August 2012 at 3pm.
+
+Computed fact: 66 anomalous T (degC) readings in 2014 in 24 windows.
+Reasoning: At 26 Jan 2014 14:00: Tdew (degC) unusually low (-2.9σ); T (degC) unusually low (-2.7σ); rho (g/m**3) unusually high (+2.5σ).
+Answer: There were 66 unusual temperature readings in 2014, falling into 24 separate spells. The clearest was on 26 January 2014 at 2pm: temperature and dew point both dropped sharply while air density rose together — a physically consistent cold snap, not a faulty sensor.
+"""
+
+
+_DECIMAL = re.compile(r"-?\d+\.\d+")
+
+
+def faithfulness(facts: str, explanation: str, tol: float = 0.1) -> dict:
+    """Measure whether the LLM altered the *measured values*.
+
+    Compares the **decimal** numbers (37.04, -2.9, 0.03 …) in the source facts vs the
+    explanation, with a numeric tolerance so **rounding is allowed** ("34.93" -> "34.9"
+    is fine). Integers (years, clock times like 16:00) are ignored — they're legitimately
+    reformatted ("16:00" -> "4pm"). Returns `{ok, dropped, invented}`:
+    - **invented** = a decimal in the explanation that matches *no* source value → the
+      serious failure (a hallucinated figure).
+    - **dropped** = a source value omitted from the explanation → benign (summarising).
+    """
+    src = [float(x) for x in _DECIMAL.findall(facts or "")]
+    exp = [float(x) for x in _DECIMAL.findall(explanation or "")]
+
+    def near(v, pool):
+        return any(abs(v - s) <= tol + 0.02 * abs(s) for s in pool)
+
+    invented = sorted({round(v, 3) for v in exp if not near(v, src)})
+    dropped = sorted({round(v, 3) for v in src if not near(v, exp)})
+    return {"ok": not invented and not dropped, "dropped": dropped, "invented": invented}
+
+
 def explain(question: str, computed: str, context: str | None = None,
             inferred: str | None = None, model: str = DEFAULT_MODEL) -> str:
     """Ask the local LLM to phrase a computed answer. Raises if Ollama is unavailable.
 
     Mirrors `rag_system.explain` but produces natural prose instead of a template.
     The numbers come only from `computed` (and `inferred`); the model just rewords.
+    Few-shot examples steer the style (a lighter, safer alternative to fine-tuning).
     """
     if not is_available():
         raise RuntimeError("Ollama is not running. Start it with `ollama serve` and "
@@ -124,5 +233,6 @@ def explain(question: str, computed: str, context: str | None = None,
         facts.append(f"Background context: {context}")
     if inferred:
         facts.append(f"Reasoning: {inferred}")
-    prompt = "\n".join(facts) + "\n\nAnswer the question using only these facts:"
+    prompt = (FEWSHOT + "\nNow write the Answer for this one, in the same style:\n"
+              + "\n".join(facts) + "\n\nAnswer:")
     return generate(prompt, model=model)

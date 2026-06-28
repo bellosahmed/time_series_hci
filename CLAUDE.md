@@ -52,7 +52,7 @@ but **not the data** — v1 is temperature, v2 is trade.
 | Deep models: CNN-AE, LSTM-AE, LSTM-Forecaster | ✅ done |
 | Forecasting: ARIMA | ✅ done |
 | Evaluation: vs pandas ground truth + labeled (synthetic) precision/recall | ✅ done |
-| Tests | ✅ 21 passing |
+| Tests | ✅ 48 passing (1 skipped) |
 | Local LLM (Ollama) explanation layer | ⏳ deferred to write-up stage |
 | Write-up / report | ⏳ to do |
 
@@ -79,7 +79,11 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
   `pip install torch --index-url https://download.pytorch.org/whl/cu128`.
 - All deep models are **device-aware** via `deep_anomaly.get_device()` (auto: cuda → cpu).
   Pass `device="cpu"` / `device="cuda"` to override.
-- Verified: 21 tests pass on GPU; CPU and GPU give equivalent results (same anomaly count,
+- **GPU memory:** inference is **batched** (`_squared_errors`, `deep_lstm._predict_batched`) so the
+  full ~70k-window series is never resident at once; `_free_cuda()` returns memory after each model.
+  This avoids CUDA OOM in notebook 04 even on the 8 GB card. If a stale kernel still hogs VRAM,
+  **Restart Kernel** to free it.
+- Verified: 48 tests pass (1 skipped) on GPU; CPU and GPU give equivalent results (same anomaly count,
   strong anomalies agree; borderline points differ slightly due to float/RNG differences across
   hardware). Speedup is modest (~1.7x) because the models are small.
 
@@ -89,15 +93,15 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 | --- | --- |
 | `preprocess.py` | load, clean (`-9999` sentinels), interpolate, align to hourly |
 | `analysis.py` | rolling stats, STL decomposition, correlations |
-| `anomaly.py` | z-score (global + rolling), Isolation Forest, anomaly windows |
+| `anomaly.py` | z-score (global + rolling), Isolation Forest, anomaly windows; `evaluation.py` adds **point-adjusted** metrics |
 | `clustering.py` | daily features + K-means day-types |
 | `query_engine.py` | **exact** max/min/mean/std/correlation/missing — the truth layer |
 | `deep_anomaly.py` | 1D CNN autoencoder (per-point reconstruction error) |
 | `deep_lstm.py` | LSTM autoencoder + LSTM forecaster |
-| `forecasting.py` | ARIMA forecast-error anomalies (deseasonalised) |
-| `reasoning.py` | multi-sensor anomaly explanation (per-sensor z-scores, co-movement) |
+| `forecasting.py` | ARIMA forecast-error anomalies (deseasonalised) + `forecast()` (14-day ahead, 80% band) |
+| `reasoning.py` | multi-sensor anomaly explanation (per-sensor z-scores, co-movement) — wired into the interface's anomaly answers (a cross-sensor explanation feature, not the headline) |
 | `rag_system.py` | local TF-IDF retriever over sensor KB + trust-aware explainer (LLM-ready) |
-| `interface.py` | NL question → query engine → trust-aware answer (computed/retrieved/inferred) |
+| `interface.py` | NL question → query engine → trust-aware answer. Intents: max/min/mean/spread/correlation/missing/summary + **trend · compare · weather(day report) · threshold · anomaly(+reasoning)** + **forecast** (14-day). Scopes to any year/month/**season**/**day**/range. Attaches a downsampled **chart** for the web UI. With `use_llm`, `llm.plan` parses free phrasing into a structured plan (fills gaps only; never computes numbers) |
 | `main.py` | end-to-end pipeline entry point |
 
 ## Notebooks (`v1/notebooks/`)
@@ -105,29 +109,28 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 | Notebook | Contents |
 | --- | --- |
 | `00_code_walkthrough` | tour of every src module with runnable examples |
-| `01_data_exploration` | load, document, descriptive stats, seasonality |
-| `02_evaluation` | query-engine correctness vs pandas, anomaly/cluster checks |
-| `03_methods_demo` | query engine, anomaly detection, clustering explained |
-| `04_visualizations` | 9 plots (trend, STL, seasonality, diurnal, heatmap, anomalies, etc.) |
-| `05_interface_demo` | NL interface, multi-sensor reasoning, labeled evaluation |
-| `06_deep_model` | CNN autoencoder train + 3-way anomaly comparison |
-| `07_deep_comparison` | CNN-AE vs LSTM-AE vs LSTM-Forecaster |
-| `08_model_comparison` | all 6 detectors compared (table + chart) |
+| `01_data_exploration_and_visualization` | dataset documentation + full visual gallery (merged old 01+04) |
+| `02_methods_and_evaluation` | methods (query engine, anomaly, clustering) + correctness vs pandas (merged old 02+03) |
+| `03_interface_reasoning` | NL interface, multi-sensor reasoning, labeled evaluation |
+| `04_deep_models_comparison` | CNN-AE train + 3 deep techniques + all 6 detectors compared (merged old 06+07+08) |
+
+Notebooks consolidated 9 → 5 (28 June 2026). Run with the **`py312-tshci`** kernel.
 
 ## Models implemented
 
 Statistical (z-score) · Forecasting (ARIMA) · Classical ML (Isolation Forest) ·
 Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/report/MODELS.md`**.
 
-## Tests (`v1/tests/`) — 21 passing
+## Tests (`v1/tests/`) — 48 passing, 1 skipped
 
-`test_query_engine` · `test_interface` (interface + evaluation) · `test_deep_anomaly` ·
-`test_deep_lstm` · `test_forecasting`.
+`test_query_engine` · `test_interface` (interface + evaluation) · `test_reasoning` ·
+`test_deep_anomaly` · `test_deep_lstm` · `test_forecasting` · `test_llm`.
 
 ## v1 layout (reorganised)
 
-`src/` (code) · `tests/` · `notebooks/` (00–08 + README) · `apps/` (chat.py + web/) ·
-`report/` (REPORT, EVALUATION, MODELS, FINETUNING). See `v1/README.md`.
+`src/` (code) · `tests/` · `notebooks/` (00–04 + README) · `apps/` (chat.py + web/) ·
+`report/` (REPORT, EVALUATION, MODELS, FINETUNING) · `verify_results.py` (17/17 independent checks).
+See `v1/README.md`.
 
 ## How to run
 

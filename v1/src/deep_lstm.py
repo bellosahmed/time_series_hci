@@ -18,12 +18,31 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .deep_anomaly import _windows_from_array
+from .deep_anomaly import _free_cuda, _windows_from_array
 
 
 def _standardise(series: pd.Series):
     s = series.astype(float)
     return ((s - s.mean()) / s.std(ddof=0)).to_numpy("float32")
+
+
+def _predict_batched(model, X: np.ndarray, batch_size: int = 4096) -> np.ndarray:
+    """Run model.forward over X in mini-batches and return stacked CPU output.
+
+    LSTMs build large intermediate state, so scoring the whole series in one
+    forward pass is the main CUDA-OOM risk; batching bounds peak GPU memory.
+    """
+    import torch
+
+    device = next(model.parameters()).device
+    model.eval()
+    chunks = []
+    with torch.no_grad():
+        for i in range(0, len(X), batch_size):
+            xb = torch.from_numpy(X[i:i + batch_size].astype("float32")).to(device)
+            chunks.append(model(xb).cpu().numpy())
+            del xb
+    return np.concatenate(chunks, axis=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -92,19 +111,16 @@ def _to_seq(X):
 def lstm_ae_scores(series: pd.Series, window: int = 24, epochs: int = 10,
                    score_step: int = 4, seed: int = 42) -> pd.Series:
     """Per-timestamp reconstruction error from an LSTM autoencoder."""
-    import torch
-
     z = _standardise(series)
     Xtr, _ = _windows_from_array(z, window, step=window)
     model = _build_lstm_ae()
     _train(model, _to_seq(Xtr), epochs, 1e-3, 128, seed)
 
     Xsc, starts = _windows_from_array(z, window, step=score_step)
-    device = next(model.parameters()).device
-    model.eval()
-    with torch.no_grad():
-        recon = model(torch.from_numpy(_to_seq(Xsc).astype("float32")).to(device)).cpu().numpy()[:, :, 0]
-    sq = (_to_seq(Xsc)[:, :, 0] - recon) ** 2          # [N, window]
+    Xseq = _to_seq(Xsc)
+    recon = _predict_batched(model, Xseq)[:, :, 0]
+    _free_cuda(model)
+    sq = (Xseq[:, :, 0] - recon) ** 2                  # [N, window]
 
     err_sum = np.zeros(len(z)); err_cnt = np.zeros(len(z))
     for i, s in enumerate(starts):
@@ -150,18 +166,14 @@ def _forecast_pairs(z: np.ndarray, window: int, step: int):
 def lstm_forecast_scores(series: pd.Series, window: int = 24, epochs: int = 10,
                          train_step: int = 4, seed: int = 42) -> pd.Series:
     """Per-timestamp absolute forecast error (|actual - predicted|)."""
-    import torch
-
     z = _standardise(series)
     Xtr, ytr, _ = _forecast_pairs(z, window, step=train_step)
     model = _build_lstm_forecaster()
     _train(model, Xtr, epochs, 1e-3, 128, seed, predict_y=ytr)
 
     Xall, yall, targets = _forecast_pairs(z, window, step=1)
-    device = next(model.parameters()).device
-    model.eval()
-    with torch.no_grad():
-        pred = model(torch.from_numpy(Xall).to(device)).cpu().numpy().ravel()
+    pred = _predict_batched(model, Xall).ravel()
+    _free_cuda(model)
     err = np.abs(yall.ravel() - pred)
 
     scores = pd.Series(0.0, index=series.index, name="lstm_forecast_score")

@@ -35,6 +35,12 @@ def _check(df: pd.DataFrame, sensor: str) -> None:
         raise KeyError(f"Sensor {sensor!r} not in columns: {list(df.columns)}")
 
 
+def fmt_when(ts, with_time: bool = True) -> str:
+    """Human-friendly timestamp, e.g. '19 Aug 2012 13:00' (or '19 Aug 2012')."""
+    ts = pd.Timestamp(ts)
+    return ts.strftime("%-d %b %Y %H:%M" if with_time else "%-d %b %Y")
+
+
 def get_max(df: pd.DataFrame, sensor: str) -> Extremum:
     """Exact maximum of `sensor` with the timestamp at which it occurred."""
     _check(df, sensor)
@@ -96,6 +102,34 @@ def get_anomaly_windows(flags: pd.Series) -> list[dict]:
         prev = ts
     if start is not None:
         out.append({"start": start, "end": prev, "n_points": count})
+    return out
+
+
+def threshold_events(df: pd.DataFrame, sensor: str, op: str, value: float) -> dict:
+    """Exact count + first/last time a sensor was above ('>') or below ('<') a value."""
+    _check(df, sensor)
+    s = df[sensor]
+    mask = s > value if op == ">" else s < value
+    hits = s[mask]
+    n = int(mask.sum())
+    return {
+        "sensor": sensor,
+        "op": op,
+        "value": float(value),
+        "count": n,
+        "pct": float(100.0 * n / len(s)) if len(s) else 0.0,
+        "first": hits.index.min() if n else None,
+        "last": hits.index.max() if n else None,
+    }
+
+
+def weather_report(df: pd.DataFrame, sensors: list[str]) -> dict:
+    """Mean/min/max of each requested sensor over the given rows (a 'weather' snapshot)."""
+    out: dict[str, dict] = {}
+    for s in sensors:
+        if s in df.columns:
+            col = df[s].astype(float)
+            out[s] = {"mean": float(col.mean()), "min": float(col.min()), "max": float(col.max())}
     return out
 
 

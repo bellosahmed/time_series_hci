@@ -3,65 +3,99 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Time-Series HCI</title>
+<title>Weather Questions — Jena Climate</title>
 <style>
-  :root { --bg:#0f1419; --panel:#1a2230; --accent:#4f9cf9; --text:#e6edf3; --muted:#8b97a7;
-          --good:#3fb950; --chip:#243044; }
+  :root {
+    --bg:#f5f7fa; --card:#ffffff; --ink:#1b2430; --muted:#5b6877; --line:#e3e8ef;
+    --accent:#2563eb; --accent-ink:#ffffff; --chip:#eef2f8; --good:#16a34a; --warn:#b45309;
+    --num:#0f766e; --note:#6d28d9;
+  }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-         background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
-  header { padding:14px 20px; background:var(--panel); border-bottom:1px solid #2a3548;
-           display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; }
-  header .sub { color:var(--muted); font-size:12px; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+         background:var(--bg); color:var(--ink); height:100vh; display:flex; flex-direction:column;
+         font-size:16px; line-height:1.55; }
+
+  header { padding:16px 22px; background:var(--card); border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0; }
+  header .sub { color:var(--muted); font-size:13px; margin-top:2px; }
   .controls { margin-left:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  select { background:var(--chip); color:var(--text); border:1px solid #2a3548; border-radius:6px;
-           padding:6px 8px; font-size:13px; }
-  label.toggle { display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; }
-  .status { font-size:12px; color:var(--muted); }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#555; margin-right:5px; }
+  .toggle { display:flex; align-items:center; gap:7px; font-size:14px; cursor:pointer;
+            background:var(--chip); padding:7px 12px; border-radius:20px; }
+  select { background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px;
+           padding:7px 9px; font-size:13px; }
+  .status { font-size:13px; color:var(--muted); display:flex; align-items:center; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#c2c9d2; margin-right:6px; }
   .dot.on { background:var(--good); }
-  #chips { padding:12px 20px; display:flex; gap:8px; flex-wrap:wrap; border-bottom:1px solid #2a3548; }
-  .chip { background:var(--chip); border:1px solid #2a3548; color:var(--text); border-radius:16px;
-          padding:6px 12px; font-size:12.5px; cursor:pointer; }
-  .chip:hover { border-color:var(--accent); }
-  #chat { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:14px; }
-  .msg { max-width:760px; }
+
+  .trustbar { background:#eef5ff; color:#1e3a8a; font-size:13.5px; padding:9px 22px;
+              border-bottom:1px solid #dbe7ff; }
+  .trustbar b { font-weight:600; }
+
+  #chips { padding:14px 22px 4px; display:flex; gap:9px; flex-wrap:wrap; }
+  .chip { background:var(--chip); border:1px solid var(--line); color:var(--ink); border-radius:18px;
+          padding:8px 14px; font-size:14px; cursor:pointer; transition:.12s; }
+  .chip:hover { border-color:var(--accent); color:var(--accent); }
+
+  #chat { flex:1; overflow-y:auto; padding:18px 22px; display:flex; flex-direction:column; gap:16px; }
+  .msg { max-width:720px; }
   .msg.user { align-self:flex-end; }
-  .bubble { padding:11px 14px; border-radius:12px; line-height:1.5; font-size:14.5px; }
-  .user .bubble { background:var(--accent); color:#04121f; border-bottom-right-radius:3px; }
-  .bot .bubble { background:var(--panel); border:1px solid #2a3548; border-bottom-left-radius:3px; }
-  .answer { font-size:15px; }
-  .facts { margin-top:9px; padding-top:9px; border-top:1px dashed #2a3548; font-size:12.5px; color:var(--muted); }
-  .facts div { margin:2px 0; }
-  .meta { font-size:11px; color:var(--muted); margin-top:6px; }
-  .err { color:#ff7b72; }
-  footer { padding:14px 20px; background:var(--panel); border-top:1px solid #2a3548; display:flex; gap:10px; }
-  #q { flex:1; background:var(--chip); border:1px solid #2a3548; color:var(--text); border-radius:8px;
-       padding:11px 14px; font-size:14.5px; }
-  #send { background:var(--accent); color:#04121f; border:none; border-radius:8px; padding:0 20px;
-          font-size:14.5px; font-weight:600; cursor:pointer; }
+  .user .bubble { background:var(--accent); color:var(--accent-ink); padding:11px 15px;
+                  border-radius:16px 16px 4px 16px; font-size:15.5px; }
+  .bot .bubble { background:var(--card); border:1px solid var(--line); border-radius:16px 16px 16px 4px;
+                 padding:14px 16px; box-shadow:0 1px 2px rgba(20,30,50,.04); }
+  .answer { font-size:16.5px; color:var(--ink); }
+  .err { color:#b91c1c; }
+
+  .details { margin-top:12px; border-top:1px solid var(--line); padding-top:11px;
+             display:flex; flex-direction:column; gap:9px; }
+  .fact { display:flex; gap:10px; align-items:flex-start; font-size:14px; }
+  .fact .ico { flex:0 0 auto; width:22px; text-align:center; }
+  .fact .lab { font-weight:600; }
+  .fact.num .lab { color:var(--num); }
+  .fact.bg  .lab { color:var(--muted); }
+  .fact.note .lab { color:var(--note); }
+  .fact .val { color:var(--ink); }
+  .tag { margin-top:10px; font-size:12px; color:var(--muted); }
+  .tag .pill { background:var(--chip); border-radius:10px; padding:2px 8px; }
+  .chartwrap { margin-top:12px; }
+  .chartcap { font-size:12.5px; color:var(--muted); margin-bottom:4px; }
+  svg.chart { width:100%; height:auto; background:#fbfdff; border:1px solid var(--line); border-radius:8px; }
+  svg.chart text.ax { fill:var(--muted); font-size:9px; }
+
+  footer { padding:14px 22px; background:var(--card); border-top:1px solid var(--line);
+           display:flex; gap:11px; }
+  #q { flex:1; background:var(--card); border:1px solid var(--line); color:var(--ink);
+       border-radius:10px; padding:13px 15px; font-size:15.5px; }
+  #q:focus { outline:none; border-color:var(--accent); }
+  #send { background:var(--accent); color:var(--accent-ink); border:none; border-radius:10px;
+          padding:0 22px; font-size:15.5px; font-weight:600; cursor:pointer; }
   #send:disabled { opacity:.5; cursor:default; }
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1>🌡️ Time-Series HCI</h1>
-    <div class="sub" id="dsinfo">Jena Climate · loading…</div>
+    <h1>🌡️ Weather Questions</h1>
+    <div class="sub" id="dsinfo">German weather (Jena), 2009–2016 · loading…</div>
   </div>
   <div class="controls">
-    <span class="status"><span class="dot" id="lamp"></span><span id="ollamaStatus">checking Ollama…</span></span>
-    <label class="toggle"><input type="checkbox" id="useLlm"/> Use LLM</label>
-    <select id="model" disabled><option>template</option></select>
+    <span class="status"><span class="dot" id="lamp"></span><span id="ollamaStatus">checking…</span></span>
+    <label class="toggle"><input type="checkbox" id="useLlm"/> Explain with AI</label>
+    <select id="model" disabled><option>plain template</option></select>
   </div>
 </header>
+
+<div class="trustbar">
+  ✓ <b>The numbers are calculated exactly from the records.</b> The AI (when on) only puts them into
+  plain English — it never makes a number up.
+</div>
 
 <div id="chips"></div>
 <div id="chat"></div>
 
 <footer>
-  <input id="q" placeholder="Ask about the data… e.g. 'what was the hottest temperature?'" autocomplete="off"/>
+  <input id="q" placeholder="Ask in plain English…  e.g. “was 2013 hotter than 2014?”" autocomplete="off"/>
   <button id="send">Ask</button>
 </footer>
 
@@ -79,19 +113,70 @@ function addUser(text){
   m.innerHTML = `<div class="bubble">${esc(text)}</div>`;
   chat.appendChild(m); chat.scrollTop = chat.scrollHeight;
 }
+
+function fact(cls, ico, lab, val){
+  return `<div class="fact ${cls}"><span class="ico">${ico}</span>`+
+         `<span><span class="lab">${lab}:</span> <span class="val">${esc(val)}</span></span></div>`;
+}
+
+function drawChart(c){
+  const W=640,H=170,P=30;
+  const hx=c.x.map(Date.parse), hy=c.y;
+  let times=[...hx], ys=[...hy];
+  const f=c.forecast;
+  if(f){ const fx=f.x.map(Date.parse); times=times.concat(fx); ys=ys.concat(f.upper,f.lower,f.mean); }
+  const tMin=Math.min(...times), tMax=Math.max(...times);
+  const yMin=Math.min(...ys), yMax=Math.max(...ys);
+  const sx=t=> P + (W-2*P)*((t-tMin)/((tMax-tMin)||1));
+  const sy=v=> (H-P) - (H-2*P)*((v-yMin)/((yMax-yMin)||1));
+  let svg=`<svg viewBox="0 0 ${W} ${H}" class="chart">`;
+  const hpts=hx.map((t,i)=>`${sx(t).toFixed(1)},${sy(hy[i]).toFixed(1)}`).join(' ');
+  svg+=`<polyline points="${hpts}" fill="none" stroke="#2563eb" stroke-width="1.6"/>`;
+  if(f){
+    const fx=f.x.map(Date.parse);
+    const up=fx.map((t,i)=>`${sx(t).toFixed(1)},${sy(f.upper[i]).toFixed(1)}`);
+    const lo=fx.map((t,i)=>`${sx(t).toFixed(1)},${sy(f.lower[i]).toFixed(1)}`).reverse();
+    svg+=`<polygon points="${up.concat(lo).join(' ')}" fill="#fca5a5" opacity="0.35"/>`;
+    svg+=`<polyline points="${fx.map((t,i)=>`${sx(t).toFixed(1)},${sy(f.mean[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="#dc2626" stroke-width="1.6"/>`;
+    const dv=sx(Math.max(...hx));
+    svg+=`<line x1="${dv.toFixed(1)}" y1="${P-6}" x2="${dv.toFixed(1)}" y2="${H-P}" stroke="#cbd5e1" stroke-dasharray="3 3"/>`;
+  }
+  (c.marks||[]).forEach(mk=>{ const cx=sx(Date.parse(mk.x)), cy=sy(mk.y);
+    const col = mk.kind==='anomaly'?'#dc2626':(mk.kind==='max'?'#ea580c':'#0ea5e9');
+    svg+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4" fill="${col}"/>`; });
+  const fmt=d=>new Date(d).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'2-digit'});
+  svg+=`<text x="3" y="${(sy(yMax)+4).toFixed(1)}" class="ax">${yMax.toFixed(1)}</text>`;
+  svg+=`<text x="3" y="${(sy(yMin)+4).toFixed(1)}" class="ax">${yMin.toFixed(1)}</text>`;
+  svg+=`<text x="${P}" y="${H-7}" class="ax">${fmt(tMin)}</text>`;
+  svg+=`<text x="${W-P-52}" y="${H-7}" class="ax">${fmt(tMax)}</text>`;
+  return svg+`</svg>`;
+}
+
 function addBot(data){
   const m = document.createElement('div'); m.className='msg bot';
   if (data.error){
-    m.innerHTML = `<div class="bubble err">⚠️ ${esc(data.error)}</div>`;
+    m.innerHTML = `<div class="bubble"><span class="err">⚠️ ${esc(data.error)}</span></div>`;
   } else {
-    let facts = '';
-    if (data.computed) facts += `<div>🔢 <b>Computed:</b> ${esc(data.computed)}</div>`;
-    if (data.context)  facts += `<div>📚 <b>Context:</b> ${esc(data.context)}</div>`;
-    if (data.inferred) facts += `<div>🧠 <b>Inferred:</b> ${esc(data.inferred)}</div>`;
-    const meta = `intent: ${esc(data.intent||'—')} · ${data.used_llm?'LLM phrasing':'template'}`;
-    m.innerHTML = `<div class="bubble"><div class="answer">${esc(data.text)}</div>`+
-                  (facts?`<div class="facts">${facts}</div>`:'')+
-                  `<div class="meta">${meta}</div></div>`;
+    const llmOn = data.used_llm;
+    // AI on: the prose is the answer, and we list the exact figures below it.
+    // AI off: the exact figure IS the answer, so we don't repeat it below.
+    const answer = llmOn ? data.text : (data.computed || data.text);
+    let details = '';
+    if (llmOn && data.computed) details += fact('num','📊','The exact figures', data.computed);
+    if (data.context)  details += fact('bg','ℹ️','Background', data.context);
+    if (data.inferred) details += fact('note','🧠','What it suggests', data.inferred);
+    const how = llmOn ? 'explained by local AI' : 'exact answer from the data';
+    let chartHtml = '';
+    if (data.chart && data.chart.x && data.chart.x.length > 1){
+      const cap = '📈 ' + esc(data.chart.label) + (data.chart.forecast ? ' — history + 14-day forecast' : '');
+      chartHtml = `<div class="chartwrap"><div class="chartcap">${cap}</div>${drawChart(data.chart)}</div>`;
+    }
+    m.innerHTML = `<div class="bubble">`+
+                  `<div class="answer">${esc(answer)}</div>`+
+                  (details?`<div class="details">${details}</div>`:'')+
+                  chartHtml+
+                  `<div class="tag"><span class="pill">${how}</span></div>`+
+                  `</div>`;
   }
   chat.appendChild(m); chat.scrollTop = chat.scrollHeight;
 }
@@ -100,7 +185,8 @@ async function ask(text){
   if(!text) return;
   addUser(text); qInput.value=''; sendBtn.disabled=true;
   const thinking = document.createElement('div'); thinking.className='msg bot';
-  thinking.innerHTML='<div class="bubble">…</div>'; chat.appendChild(thinking);
+  thinking.innerHTML='<div class="bubble">…thinking</div>'; chat.appendChild(thinking);
+  chat.scrollTop = chat.scrollHeight;
   try{
     const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({question:text, use_llm:useLlm.checked, model:modelSel.value})});
@@ -116,7 +202,7 @@ qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') ask(qInput.value.tri
 // init
 fetch('/api/suggestions').then(r=>r.json()).then(d=>{
   document.getElementById('dsinfo').textContent =
-    `Jena Climate · ${d.sensors.length} sensors`;
+    `German weather (Jena), 2009–2016 · ${d.sensors.length} sensors`;
   const chips = document.getElementById('chips');
   d.suggestions.forEach(s=>{
     const c=document.createElement('div'); c.className='chip'; c.textContent=s;
@@ -126,12 +212,12 @@ fetch('/api/suggestions').then(r=>r.json()).then(d=>{
 fetch('/api/models').then(r=>r.json()).then(d=>{
   const lamp=document.getElementById('lamp'), st=document.getElementById('ollamaStatus');
   if(d.available && d.models.length){
-    lamp.classList.add('on'); st.textContent='Ollama ready';
+    lamp.classList.add('on'); st.textContent='AI ready';
     modelSel.disabled=false; modelSel.innerHTML='';
     d.models.forEach(name=>{ const o=document.createElement('option');
-      o.value=name; o.textContent=name.length>40?name.slice(0,40)+'…':name; modelSel.appendChild(o); });
+      o.value=name; o.textContent=name.length>32?name.slice(0,32)+'…':name; modelSel.appendChild(o); });
   } else {
-    st.textContent='Ollama off (template only)'; useLlm.checked=false; useLlm.disabled=true;
+    st.textContent='AI off — plain answers'; useLlm.checked=false; useLlm.disabled=true;
   }
 });
 </script>

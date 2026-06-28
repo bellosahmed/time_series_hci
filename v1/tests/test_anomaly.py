@@ -1,0 +1,21 @@
+"""Tests for anomaly detectors + parameter-sensitivity sweeps."""
+
+import numpy as np
+import pandas as pd
+
+from src import anomaly
+
+
+def test_threshold_sensitivity_monotone():
+    idx = pd.date_range("2024-01-01", periods=500, freq="h")
+    s = pd.Series(np.random.default_rng(0).normal(0, 1, 500), index=idx)
+    sens = anomaly.threshold_sensitivity(s, thresholds=(2.0, 3.0, 4.0))
+    assert sens[2.0] >= sens[3.0] >= sens[4.0]      # higher threshold -> fewer flags
+
+
+def test_contamination_sensitivity_monotone():
+    idx = pd.date_range("2024-01-01", periods=300, freq="h")
+    rng = np.random.default_rng(1)
+    df = pd.DataFrame({"a": rng.normal(0, 1, 300), "b": rng.normal(0, 1, 300)}, index=idx)
+    sens = anomaly.contamination_sensitivity(df, contaminations=(0.01, 0.05))
+    assert sens[0.05] >= sens[0.01]

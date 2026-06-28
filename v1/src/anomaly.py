@@ -50,19 +50,29 @@ def isolation_forest_anomalies(
     return pd.Series(labels == -1, index=features.index, name="iforest_anomaly")
 
 
+def threshold_sensitivity(series: pd.Series,
+                          thresholds=(2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)) -> dict:
+    """Anomaly count at each z-score threshold — evidence for the chosen value.
+
+    Pass the (STL-residual) series. Lower thresholds flag more points (more false
+    positives); higher thresholds flag fewer (risk missing real events). The default
+    4.0 is the knee where only clear events survive on this data.
+    """
+    return {float(t): int(zscore_anomalies(series, threshold=t).sum()) for t in thresholds}
+
+
+def contamination_sensitivity(features: pd.DataFrame,
+                              contaminations=(0.005, 0.01, 0.02, 0.05)) -> dict:
+    """Isolation-Forest anomaly count at each `contamination` prior (sweep to justify it)."""
+    return {float(c): int(isolation_forest_anomalies(features, contamination=c).sum())
+            for c in contaminations}
+
+
 def anomaly_windows(flags: pd.Series) -> list[tuple]:
-    """Collapse a boolean anomaly Series into (start, end) timestamp intervals."""
-    flags = flags.astype(bool)
-    windows: list[tuple] = []
-    start = None
-    prev = None
-    for ts, is_anom in flags.items():
-        if is_anom and start is None:
-            start = ts
-        elif not is_anom and start is not None:
-            windows.append((start, prev))
-            start = None
-        prev = ts
-    if start is not None:
-        windows.append((start, prev))
-    return windows
+    """Collapse a boolean anomaly Series into (start, end) timestamp intervals.
+
+    Thin wrapper over ``query_engine.get_anomaly_windows`` (the canonical grouping)
+    so the interval logic lives in one place.
+    """
+    from .query_engine import get_anomaly_windows
+    return [(w["start"], w["end"]) for w in get_anomaly_windows(flags)]

@@ -26,3 +26,20 @@ def test_arima_flags_spikes():
     flags = forecasting.arima_anomalies(s, order=(1, 0, 1), threshold=3.0, deseasonalize_period=24)
     assert flags.dtype == bool
     assert flags.loc[spikes].sum() >= 3
+
+
+def test_forecast_shape_and_bounds():
+    idx = pd.date_range("2014-01-01", periods=24 * 400, freq="h")
+    s = pd.Series(10 + 5 * np.sin(2 * np.pi * np.arange(len(idx)) / (24 * 365)), index=idx)
+    fc = forecasting.forecast(s, steps=14)
+    assert len(fc) == 14
+    assert (fc["lower"] <= fc["mean"]).all() and (fc["mean"] <= fc["upper"]).all()
+    assert fc.index[0] > s.index[-1]            # forecasts the future
+
+
+def test_backtest_metrics():
+    idx = pd.date_range("2014-01-01", periods=24 * 500, freq="h")
+    s = pd.Series(10 + 5 * np.sin(2 * np.pi * np.arange(len(idx)) / (24 * 365)), index=idx)
+    bt = forecasting.backtest(s, horizon=7, folds=3)
+    assert bt["folds"] >= 1
+    assert bt["mae"] >= 0 and bt["rmse"] >= 0 and "mase" in bt
