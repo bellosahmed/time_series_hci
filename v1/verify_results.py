@@ -47,12 +47,19 @@ check("correlation == pandas",
 # NEW: data-quality additions recomputed a different way (ground-truth control)
 raw = preprocess.load_data(DATA)
 avail = analysis.data_availability(raw)
-check("availability n_total == len(raw) for all sensors",
-      bool((avail["n_total"] == len(raw)).all()), f"{len(raw)} rows")
+num_raw = raw.select_dtypes("number")
+exp_sentinel = (num_raw == -9999.0).sum()
+exp_missing = num_raw.isna().sum()
+exp_real = len(raw) - exp_sentinel - exp_missing
+check("availability n_real & n_sentinel == pandas recomputation (all sensors)",
+      bool((avail["n_real"] == exp_real).all())
+      and bool((avail["n_sentinel"] == exp_sentinel).all()),
+      f"wv real={int(exp_real.get('wv (m/s)', -1))}")
 check("distribution skew == pandas skew",
       np.isclose(analysis.distribution_stats(df).loc[S, "skew"], df[S].skew()))
 multi = analysis.analyze_all_sensors(df)
-check("multi-sensor table covers all 14 sensors", len(multi) == 14, f"{len(multi)}")
+check("multi-sensor table covers every numeric sensor",
+      len(multi) == df.select_dtypes("number").shape[1], f"{len(multi)}")
 
 # 6. scoped query via the interface == pandas slice
 a13 = iface.ask("hottest in 2013")
