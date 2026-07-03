@@ -85,6 +85,10 @@ to the same global average.
 (`anomaly.threshold_sensitivity`) shows counts collapsing as the threshold rises, and the knee
 is where only real events survive.
 
+(Note: the detector uses population std `ddof=0` here, whereas the descriptive `std` column in
+Section 2 is pandas' default sample std `ddof=1`. The two differ only by a factor of √(n/(n−1)),
+which is negligible at n ≈ 70,000, but they are computed for different purposes.)
+
 ## 5. Class imbalance
 
 ```
