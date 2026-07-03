@@ -88,3 +88,33 @@ def distribution_stats(df: pd.DataFrame) -> pd.DataFrame:
             "max": num.max(),
         }
     )
+
+
+def data_availability(
+    raw_df: pd.DataFrame, sentinels: tuple[float, ...] = (-9999.0,)
+) -> pd.DataFrame:
+    """Per-sensor data-availability report, computed on the RAW (pre-clean) frame.
+
+    Returns a DataFrame indexed by sensor with columns:
+      ``n_total``      — number of rows
+      ``n_missing``    — NaN count (genuinely absent readings)
+      ``n_sentinel``   — count of sentinel error codes (e.g. -9999 on wind sensors)
+      ``n_real``       — ``n_total - n_missing - n_sentinel`` (usable readings)
+      ``available_pct``— ``100 * n_real / n_total``
+    This quantifies how much of each sensor is real versus imputed *before* cleaning —
+    the honest denominator for any downstream statistic.
+    """
+    num = raw_df.select_dtypes("number")
+    n_total = len(num)
+    n_missing = num.isna().sum().astype(int)
+    n_sentinel = num.isin(list(sentinels)).sum().astype(int)
+    n_real = (n_total - n_missing - n_sentinel).astype(int)
+    return pd.DataFrame(
+        {
+            "n_total": n_total,
+            "n_missing": n_missing,
+            "n_sentinel": n_sentinel,
+            "n_real": n_real,
+            "available_pct": 100.0 * n_real / n_total,
+        }
+    )

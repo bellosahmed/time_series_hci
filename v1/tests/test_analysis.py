@@ -31,3 +31,16 @@ def test_distribution_stats_detects_right_skew():
     skewed = pd.DataFrame({"wv (m/s)": rng.exponential(2.0, 1000)}, index=idx)
     stats = analysis.distribution_stats(skewed)
     assert stats.loc["wv (m/s)", "skew"] > 1.0
+
+
+def test_data_availability_exact_counts():
+    idx = pd.date_range("2024-01-01", periods=10, freq="h")
+    df = pd.DataFrame(
+        {"x": [1.0, 2.0, np.nan, -9999.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]}, index=idx
+    )
+    rep = analysis.data_availability(df)
+    assert rep.loc["x", "n_total"] == 10
+    assert rep.loc["x", "n_missing"] == 1
+    assert rep.loc["x", "n_sentinel"] == 1
+    assert rep.loc["x", "n_real"] == 8
+    assert abs(rep.loc["x", "available_pct"] - 80.0) < 1e-9
