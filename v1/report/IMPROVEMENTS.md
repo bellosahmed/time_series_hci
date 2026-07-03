@@ -9,6 +9,31 @@ split · **G4** more detectors + honest evaluation.
 
 ---
 
+## Overview — all v1 work this session
+
+Two batches of work, both on branch `supervisor-feedback-improvements`. Final gates throughout:
+**`pytest` 63 passed / 1 skipped**, **`verify_results` 20/20**, web app smoke-tested live.
+
+**Batch 1 — supervisor-feedback response** (documented in full in `report/DATA_QUALITY.md`):
+answered every point of the 1 July supervisor feedback with new, tested analysis code and a
+report describing real outputs.
+
+| Added | What it answers | Key real result |
+| --- | --- | --- |
+| `analysis.distribution_stats` | "shape of the graph", skewness | most-skewed sensor `VPdef (mbar)` (skew 2.37) |
+| `analysis.data_availability` | "availability of the data" | 99.995–100% real across all 14 sensors |
+| `analysis.analyze_all_sensors` | "verify humidity & other sensors" | all 14 sensors profiled, not just temperature |
+| `evaluation.anomaly_imbalance` | "imbalance of the data" | anomalies are 0.22% of points |
+| `preprocess.compare_imputation` | "how missing data is handled" | interpolation MAE 0.26 vs mean-fill 6.90 (~26× better) |
+| +3 `verify_results` checks | "control the algorithm → right answer" | 17 → **20/20** ground-truth cross-checks |
+
+**Batch 2 — improvements (G1–G4)**, detailed below. Headlines: wind direction fixed to use
+circular statistics (G1); the local-LLM explainer found to be silently broken and fixed (G2);
+`interface.py` split 585→390 lines (G3); LOF + One-Class SVM detectors and a real labeled-event
+evaluation added (G4).
+
+---
+
 ## G1 — Correctness fixes
 
 ### G1.1 — Wind direction treated as a circular variable
