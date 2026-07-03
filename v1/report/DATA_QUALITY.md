@@ -133,3 +133,13 @@ variable measured in degrees is not well described by a linear z-score or Pearso
 `verify_results.py` re-derives results a different way and asserts agreement: 20/20 checks
 pass, including query-engine == pandas and the data-quality functions == pandas. The query
 engine is the exact truth layer; the LLM only explains its numbers.
+
+## 8. Verification results (3 July 2026)
+
+Captured from a real run on the Jena Climate hourly series:
+
+- `python3.12 -m pytest tests/ -q` → `54 passed, 1 skipped, 7 warnings in 8.87s`
+- `python3.12 verify_results.py` → `20/20 checks passed.` (exit 0)
+
+Feedback status: **A** (skewness / availability / imbalance) ✅ · **B** (all 14 sensors verified) ✅ ·
+**C** (documented in this file + notebooks 01 & 02) ✅. Cloud and local-speed work were deferred.
