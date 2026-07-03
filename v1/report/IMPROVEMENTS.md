@@ -103,3 +103,33 @@ template, with every number preserved (the `faithfulness` guard reports `invente
 The core guarantee holds: the number `37.04` is computed by the query engine; the model only
 rewords it. This closes the "LLM explains" half of the system's thesis. Full suite: **60 passed,
 1 skipped**; `verify_results` **20/20** (its LLM-faithfulness check now exercises a real call).
+
+---
+
+## G3 — Split `interface.py` (separate parsing from orchestration)
+
+**Problem (before).** `interface.py` had grown to **585 lines** doing two distinct jobs: (1) pure
+natural-language *parsing* (intent/sensor/date/threshold via keyword + regex) and (2) *orchestration*
+(routing to the query engine, RAG context, phrasing, charting). One large file mixing both concerns
+is harder to read, test, and change safely.
+
+**Change.** Extracted the entire pure-parsing layer into a new module **`src/interface_parsing.py`**
+(224 lines): `SENSOR_ALIASES`, `INTENTS`, `resolve_sensors`, `detect_intent`, `resolve_period`,
+`resolve_day`, `resolve_compare`, `resolve_threshold`, and their helper tables (`MONTHS`, `SEASONS`,
+`COMPARE`). `interface.py` (now **390 lines**) imports and **re-exports** them, so the public API is
+unchanged — `interface.resolve_sensors`, `interface.detect_intent`, etc. still resolve exactly as
+before for `apps/web/app.py`, `apps/chat.py`, and `tests/test_interface.py`. No behaviour change; a
+pure structural refactor.
+
+**Result (after).**
+
+| | Before | After |
+| --- | --- | --- |
+| `interface.py` | 585 lines (parsing + orchestration) | **390 lines** (orchestration only) |
+| parsing layer | inline | **`interface_parsing.py`**, 224 lines, independently testable |
+| public API | `interface.<parser>` | unchanged (re-exported) |
+
+Verified: the 48 interface tests still pass, full suite **60 passed / 1 skipped**, `verify_results`
+**20/20**, and a live **web smoke-test** (launched `apps/web/app.py`, POSTed `/api/ask`) returned
+correct answers in both template mode ("max T (degC) was 37.04…") and LLM mode ("Yes, 2013 was
+hotter than 2014 by a margin of 1.25°C…").
