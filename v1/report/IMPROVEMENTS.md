@@ -71,3 +71,35 @@ env with the dependencies), but the notebooks stored a generic `python3` kernels
 notebooks 01 and 02 to `py312-tshci` (metadata only; outputs untouched). **Result (after).** Both
 now open on the correct kernel by default, matching the doc. (Notebooks 00/03/04 have unrelated
 uncommitted edits and should be repinned when next touched.)
+
+---
+
+## G2 — Local-LLM explainer (Ollama) actually wired in
+
+**Problem (before).** The Ollama explanation layer was already coded (`llm.py`: `generate`,
+`explain`, `classify`, `plan`, `faithfulness`; `interface.py` routes through it when
+`use_llm=True`). But the default model was the bare tag **`"llama3.2"`**, while the only model
+pulled locally is **`llama3.2:3b`**. Ollama does not auto-resolve the bare name, so every call
+returned **HTTP 404**, and `interface._phrase` swallowed it with a bare `except Exception: pass`
+and silently fell back to the offline template. Net effect: **`use_llm=True` produced output byte-
+identical to `use_llm=False`** — the LLM was never actually being used, and nothing surfaced the
+misconfiguration.
+
+**Change.**
+- Pinned the model to **`llama3.2:3b`** everywhere: `llm.DEFAULT_MODEL`, `interface.Interface`
+  default (now references `llm.DEFAULT_MODEL`), `apps/chat.py`, `apps/web/app.py`.
+- Added two regression tests (`tests/test_llm.py`) that, when Ollama is up, assert
+  `DEFAULT_MODEL` is actually pulled and that `explain` returns real prose (not the template) with
+  **no invented numbers** — this would have caught the 404 silent-fallback.
+
+**Result (after).** `use_llm=True` now returns genuine local-LLM explanations that differ from the
+template, with every number preserved (the `faithfulness` guard reports `invented: []`):
+
+| Question | TEMPLATE (before / fallback) | LOCAL LLM `llama3.2:3b` (after) |
+| --- | --- | --- |
+| hottest temperature? | `🔢 Computed: max T (degC) was 37.04 on 4 Jul 2015 16:00.` | "The hottest temperature recorded during this period was **37.04°C**, on **4 July 2015 at 4pm**." |
+| corr(temp, humidity)? | `🔢 Computed: correlation(T, rh) = -0.572.` | "There is a strong negative correlation between temperature and humidity — as one goes up, the other tends to go down." |
+
+The core guarantee holds: the number `37.04` is computed by the query engine; the model only
+rewords it. This closes the "LLM explains" half of the system's thesis. Full suite: **60 passed,
+1 skipped**; `verify_results` **20/20** (its LLM-faithfulness check now exercises a real call).

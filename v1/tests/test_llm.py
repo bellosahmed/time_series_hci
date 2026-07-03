@@ -56,3 +56,35 @@ def test_live_generation_if_available():
                       computed="max T (degC) was 37.04 at 2015-07-04 16:00.",
                       model=models[0])
     assert isinstance(out, str) and len(out) > 0
+
+
+def test_default_model_is_actually_pulled():
+    """Regression guard: when Ollama is up, DEFAULT_MODEL must resolve (no 404).
+
+    A tag mismatch (e.g. DEFAULT_MODEL='llama3.2' when only 'llama3.2:3b' is pulled) made
+    `generate` raise HTTP 404, which the interface silently swallowed and fell back to the
+    template — so use_llm=True looked identical to use_llm=False. This test catches that.
+    """
+    if not llm.is_available():
+        pytest.skip("Ollama not running; nothing to check.")
+    assert llm.DEFAULT_MODEL in llm.list_models()
+    out = llm.generate("Reply with the single word: ok", model=llm.DEFAULT_MODEL)
+    assert isinstance(out, str) and out.strip() != ""
+
+
+def test_llm_explain_path_differs_from_template_when_available():
+    """When Ollama is up, the local-LLM explanation must actually run (not fall back).
+
+    Guards the same silent-fallback regression at the interface level: the LLM answer
+    should be real prose, not the emoji-structured template string.
+    """
+    if not llm.is_available():
+        pytest.skip("Ollama not running; nothing to check.")
+    out = llm.explain(
+        "what was the hottest temperature?",
+        computed="max T (degC) was 37.04 on 4 Jul 2015 16:00.",
+    )
+    assert isinstance(out, str) and out.strip() != ""
+    assert "🔢" not in out  # not the template format
+    fa = llm.faithfulness(facts="max T (degC) was 37.04 on 4 Jul 2015 16:00.", explanation=out)
+    assert fa["invented"] == []  # the model must not invent numbers

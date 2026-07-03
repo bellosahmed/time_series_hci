@@ -61,7 +61,7 @@ def main() -> None:
             print("[warn] Ollama not reachable at localhost:11434 — using template phrasing.")
             print("       Start it with `ollama serve` and `ollama pull llama3.2:3b`.")
 
-    iface = interface.Interface(df, use_llm=use_llm, model=model or "llama3.2")
+    iface = interface.Interface(df, use_llm=use_llm, model=model or "llama3.2:3b")
 
     if args.question:
         print("\n" + iface.ask(" ".join(args.question)).text)

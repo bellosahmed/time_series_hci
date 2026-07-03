@@ -67,7 +67,7 @@ def ask():
     body = request.get_json(force=True) or {}
     question = (body.get("question") or "").strip()
     use_llm = bool(body.get("use_llm"))
-    model = body.get("model") or "llama3.2"
+    model = body.get("model") or "llama3.2:3b"
     if not question:
         return jsonify({"error": "empty question"}), 400
     try:

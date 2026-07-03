@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 
 OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.2"
+DEFAULT_MODEL = "llama3.2:3b"
 
 SYSTEM_PROMPT = (
     "You are the explanation layer of a time-series analytics system. "

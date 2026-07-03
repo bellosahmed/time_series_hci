@@ -247,7 +247,7 @@ def resolve_threshold(question: str):
 class Interface:
     """Answer natural-language questions about a prepared DataFrame."""
 
-    def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = "llama3.2"):
+    def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = llm.DEFAULT_MODEL):
         self.df = df
         self.retriever = rag_system.Retriever()
         self.use_llm = use_llm
