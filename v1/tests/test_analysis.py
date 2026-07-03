@@ -122,3 +122,37 @@ def test_compare_imputation_requires_datetime_index():
     s = pd.Series(np.linspace(0, 10, 50))     # RangeIndex, not DatetimeIndex
     with pytest.raises((TypeError, ValueError)):
         preprocess.compare_imputation(s)
+
+
+# --- G4: additional detectors (LOF, One-Class SVM) + real labeled events ---
+
+def _features_with_outliers(n=500, seed=0):
+    idx = pd.date_range("2024-01-01", periods=n, freq="h")
+    rng = np.random.default_rng(seed)
+    X = rng.normal(0, 1, (n, 2))
+    X[::100] += 12.0  # inject clear outliers every 100th row
+    return pd.DataFrame(X, columns=["a", "b"], index=idx)
+
+
+def test_lof_flags_injected_outliers():
+    df = _features_with_outliers()
+    flags = anomaly.lof_anomalies(df, contamination=0.02)
+    assert flags.dtype == bool
+    assert list(flags.index) == list(df.index)
+    assert int(flags.iloc[::100].sum()) >= 4  # catches the injected outliers
+
+
+def test_ocsvm_flags_outliers_via_subsampled_fit():
+    df = _features_with_outliers(n=400)
+    flags = anomaly.ocsvm_anomalies(df, nu=0.05, max_fit=100)  # forces the subsample path
+    assert flags.dtype == bool
+    assert int(flags.iloc[::100].sum()) >= 2
+
+
+def test_label_from_events_marks_real_windows():
+    idx = pd.date_range("2015-06-25", "2015-07-10", freq="h")
+    labels = evaluation.label_from_events(idx)
+    assert bool(labels.loc["2015-07-04 12:00"])       # inside the Jul-2015 heatwave window
+    assert not bool(labels.loc["2015-06-25 00:00"])   # outside every window
+    assert int(labels.sum()) > 0
+    assert len(evaluation.known_events()) == 5

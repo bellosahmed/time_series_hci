@@ -17,7 +17,14 @@ import pandas as pd
 
 def arima_residuals(series: pd.Series, order: tuple = (2, 1, 2),
                     deseasonalize_period: int | None = 24) -> pd.Series:
-    """Return the in-sample ARIMA residuals (actual - one-step prediction)."""
+    """Return the in-sample ARIMA residuals (actual - one-step prediction).
+
+    The default ``order=(2, 1, 2)`` is a deliberate fixed, low order, not an auto-selected
+    one: the series is STL-deseasonalised first (``deseasonalize_period``), which removes the
+    daily cycle and leaves short-memory dynamics that a small ARMA captures well. A fixed low
+    order keeps the fit fast and stable on ~70k points and avoids the cost/overfitting risk of
+    a per-call AIC search; ``order`` is exposed so it can be tuned if needed.
+    """
     from statsmodels.tsa.arima.model import ARIMA
 
     s = series.astype(float).interpolate(limit_direction="both")

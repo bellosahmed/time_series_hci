@@ -50,6 +50,47 @@ def isolation_forest_anomalies(
     return pd.Series(labels == -1, index=features.index, name="iforest_anomaly")
 
 
+def lof_anomalies(
+    features: pd.DataFrame, n_neighbors: int = 20, contamination: float = 0.01
+) -> pd.Series:
+    """Local Outlier Factor: flag points in low-density regions relative to their neighbours.
+
+    LOF is a density-based detector — a point is anomalous if it sits in a sparser region
+    than its `n_neighbors` nearest neighbours do. Complements Isolation Forest (which splits
+    globally) by catching *local* outliers. Returns a boolean Series (True = anomaly).
+    """
+    from sklearn.neighbors import LocalOutlierFactor
+
+    X = StandardScaler().fit_transform(features.astype(float).to_numpy())
+    labels = LocalOutlierFactor(
+        n_neighbors=n_neighbors, contamination=contamination
+    ).fit_predict(X)  # -1 = outlier
+    return pd.Series(labels == -1, index=features.index, name="lof_anomaly")
+
+
+def ocsvm_anomalies(
+    features: pd.DataFrame, nu: float = 0.01, gamma: str = "scale",
+    max_fit: int = 15000, random_state: int = 42,
+) -> pd.Series:
+    """One-Class SVM: learn a boundary around the bulk of the data; points outside are anomalies.
+
+    `nu` upper-bounds the fraction of outliers. A kernel One-Class SVM fits in ~O(n²), so on
+    long series we fit on a random subsample of at most `max_fit` rows and then score *every*
+    point — keeping it tractable on the full ~70k-row series while still labelling all of it.
+    Returns a boolean Series (True = anomaly).
+    """
+    from sklearn.svm import OneClassSVM
+
+    X = StandardScaler().fit_transform(features.astype(float).to_numpy())
+    model = OneClassSVM(nu=nu, gamma=gamma)
+    if len(X) > max_fit:
+        rng = np.random.default_rng(random_state)
+        model.fit(X[rng.choice(len(X), max_fit, replace=False)])
+    else:
+        model.fit(X)
+    return pd.Series(model.predict(X) == -1, index=features.index, name="ocsvm_anomaly")
+
+
 def threshold_sensitivity(series: pd.Series,
                           thresholds=(2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)) -> dict:
     """Anomaly count at each z-score threshold — evidence for the chosen value.

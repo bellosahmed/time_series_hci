@@ -14,6 +14,38 @@ import numpy as np
 import pandas as pd
 
 
+# Known Central-European weather events within the Jena record (2009–2016), used as REAL
+# (not synthetic) ground-truth anomaly windows. Windows are approximate and were chosen from
+# documented events and cross-checked against the record's own temperature extremes — an honest
+# complement to the synthetic-spike evaluation below (which has exact but artificial labels).
+KNOWN_EVENTS = [
+    ("2009 winter cold snap", "2009-01-01", "2009-01-20"),
+    ("2010 July heat", "2010-07-08", "2010-07-20"),
+    ("2012 February cold wave", "2012-02-01", "2012-02-14"),
+    ("2013 August heat", "2013-08-01", "2013-08-10"),
+    ("2015 July heatwave", "2015-07-01", "2015-07-06"),
+]
+
+
+def known_events() -> list[tuple[str, str, str]]:
+    """Return the labelled real-event windows as ``(name, start, end)`` — see ``KNOWN_EVENTS``."""
+    return list(KNOWN_EVENTS)
+
+
+def label_from_events(index, events=None) -> pd.Series:
+    """Boolean Series over ``index``, True inside any known-event window (real ground truth).
+
+    Unlike ``inject_spikes`` (which fabricates labels), this marks time spans of *actual*
+    documented weather events, so a detector's precision/recall here is measured against
+    real anomalies rather than synthetic ones.
+    """
+    events = events or KNOWN_EVENTS
+    labels = pd.Series(False, index=index)
+    for _, start, end in events:
+        labels.loc[start:end] = True
+    return labels
+
+
 @dataclass
 class Scores:
     precision: float
