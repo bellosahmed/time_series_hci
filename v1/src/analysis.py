@@ -65,3 +65,26 @@ def top_correlations(df: pd.DataFrame, target: str, n: int = 5) -> pd.Series:
     """Return the `n` sensors most correlated (by |r|) with `target`."""
     corr = correlations(df)[target].drop(target)
     return corr.reindex(corr.abs().sort_values(ascending=False).index).head(n)
+
+
+def distribution_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-sensor distribution shape: mean, median, std, skew, kurtosis, min, max.
+
+    Returns a DataFrame indexed by sensor name (one row per numeric column). ``skew``
+    is Fisher-Pearson skewness — 0 means symmetric, >0 a right/long-upper tail, <0 a
+    left tail. ``kurtosis`` is *excess* kurtosis — 0 is normal-tailed, >0 heavy-tailed
+    (more outliers). Together they describe the *shape* of each sensor's distribution,
+    the basis for judging skewness and heavy tails.
+    """
+    num = df.select_dtypes("number")
+    return pd.DataFrame(
+        {
+            "mean": num.mean(),
+            "median": num.median(),
+            "std": num.std(),
+            "skew": num.skew(),
+            "kurtosis": num.kurt(),
+            "min": num.min(),
+            "max": num.max(),
+        }
+    )
