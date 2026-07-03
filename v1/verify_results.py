@@ -44,6 +44,16 @@ check("mean == pandas", np.isclose(qe.get_mean_std(df, S)["mean"], df[S].mean())
 check("correlation == pandas",
       np.isclose(qe.get_correlation(df, S, "rho (g/m**3)"), df[S].corr(df["rho (g/m**3)"])))
 
+# NEW: data-quality additions recomputed a different way (ground-truth control)
+raw = preprocess.load_data(DATA)
+avail = analysis.data_availability(raw)
+check("availability n_total == len(raw) for all sensors",
+      bool((avail["n_total"] == len(raw)).all()), f"{len(raw)} rows")
+check("distribution skew == pandas skew",
+      np.isclose(analysis.distribution_stats(df).loc[S, "skew"], df[S].skew()))
+multi = analysis.analyze_all_sensors(df)
+check("multi-sensor table covers all 14 sensors", len(multi) == 14, f"{len(multi)}")
+
 # 6. scoped query via the interface == pandas slice
 a13 = iface.ask("hottest in 2013")
 check("2013-scoped max == pandas slice", a13.value.value == df.loc["2013", S].max())
