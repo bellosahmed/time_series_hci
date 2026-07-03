@@ -107,3 +107,24 @@ def benchmark(clean: pd.Series, detector, seeds=range(10),
     keys = ["precision", "recall", "f1", "pa_precision", "pa_recall", "pa_f1"]
     return {k: {"mean": float(arr[:, i].mean()), "std": float(arr[:, i].std())}
             for i, k in enumerate(keys)}
+
+
+def anomaly_imbalance(flags: pd.Series) -> dict:
+    """Class-imbalance summary for a boolean anomaly flag Series.
+
+    Returns ``{n_anomaly, n_normal, n_total, anomaly_pct}``. Anomalies are a tiny
+    minority of all points, so this quantifies the imbalance — essential context when
+    reading precision/recall, since a detector can score high 'accuracy' simply by
+    predicting everything normal.
+    """
+    f = flags.astype(bool)
+    n_total = int(len(f))
+    n_anomaly = int(f.sum())
+    n_normal = n_total - n_anomaly
+    anomaly_pct = 100.0 * n_anomaly / n_total if n_total else 0.0
+    return {
+        "n_anomaly": n_anomaly,
+        "n_normal": n_normal,
+        "n_total": n_total,
+        "anomaly_pct": anomaly_pct,
+    }

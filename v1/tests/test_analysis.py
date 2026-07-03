@@ -58,3 +58,12 @@ def test_analyze_all_sensors_one_row_per_sensor():
     for col in df.columns:
         assert out.loc[col, "top_corr_sensor"] in df.columns
         assert out.loc[col, "top_corr_sensor"] != col
+
+
+def test_anomaly_imbalance_counts():
+    flags = pd.Series([True, False, False, False, True])
+    imb = evaluation.anomaly_imbalance(flags)
+    assert imb["n_anomaly"] == 2
+    assert imb["n_normal"] == 3
+    assert imb["n_total"] == 5
+    assert abs(imb["anomaly_pct"] - 40.0) < 1e-9
