@@ -16,15 +16,33 @@ import re
 
 import pandas as pd
 
-# Map everyday words to dataset columns.
+# Map everyday words/phrases to dataset columns — covers ALL 14 sensors so each is nameable
+# in plain English. Matching is longest-phrase-first with span consumption (see
+# `resolve_sensors`), so a specific multi-word alias ("vapour pressure deficit", "wind
+# direction", "specific humidity") wins over a shorter generic word nested inside it
+# ("pressure", "wind", "humidity"). Both British/American spellings of vapo(u)r are accepted.
 SENSOR_ALIASES = {
+    # temperature family
     "temperature": "T (degC)", "temp": "T (degC)", "hot": "T (degC)", "cold": "T (degC)",
-    "humidity": "rh (%)", "humid": "rh (%)",
+    "potential temperature": "Tpot (K)", "potential": "Tpot (K)",
+    "dew point": "Tdew (degC)", "dewpoint": "Tdew (degC)", "dew": "Tdew (degC)",
+    # humidity / water vapour
+    "relative humidity": "rh (%)", "humidity": "rh (%)", "humid": "rh (%)",
+    "specific humidity": "sh (g/kg)",
+    "water vapour concentration": "H2OC (mmol/mol)", "water vapor concentration": "H2OC (mmol/mol)",
+    "water vapour": "H2OC (mmol/mol)", "water vapor": "H2OC (mmol/mol)",
+    # vapour pressures (specific phrases before the generic "vapour pressure")
+    "saturation vapour pressure": "VPmax (mbar)", "saturation vapor pressure": "VPmax (mbar)",
+    "vapour pressure deficit": "VPdef (mbar)", "vapor pressure deficit": "VPdef (mbar)",
+    "actual vapour pressure": "VPact (mbar)", "actual vapor pressure": "VPact (mbar)",
+    "vapour pressure": "VPact (mbar)", "vapor pressure": "VPact (mbar)",
+    # pressure / density
     "pressure": "p (mbar)",
-    "density": "rho (g/m**3)",
-    "dew": "Tdew (degC)", "dewpoint": "Tdew (degC)",
-    "wind": "wv (m/s)", "gust": "max. wv (m/s)",
-    "potential": "Tpot (K)",
+    "air density": "rho (g/m**3)", "density": "rho (g/m**3)",
+    # wind (direction/gust phrases before the generic "wind")
+    "wind direction": "wd (deg)", "direction": "wd (deg)",
+    "wind gust": "max. wv (m/s)", "gust": "max. wv (m/s)",
+    "wind speed": "wv (m/s)", "wind": "wv (m/s)",
 }
 
 INTENTS = {
@@ -48,13 +66,35 @@ INTENTS = {
 
 
 def resolve_sensors(question: str, columns) -> list[str]:
-    """Find which dataset columns a question refers to (via aliases + exact names)."""
+    """Find which dataset columns a question refers to (via aliases + exact names).
+
+    Aliases are matched **longest phrase first**, and the character span each match covers is
+    then consumed, so a specific multi-word alias wins over a shorter generic word nested
+    inside it — e.g. "wind direction" -> ``wd (deg)`` (not wind speed), "vapour pressure" ->
+    ``VPact (mbar)`` (not pressure), "specific humidity" -> ``sh (g/kg)`` (not humidity). This
+    lets every one of the 14 sensors be named in plain English without a generic word stealing
+    the match. Returns the matched columns in order of first appearance in the question.
+    """
     q = question.lower()
+    consumed = [False] * len(q)
+    hits: list[tuple[int, str]] = []  # (position, column)
+    for word in sorted(SENSOR_ALIASES, key=len, reverse=True):
+        col = SENSOR_ALIASES[word]
+        if col not in columns:
+            continue
+        start = q.find(word)
+        while start != -1:
+            if not any(consumed[start:start + len(word)]):
+                for i in range(start, start + len(word)):
+                    consumed[i] = True
+                hits.append((start, col))
+                break
+            start = q.find(word, start + 1)
     found: list[str] = []
-    for word, col in SENSOR_ALIASES.items():
-        if word in q and col in columns and col not in found:
+    for _, col in sorted(hits):  # order by appearance in the question
+        if col not in found:
             found.append(col)
-    for col in columns:  # also catch exact column names mentioned
+    for col in columns:  # also catch exact column names mentioned (e.g. "rh (%)")
         if col.lower() in q and col not in found:
             found.append(col)
     return found

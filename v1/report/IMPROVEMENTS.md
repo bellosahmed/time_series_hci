@@ -200,3 +200,40 @@ The new **LOF** is competitive (perfect recall, F1 0.816); the new **One-Class S
 — perfect recall but precision 0.233, over-flagging 5,140 points on this univariate temperature
 signal. Reporting a baseline that underperforms is deliberate: it shows the evaluation is real, not
 cherry-picked. Full suite: **63 passed, 1 skipped**; `verify_results` **20/20**.
+
+---
+
+## G5 — Plain-English aliases for all 14 sensors
+
+**Problem (before).** Only 8 concepts had aliases (temperature, humidity, pressure, density, dew,
+wind, gust, potential). The other **6 sensors had no plain-English name**: `VPmax`, `VPact`,
+`VPdef`, `sh (g/kg)`, `H2OC`, and `wd (deg)`. Worse, generic words stole matches — "wind direction"
+resolved to wind *speed* (`wv`), "vapour pressure" resolved to `pressure` (`p`). Without the LLM,
+these questions returned "I couldn't map that to a known query"; with the small LLM they were
+sometimes mis-answered.
+
+**Change.**
+- Extended `SENSOR_ALIASES` to cover **all 14 sensors** in plain English (both British/American
+  spellings of vapo(u)r), e.g. "vapour pressure deficit" → `VPdef`, "specific humidity" → `sh`,
+  "water vapour concentration" → `H2OC`, "wind direction" → `wd`, "saturation vapour pressure" →
+  `VPmax`, "actual vapour pressure" → `VPact`.
+- Rewrote `resolve_sensors` to match **longest phrase first with span consumption**, so a specific
+  multi-word alias beats a shorter generic word nested inside it. This fixes the "wind direction →
+  wind speed" and "vapour pressure → pressure" mis-resolution structurally, not by luck of ordering.
+- Two new tests: all 14 sensors resolve from a plain phrase; specific beats generic.
+
+**Result (after).** Every sensor is now answerable **without the local model** (numbers from the
+query engine):
+
+| Question (template mode, no LLM) | Resolves to | Answer |
+| --- | --- | --- |
+| "maximum wind direction?" | `wd (deg)` | 359.80° (13 Jul 2015) |
+| "average vapour pressure deficit?" | `VPdef (mbar)` | mean 4.03, std 4.87 |
+| "highest specific humidity?" | `sh (g/kg)` | 18.03 (20 Jun 2013) |
+| "max water vapour concentration?" | `H2OC (mmol/mol)` | 28.66 (20 Jun 2013) |
+| "correlation between wind direction and wind speed?" | `wd`, `wv` | −0.067 |
+
+Full suite: **65 passed, 1 skipped**; `verify_results` **20/20**.
+
+_Known follow-up (not done here): the interface's `correlation` intent still uses linear Pearson for
+`wd (deg)`; the circular-linear coefficient from G1 could be wired into that path too._

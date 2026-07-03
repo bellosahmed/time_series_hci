@@ -191,3 +191,40 @@ def test_point_adjust_credits_segment():
     adj = evaluation.point_adjust(pred, truth)
     assert adj.iloc[1] and adj.iloc[2] and adj.iloc[3]            # whole segment credited
     assert evaluation.score_point_adjusted(pred, truth).recall == 1.0
+
+
+JENA_COLUMNS = [
+    "p (mbar)", "T (degC)", "Tpot (K)", "Tdew (degC)", "rh (%)", "VPmax (mbar)",
+    "VPact (mbar)", "VPdef (mbar)", "sh (g/kg)", "H2OC (mmol/mol)", "rho (g/m**3)",
+    "wv (m/s)", "max. wv (m/s)", "wd (deg)",
+]
+
+
+def test_all_14_sensors_have_plain_english_aliases():
+    cols = JENA_COLUMNS
+    phrases = {
+        "pressure": "p (mbar)",
+        "temperature": "T (degC)",
+        "potential temperature": "Tpot (K)",
+        "dew point": "Tdew (degC)",
+        "humidity": "rh (%)",
+        "saturation vapour pressure": "VPmax (mbar)",
+        "actual vapour pressure": "VPact (mbar)",
+        "vapour pressure deficit": "VPdef (mbar)",
+        "specific humidity": "sh (g/kg)",
+        "water vapour concentration": "H2OC (mmol/mol)",
+        "air density": "rho (g/m**3)",
+        "wind speed": "wv (m/s)",
+        "wind gust": "max. wv (m/s)",
+        "wind direction": "wd (deg)",
+    }
+    for phrase, col in phrases.items():
+        got = interface.resolve_sensors(phrase, cols)
+        assert got and got[0] == col, f"{phrase!r} -> {got}, expected {col} first"
+
+
+def test_specific_alias_beats_generic():
+    cols = JENA_COLUMNS
+    assert interface.resolve_sensors("wind direction", cols)[0] == "wd (deg)"      # not wind speed
+    assert interface.resolve_sensors("vapour pressure", cols)[0] == "VPact (mbar)"  # not pressure
+    assert interface.resolve_sensors("specific humidity", cols)[0] == "sh (g/kg)"   # not humidity
