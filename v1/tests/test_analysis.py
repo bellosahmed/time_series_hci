@@ -67,3 +67,11 @@ def test_anomaly_imbalance_counts():
     assert imb["n_normal"] == 3
     assert imb["n_total"] == 5
     assert abs(imb["anomaly_pct"] - 40.0) < 1e-9
+
+
+def test_compare_imputation_interpolation_beats_mean_on_ramp():
+    idx = pd.date_range("2024-01-01", periods=200, freq="h")
+    ramp = pd.Series(np.linspace(0, 100, 200), index=idx)  # smooth trend
+    res = preprocess.compare_imputation(ramp)
+    assert np.isfinite(res.loc["interpolation", "mae"])
+    assert res.loc["interpolation", "mae"] <= res.loc["mean_fill", "mae"]

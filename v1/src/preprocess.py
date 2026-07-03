@@ -82,3 +82,31 @@ def align(df: pd.DataFrame, freq: str = "1h", agg: str = "mean") -> pd.DataFrame
 def infer_interval(df: pd.DataFrame) -> pd.Timedelta:
     """Return the most common spacing between consecutive timestamps."""
     return df.index.to_series().diff().mode().iloc[0]
+
+
+def compare_imputation(
+    series: pd.Series, method: str = "time", frac: float = 0.1, seed: int = 42
+) -> pd.DataFrame:
+    """Justify the interpolation choice by holding out known points and refilling.
+
+    Randomly masks ``frac`` of the finite points, then refills them two ways:
+      - interpolation (``method``, time-aware by default) — follows the local trend
+      - mean-fill — replaces every gap with the series mean (ignores the trend)
+    Returns a DataFrame indexed ``["interpolation", "mean_fill"]`` with a ``mae`` column:
+    the mean absolute error against the held-out truth. Lower is better; on a trending
+    signal interpolation wins, which is *why* the pipeline interpolates (following the
+    graph's trend) rather than flattening gaps to an average.
+    """
+    s = series.astype(float)
+    finite_idx = s.dropna().index
+    rng = np.random.default_rng(seed)
+    n_mask = max(1, int(len(finite_idx) * frac))
+    mask_idx = rng.choice(finite_idx.to_numpy(), size=n_mask, replace=False)
+    held = s.copy()
+    held.loc[mask_idx] = np.nan
+    interp = held.interpolate(method=method, limit_direction="both")
+    meanfill = held.fillna(s.mean())
+    true_vals = s.loc[mask_idx]
+    mae_interp = float((interp.loc[mask_idx] - true_vals).abs().mean())
+    mae_mean = float((meanfill.loc[mask_idx] - true_vals).abs().mean())
+    return pd.DataFrame({"mae": {"interpolation": mae_interp, "mean_fill": mae_mean}})
