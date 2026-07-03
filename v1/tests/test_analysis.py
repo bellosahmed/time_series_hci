@@ -44,3 +44,17 @@ def test_data_availability_exact_counts():
     assert rep.loc["x", "n_sentinel"] == 1
     assert rep.loc["x", "n_real"] == 8
     assert abs(rep.loc["x", "available_pct"] - 80.0) < 1e-9
+
+
+def test_analyze_all_sensors_one_row_per_sensor():
+    df = _df()
+    out = analysis.analyze_all_sensors(df)
+    assert list(out.index) == list(df.columns)
+    assert {"skew", "kurtosis", "zscore_anomalies", "top_corr_sensor", "top_corr_r"} <= set(
+        out.columns
+    )
+    assert (out["zscore_anomalies"] >= 0).all()
+    # top-correlation partner must be a different, real sensor
+    for col in df.columns:
+        assert out.loc[col, "top_corr_sensor"] in df.columns
+        assert out.loc[col, "top_corr_sensor"] != col

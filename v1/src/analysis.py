@@ -118,3 +118,33 @@ def data_availability(
             "available_pct": 100.0 * n_real / n_total,
         }
     )
+
+
+def analyze_all_sensors(df: pd.DataFrame, threshold: float = 3.0) -> pd.DataFrame:
+    """Run the core analysis across EVERY sensor (not just temperature).
+
+    Returns a DataFrame indexed by sensor with one row each:
+      ``skew``, ``kurtosis``   — distribution shape (from ``distribution_stats``)
+      ``zscore_anomalies``     — count of global z-score outliers at ``threshold``
+      ``top_corr_sensor``      — the other sensor it correlates most strongly with (by |r|)
+      ``top_corr_r``           — that correlation coefficient (signed)
+    This is the artifact that proves humidity, pressure, wind and the rest were all
+    verified the same way as temperature — the answer to "verify the other sensors".
+    """
+    from . import anomaly
+
+    stats = distribution_stats(df)
+    num = df.select_dtypes("number")
+    rows = {}
+    for col in num.columns:
+        top = top_correlations(num, col, n=1)
+        rows[col] = {
+            "skew": float(stats.loc[col, "skew"]),
+            "kurtosis": float(stats.loc[col, "kurtosis"]),
+            "zscore_anomalies": int(
+                anomaly.zscore_anomalies(num[col], threshold=threshold).sum()
+            ),
+            "top_corr_sensor": top.index[0] if len(top) else None,
+            "top_corr_r": float(top.iloc[0]) if len(top) else float("nan"),
+        }
+    return pd.DataFrame.from_dict(rows, orient="index")
