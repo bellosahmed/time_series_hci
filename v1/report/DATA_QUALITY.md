@@ -117,7 +117,7 @@ H2OC (mmol/mol)  0.558    -0.240               139        sh (g/kg)       1.000
 rho (g/m**3)     0.314     0.141               359         Tpot (K)      -0.981
 wv (m/s)         1.541     3.734              1076    max. wv (m/s)       0.969
 max. wv (m/s)    1.283     2.121               914         wv (m/s)       0.969
-wd (deg)        -0.725    -0.353                 0         p (mbar)      -0.074
+wd (deg)        -0.725    -0.353                 0    max. wv (m/s)       0.247
 ```
 
 The same analysis runs across all **14 sensors**, not just temperature: each has its own
@@ -127,10 +127,19 @@ shape (skew/kurtosis), z-score anomaly count, and strongest correlation partner.
 humidity means a smaller vapour pressure deficit. `VPdef (mbar)` itself has by far the most
 z-score anomalies (1,486) of any sensor, consistent with its heavy right tail from Section 2.
 Near-duplicate physical quantities show near-perfect correlation, e.g. `sh (g/kg)` and
-`H2OC (mmol/mol)` (r = 1.000) and `T (degC)`/`Tpot (K)` (r = 0.997). `wd (deg)` (wind
-direction, a circular/periodic quantity) has 0 z-score anomalies at threshold 3.0 and the
-weakest top correlation of any sensor (r = −0.074 with pressure) — expected, since a circular
-variable measured in degrees is not well described by a linear z-score or Pearson correlation.
+`H2OC (mmol/mol)` (r = 1.000) and `T (degC)`/`Tpot (K)` (r = 0.997).
+
+`wd (deg)` (wind direction) is **circular** — it wraps at 360°, so linear z-scores and Pearson
+correlation are invalid for it. It is therefore analysed with **circular statistics**: angular
+deviation from the circular mean (`circular_zscore_anomalies`) and the Mardia circular–linear
+correlation coefficient (`circular_linear_corr`, unsigned, in [0, 1]). Its strongest association
+is with `max. wv (m/s)` (circular-linear coefficient **0.247**) — physically sensible, since the
+prevailing wind direction relates to gust strength. This corrects an earlier artefact: under the
+old *linear* treatment, `wd` reported its strongest correlation as a spurious `p (mbar)`
+(r = −0.074), i.e. essentially uncorrelated with everything, purely because Pearson's r is
+meaningless on a wrapped angle. The 0 angular anomalies at threshold 3.0 are now a genuine result
+— over a full year wind blows from a broad range of directions, so the circular spread is wide
+and no single hour is a 3σ angular outlier — rather than the previous linear artefact.
 
 ## 7. Ground-truth control (the algorithm gives the right answer)
 

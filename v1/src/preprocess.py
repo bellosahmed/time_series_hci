@@ -96,7 +96,15 @@ def compare_imputation(
     the mean absolute error against the held-out truth. Lower is better; on a trending
     signal interpolation wins, which is *why* the pipeline interpolates (following the
     graph's trend) rather than flattening gaps to an average.
+
+    Requires a ``DatetimeIndex`` when ``method="time"`` (time-aware interpolation needs the
+    timestamps); raises ``TypeError`` otherwise instead of a cryptic pandas error.
     """
+    if method == "time" and not isinstance(series.index, pd.DatetimeIndex):
+        raise TypeError(
+            "compare_imputation(method='time') requires a DatetimeIndex; "
+            f"got {type(series.index).__name__}."
+        )
     s = series.astype(float)
     finite_idx = s.dropna().index
     rng = np.random.default_rng(seed)
