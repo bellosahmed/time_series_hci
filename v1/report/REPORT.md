@@ -1,7 +1,7 @@
 # Time-Series Data Analysis Through a Natural HCI Interface
 
 **MSc Project Report (Draft)**
-_Author: Bello Ahmed · Loughborough University · Last updated: 21 June 2026_
+_Author: Bello Ahmed · Loughborough University · Last updated: 4 July 2026_
 
 > This is a working draft generated from the implemented system and its measured results.
 > Placeholders marked **[ADD]** are for you to complete (exact citations, personal reflection,
@@ -16,13 +16,18 @@ analytics system that lets a user ask natural-language questions about multivari
 receive **trustworthy** answers. Its defining principle is a strict separation between *computation*
 and *explanation*: all exact values (maxima, minima, correlations, anomaly windows, missing-value
 counts) are produced by a deterministic **query engine**, while a language model is reserved purely
-for phrasing — it never computes numbers. The system is evaluated on the Jena Climate dataset
-(2009–2016; 70,129 hourly readings across 14 sensors). Anomaly detection is studied across six
-methods spanning statistical, forecasting, classical-machine-learning and deep-learning families.
-The query engine is shown to match an independent `pandas` ground truth exactly, and the detectors
-achieve high recall on injected anomalies (precision 0.85–1.00 on a controlled signal). The result
-is a fully offline pipeline that combines exact numerical querying, anomaly detection, multi-sensor
-reasoning and a natural-language interface.
+for phrasing — it never computes numbers, and a lightweight **faithfulness check** verifies this
+automatically, rejecting any explanation that introduces a figure absent from the computed facts.
+We name this reusable pattern **Verifiable NL Analytics** (deterministic truth layer + LLM
+explanation + automated faithfulness verification). The system is evaluated on the Jena Climate
+dataset (2009–2016; 70,129 hourly readings across 14 sensors). Anomaly detection is studied across
+six methods spanning statistical, forecasting, classical-machine-learning and deep-learning families.
+The query engine is shown to match an independent `pandas` ground truth exactly; detector quality is
+reported with bootstrap confidence intervals and a paired significance test (precision 0.85–1.00 on
+a controlled signal); and the local LLM introduced **0** fabricated numbers across the verification
+suite. The result is a fully offline pipeline that combines exact numerical querying, anomaly
+detection, multi-sensor reasoning and a verified natural-language interface. The same architecture is
+shown to transfer to a second, unrelated domain (EU trade; Appendix B).
 
 ---
 
@@ -61,10 +66,15 @@ computes exact results, and answers user questions interactively.
 5. How can trust and explainability be improved in local time-series analytics?
 
 ### 1.6 Contributions
-- A **trust-separated architecture**: deterministic computation vs language-based explanation.
-- A comparative study of **six** anomaly-detection methods on a common dataset and harness.
+- **Verifiable NL Analytics** — a reusable architecture that pairs a deterministic *truth layer*
+  with an LLM used *only* for explanation, and adds an **automated faithfulness check** that verifies,
+  at answer time, that the explanation invented no numbers. Numerical trust is thus guaranteed by
+  construction *and* checked, not merely asserted.
+- A comparative study of **six** anomaly-detection methods on a common dataset and harness, reported
+  with **bootstrap confidence intervals** and a **paired significance test** (not bare point estimates).
 - A **multi-sensor reasoning** component that explains anomalies using cross-sensor behaviour.
-- A fully **offline** natural-language interface with trust-labelled answers.
+- A fully **offline** natural-language interface with trust-labelled answers, shown to **transfer to a
+  second, unrelated domain** (EU trade, Appendix B) — evidence the method is general, not dataset-specific.
 
 ### 1.7 Report structure
 Section 2 reviews related work; Section 3 sets out the methodology; Section 4 the implementation;
@@ -159,7 +169,7 @@ Data → Preprocess → Behaviour analysis → Anomaly detection → Clustering
                                    ↓
                     Natural-language interface (trust-aware)
                                    ↓
-                       [Local LLM — explanation only, future]
+              Local LLM — explanation only, faithfulness-checked
 ```
 
 ### 4.2 Modules (`v1/src/`)
@@ -168,13 +178,17 @@ LSTM-AE, LSTM forecaster) · `forecasting` (ARIMA) · `reasoning` · `rag_system
 · `interface` · `main`.
 
 ### 4.3 Technology
-Python; pandas, NumPy, scikit-learn, statsmodels, matplotlib; PyTorch for deep models. Everything
-runs locally. Deep models are **GPU-aware** (auto-select CUDA): verified on an NVIDIA RTX 5070
+Python 3.12; pandas, NumPy, SciPy, scikit-learn, statsmodels, matplotlib; PyTorch for deep models;
+Flask for the web UI; an optional local Ollama model for phrasing. Dependencies are pinned
+(`requirements.txt`). Everything runs locally. Deep models are **GPU-aware** (auto-select CUDA): verified on an NVIDIA RTX 5070
 (Blackwell) with the cu128 PyTorch build; results are equivalent to CPU.
 
 ### 4.4 Testing
-21 automated tests (`v1/tests/`): query-engine correctness vs pandas, interface routing, synthetic
-evaluation, and the deep / ARIMA detectors.
+**87 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
+routing (incl. circular wind-direction handling and the LLM trust-gate), the Flask/CLI app layer,
+synthetic evaluation with confidence intervals, and the deep / ARIMA detectors. An independent
+harness (`verify_results.py`) additionally recomputes results a different way and passes **21/21**
+checks (plus one advisory LLM-faithfulness vote); `reproduce.sh` regenerates everything in one command.
 
 ---
 
@@ -187,8 +201,10 @@ correct, confirming the pipeline handles the data soundly.
 
 ### 5.2 Query-engine correctness
 On the full dataset, every exact query matched the independent `pandas` ground truth **exactly**
-(values and timestamps) — 7/7 numeric checks, plus 8/8 unit tests. This establishes the trust
-guarantee the architecture depends on.
+(values and timestamps): the `verify_results.py` harness passes **21/21** cross-checks — max, min,
+mean and correlation equal pandas; scoped and threshold queries equal the corresponding pandas slice;
+per-sensor availability and skew are recomputed and agree — and the unit suite (**87 tests**) covers
+the same guarantees. This establishes the trust guarantee the architecture depends on.
 
 ### 5.3 Anomaly-detection comparison
 | Model | Type | Flags | Time | Precision* | Recall* | F1* |
@@ -231,6 +247,35 @@ plus retrieved sensor context. Reasoning at that moment correctly identifies a h
 The full pipeline runs offline using only local libraries. Deep-model training is verified on both
 CPU and GPU with equivalent results (~1.7× GPU speedup at this model size).
 
+### 5.7 Statistical rigor (confidence intervals and significance)
+Point estimates alone are not defensible on a small labelled set, so detector quality is now reported
+with uncertainty. On the labelled synthetic-spike protocol, the z-score/STL-residual detector achieves
+**recall 0.78 (95 % bootstrap CI 0.64–0.90)** and **precision 0.89 (0.76–0.98)** (2 000 resamples,
+seeded). A paired **McNemar test** comparing Isolation Forest and the z-score detector on the same
+points rejects the null of equal error patterns (**p ≈ 1×10⁻¹⁹**, 64 discordant points). This
+difference must be read with the class imbalance in mind (§5.3): per-point accuracy is dominated by
+the ~99 % normal class, and Isolation Forest's fixed contamination prior over-flags this slice, so the
+test confirms the two detectors make *significantly different* errors rather than crowning a winner —
+consistent with the "no single best detector" finding. Both functions (`evaluation.bootstrap_ci`,
+`evaluation.mcnemar_test`) are unit-tested and re-run inside the verification harness.
+
+### 5.8 Circular sensors (a correctness fix in the truth layer)
+Wind direction `wd (deg)` is a compass bearing that wraps at 360°, so linear statistics are invalid on
+it. Previously the interface answered *"maximum wind direction"* with **359.8°** — a meaningless linear
+extremum that ignores the wrap. The interface now routes circular sensors through circular statistics
+and instead reports the **prevailing (circular-mean) direction 196.6° (S), circular spread 71.3°**, and
+uses an unsigned circular–linear coefficient for correlation. This closes a genuine hole in the
+"exact numbers" guarantee: the truth layer must be correct for *every* sensor, not only the linear ones.
+
+### 5.9 LLM faithfulness (the trust guarantee, measured)
+The central claim — the LLM explains but never computes — is verified rather than assumed. Every LLM
+answer is passed through a faithfulness check that compares the decimal figures in the explanation
+against the computed facts (rounding tolerated); if the model introduces a number that matches no
+computed value, the interface **discards the phrasing and falls back to the exact template**, so a
+fabricated figure cannot reach the user. Across the verification questions, run as a **majority-of-3
+vote** (the 3-billion-parameter model is stochastic), the LLM introduced **0 invented numbers**. This
+turns "trust us, it only explains" into a measured, reproducible result.
+
 ---
 
 ## 6. Discussion
@@ -244,30 +289,61 @@ synthetic injection on real data confounds it with genuine background anomalies 
 benchmark-critique literature raises. Multi-sensor reasoning demonstrates how exact cross-sensor
 statistics can support *explanations* of anomalies, not just detections.
 
+**Verifiable NL Analytics as the core contribution.** Beyond the temperature application, the reusable
+idea is an architecture: a deterministic *truth layer* answers every quantitative question, an LLM is
+confined to *explanation*, and an *automated faithfulness check* verifies at answer time that the
+explanation added no numbers of its own. The measured result — 0 invented numbers, with a template
+fallback whenever the check fails (§5.9) — makes numerical trust an enforced property rather than a
+hope. This directly targets the currently prominent problem of LLM hallucination in data analysis, and
+because the truth layer is domain-agnostic the pattern transfers unchanged to other datasets (Appendix
+B). We therefore frame the contribution not as "a weather chatbot" but as a general, verifiable
+method for trustworthy natural-language analytics.
+
 ---
 
-## 7. Limitations
-- **No real anomaly labels** in Jena, so detection accuracy is measured only via synthetic injection
-  and sanity checks.
-- **Single dataset** — generalisation to other domains is untested.
-- **Threshold/contamination** parameters are chosen priors, not learned.
-- **Interface routing** is keyword-based; it handles a defined set of intents, not arbitrary phrasing.
-- **The explanation LLM is not yet integrated** — answers are currently template-phrased.
-- No formal statistical-significance testing or hyperparameter search.
+## 7. Limitations and Threats to Validity
+
+### 7.1 Limitations
+- **No real anomaly labels** in Jena, so detection accuracy is measured via synthetic injection and a
+  set of *documented real-event* windows (2010 July heat, 2012 February cold wave, etc.) used as
+  approximate ground truth — not a gold-standard labelled benchmark.
+- **Threshold/contamination** parameters are chosen priors (justified by sensitivity sweeps), not learned.
+- **Interface routing** is keyword-based with an optional LLM planner; it handles a defined set of
+  intents, not fully arbitrary phrasing.
+- **Small explanation model.** The local LLM is a 3B model; it is stochastic and can mis-phrase
+  qualitative context. This is contained (not eliminated) by the faithfulness gate and prompt
+  constraints, which guarantee only the *numbers*, not the surrounding prose.
+
+### 7.2 Threats to validity
+- **Construct validity.** Synthetic spikes may not resemble real anomalies; we mitigate by *also*
+  evaluating on documented real events and by reporting the honest precision caveat (§5.3).
+- **Statistical-conclusion validity.** Labelled points are few, so we report **bootstrap CIs and a
+  paired McNemar test** rather than bare point estimates (§5.7); results are framed as indicative.
+- **External validity.** A single primary domain risks over-fitting conclusions to weather; we address
+  this by demonstrating the same architecture on an unrelated domain (EU trade, **Appendix B**).
+- **Reproducibility.** All randomness is seeded, dependencies are pinned (`requirements.txt`), and
+  `reproduce.sh` regenerates every counted result; the stochastic LLM check is advisory only.
+- **No human evaluation yet.** The interface's usability and trust benefits are argued from design and
+  exact-answer correctness, **not yet measured with users**. A within-subjects study (spreadsheet vs
+  template vs AI mode, 8 ground-truth-graded tasks, SUS/trust) is designed and ready to run
+  (`HCI_USER_STUDY.md`); running it is the primary item of future work.
 
 ---
 
 ## 8. Conclusion and Future Work
 
 The project delivers a working, offline, trustworthy time-series analytics core: exact querying,
-six-method anomaly detection, clustering, a natural-language interface, RAG context and multi-sensor
-reasoning, all evaluated. Future work:
-1. **Integrate a local LLM (Ollama)** to phrase the (already trust-labelled) grounded facts — the
-   `rag_system.explain` interface is ready for it.
-2. Add a **labelled or semi-synthetic benchmark** for proper precision/recall.
+six-method anomaly detection (reported with confidence intervals and a significance test), clustering,
+a natural-language interface with an **integrated, faithfulness-checked local LLM**, RAG context and
+multi-sensor reasoning, all evaluated, and shown to transfer to a second domain (Appendix B). Future
+work:
+1. **Run the HCI user study** (the designed within-subjects protocol) to measure usability, task
+   accuracy and trust with real participants — the single highest-value next step and the natural
+   completion of the "HCI" aim.
+2. Add a **labelled or semi-synthetic benchmark** for proper precision/recall beyond documented events.
 3. Explore a **multi-sensor deep model** (e.g. a graph network) to strengthen cross-sensor reasoning.
-4. Build a **Streamlit UI** over the interface for an interactive demo.
-5. Test on **additional datasets** to assess generalisation.
+4. Extend the **Verifiable NL Analytics** pattern with agentic tool-use (multi-step questions,
+   still numberless) and streaming/online detection.
 
 ---
 
@@ -280,7 +356,33 @@ Forest (2008); STL (1990); Malhotra et al. (2015); Bai et al. (2018); Pang et al
 ```bash
 cd code/v1
 python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
-python -m pytest tests/
+python -m pytest tests/          # 87 pass (1 skipped)
+python verify_results.py         # 21/21 independent checks
+bash reproduce.sh                # both of the above, with an environment banner
 ```
-Notebooks `01`–`08` reproduce exploration, evaluation, the methods, visualisations, the interface,
-the deep models and the model comparison.
+Notebooks `00`–`04` reproduce the code walkthrough, exploration/visualisation, methods and evaluation,
+the interface and reasoning, and the deep-model comparison.
+
+## Appendix B — Generalisation to a second domain (EU trade)
+
+A central claim of *Verifiable NL Analytics* (§1.6, §6) is that the architecture is domain-agnostic:
+only the data changes, not the truth-layer / explanation / verification design. To test this beyond
+weather, the **identical pipeline** (preprocess → analyse → detect → forecast → query engine →
+interface → faithfulness-checked LLM) was applied to an unrelated dataset — **EU monthly international
+trade**: 292 months × 54 series (27 EU countries × {exports, imports}), 2002–2026, in € millions, a
+domain with real, documented shocks (the 2008 financial crisis, COVID-2020, the 2022 energy shock).
+
+**Findings (from the second system's own independent verification, 13/13 checks):**
+
+| Aspect | Weather (v1) | EU trade (Appendix B) |
+| --- | --- | --- |
+| Query engine == pandas | ✅ exact | ✅ exact |
+| Anomaly detection | catches 2015 heatwave, 2012 cold wave | catches the **2008 crisis** and **COVID-2020** |
+| Forecast honesty | ARIMA backtest MASE < 1.5 | SARIMA backtest **MAPE 4.0 %** (normal); 14.4 % across COVID → shocks *detected*, not predicted |
+| Deep vs classical (honest) | no single best detector | autoencoder **F1 0.21 ≤ Isolation Forest 0.36** — reported as a loss, not hidden |
+| LLM faithfulness | 0 invented numbers | 0 invented numbers |
+
+The pattern transfers without modification to its logic: exact answers remain exact, detectors surface
+the domain's true events, forecasts remain honest about shocks, and the LLM still never invents a
+figure. This is evidence that the contribution is a **general method**, not a weather-specific artefact.
+(The trade system is a sibling implementation; full details in its own report.)
