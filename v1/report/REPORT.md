@@ -243,6 +243,23 @@ Example: *"What was the hottest temperature?"* → "🔢 max T (degC) was 37.04 
 plus retrieved sensor context. Reasoning at that moment correctly identifies a hot, dry day
 (vapour-pressure deficit +8.4 σ).
 
+**Reading the chart (legend).** Answers that plot a series attach a small chart with a colour-coded
+legend so every marker is self-explanatory: the **blue line** is the observed data; a **solid red dot**
+is an anomaly (flagged unusual); a **dashed amber ring** is a *borderline* near-miss (close to the
+threshold but not flagged — shown to convey uncertainty rather than a hard yes/no); a **solid orange
+dot** is the maximum and a **solid blue dot** the minimum; a **shaded band** is the 80 % forecast range.
+The legend lists only the markers actually present, and the interface can answer questions *about* it
+(e.g. *"what is the red dot?"*) from a fixed knowledge base — the meaning is a known fact, so, like every
+other answer, it needs no computation and cannot be fabricated.
+
+**Conversational follow-ups.** With the local model enabled, the interface keeps a short rolling memory
+of recent turns, so elliptical follow-ups resolve in context: after *"show the anomalies in 2013"*, the
+question *"what about 2014?"* is rewritten to a standalone question and answered for 2014, and *"what is
+the red dot?"* is answered as a legend question. Crucially, the model only rewrites the *language*; the
+deterministic query engine still computes every number, preserving the trust guarantee. Without the
+model the interface remains single-shot (each question answered independently) — the documented
+no-model limitation.
+
 ### 5.6 Offline operation and GPU
 The full pipeline runs offline using only local libraries. Deep-model training is verified on both
 CPU and GPU with equivalent results (~1.7× GPU speedup at this model size).
