@@ -4,13 +4,61 @@ These don't require Ollama to be running: they check graceful behaviour when it'
 absent. The actual generation is only exercised if a local server is up.
 """
 
+import json
+
 import pytest
 
 from src import llm
 
 
+def test_generate_sets_seed_and_temperature(monkeypatch):
+    captured = {}
+
+    class FakeResp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"response":"ok"}'
+
+    def fake_urlopen(req, timeout=None):
+        captured["data"] = req.data
+        return FakeResp()
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    out = llm.generate("hi", seed=7, temperature=0.0)
+    payload = json.loads(captured["data"])
+    assert payload["options"]["seed"] == 7          # reproducible generation
+    assert payload["options"]["temperature"] == 0.0
+    assert out == "ok"
+
+
 def test_is_available_returns_bool():
     assert isinstance(llm.is_available(), bool)
+
+
+def test_faithfulness_flags_invented_integer_count():
+    facts = "66 anomalous readings in 24 windows."
+    good = "There were 66 unusual readings across 24 windows."
+    bad = "There were 66 unusual readings across 87 windows."   # 87 is hallucinated
+    assert llm.faithfulness(facts, good)["invented"] == []
+    assert 87 in llm.faithfulness(facts, bad)["invented"]
+
+
+def test_faithfulness_flags_wrong_year():
+    facts = "max T (degC) was 37.04 on 4 Jul 2015 16:00."
+    assert 2016 in llm.faithfulness(facts, "The record was 37.04 in 2016.")["invented"]
+
+
+def test_faithfulness_allows_clock_reformatting():
+    facts = "max T (degC) was 37.04 on 4 Jul 2015 16:00."
+    exp = "The hottest was 37.04 degrees, on 4 July 2015 at 4pm."
+    assert llm.faithfulness(facts, exp)["invented"] == []   # 16:00 -> 4pm must not be flagged
 
 
 def test_rewrite_followup_none_without_history(monkeypatch):

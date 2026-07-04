@@ -111,7 +111,7 @@ python3.12 apps/web/app.py
 
 ```bash
 python3.12 -m pytest tests/       # 48 passed, 1 skipped (the LLM test needs Ollama)
-python3.12 verify_results.py      # 17/17 independent checks (results == pandas, LLM invents 0 numbers)
+python3.12 verify_results.py      # 25/25 independent checks (results == pandas, LLM invents 0 numbers)
 ```
 
 `verify_results.py` is the trust gate: it re-computes headline results independently and confirms the
@@ -128,16 +128,18 @@ LLM never introduced a number that isn't in the data.
 | `notebooks/` | 5 Jupyter notebooks — walkthrough, EDA, methods, interface, deep models (see `notebooks/README.md`) |
 | `apps/` | things you **run**: `chat.py` (CLI) and `web/` (browser app) |
 | `report/` | things you **read**: the write-up, evaluation, model comparison (see below) |
-| `verify_results.py` | the 17/17 independent verification of results |
-| `conftest.py` | lets `pytest` find `src` from any directory (no config needed) |
+| `verify_results.py` | the 25/25 independent verification of results |
+| `pyproject.toml` | package metadata + pytest/ruff config (puts `src` on the path from any directory) |
 
 ### Docs in `report/`
 - `REPORT.md` — the MSc report draft
-- `WRITEUP.md` — dissertation write-up skeleton (structure + measured evidence)
 - `EVALUATION.md` — evaluation results (correctness, anomalies, quantitative rigour)
 - `MODELS.md` — the six detectors compared + confusion matrix
+- `DATA_QUALITY.md` — data-availability / cleaning analysis (real vs imputed readings)
 - `HCI_USER_STUDY.md` — planned user-study protocol (accuracy vs ground truth, SUS, trust)
 - `FINETUNING.md` — a side note on fine-tuning the LLM
+- `notes/` — working notes (not deliverables): `impro.md` (supervisor feedback), `IMPROVEMENTS.md`,
+  `WRITEUP.md` (dissertation skeleton), `RESULTS_DATA.md`
 
 ---
 

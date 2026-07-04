@@ -7,6 +7,36 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-04
 
+### Full v1 audit + code-quality / architecture pass (fourth pass)
+Read every v1 source module (13), both apps, tests and docs; verified the whole system and applied
+best-practice organisation. Kept `src/` **flat** (user chose this over a subpackage restructure) so
+notebook/app/report imports are untouched — nothing to re-run. **120 tests pass (1 skipped),
+verify_results 25/25, ruff clean.**
+
+- **Bug fixed (test-first): LSTM detectors weren't reproducibly seeded** (`deep.py`). `torch.manual_seed`
+  ran *inside* `_train`, **after** `_build_lstm_ae()` / `_build_lstm_forecaster()` had already built the
+  model — so LSTM **weight init was unseeded** and scores drifted run-to-run (the CNN path seeds before
+  building, so it was inconsistent, and the "seeded/reproducible deep models" claim didn't hold for the
+  LSTMs). Added a failing reproducibility test (`test_lstm_ae_scores_reproducible` diffed 100%), then
+  added `_seed_torch(seed)` before building both LSTM models. 5 → 7 deep tests.
+- **Packaging (`pyproject.toml`, new).** Declares the package + abstract deps (loose bounds; the pinned
+  reproducible set stays in `requirements.txt`), and configures **pytest** (`pythonpath=["."]`,
+  `testpaths`) and **ruff** (E/F/W/I/B/UP). Verified the pytest config resolves `from src import …` from
+  both `v1/` and the repo root, so the empty `conftest.py` bootstrap was **removed**.
+- **Lint clean-up (ruff, 14 → 0).** Real ones: removed an unused `pytest` import; `zip(..., strict=True)`
+  in `inject_spikes`; `benchmark(seeds=None)` instead of a `range()` default; moved `interface.py`'s
+  `logger` below its imports (E402); dropped a stale `"Answer"` string annotation; `def` instead of a
+  bound `lambda` in a test; import ordering. No behaviour change (full suite still green).
+- **Docs organised.** Moved working notes (`impro.md`, `IMPROVEMENTS.md`, `WRITEUP.md`, `RESULTS_DATA.md`)
+  into **`report/notes/`**, leaving deliverables (REPORT, EVALUATION, MODELS, DATA_QUALITY, HCI_USER_STUDY,
+  FINETUNING) at top level. Fixed the live cross-references + stale counts (`17/17`→`25/25`, conftest→
+  pyproject) in `v1/README.md` and `code/CLAUDE.md`. Cleaned `__pycache__` from the tree.
+- **Minor correctness/doc fixes.** Corrected `main.py`'s stale "LLM/interface out of scope" docstring;
+  documented the `resolve_threshold` year-vs-threshold edge case (a bare integer 1900–2100 is read as a
+  year — harmless on this dataset's magnitudes).
+- **Audit verdict:** the codebase is genuinely high quality (multiply reviewed already) — the LSTM seeding
+  was the only real bug found across ~2800 LOC; everything else was hygiene/organisation.
+
 ### Supervisor-feedback code pass (v1) — correctness, rigor, robustness, a11y
 Worked through the code-only items in `v1/report/impro.md` (write-up items deferred). All changes
 test-first; **84 tests pass (1 skipped)**, `verify_results.py` **21/21** (+1 advisory). Highlights:

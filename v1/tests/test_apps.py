@@ -9,7 +9,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 V1 = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(V1 / "apps" / "web"))
@@ -70,10 +69,17 @@ def test_ask_route_accepts_history_and_returns_resolved_key():
     assert "resolved" in r.get_json()   # follow-up transparency field is exposed
 
 
+def test_chart_js_is_served():
+    r = _client().get("/chart.js")           # index.html depends on it
+    assert r.status_code == 200
+    assert "function legendHtml" in r.get_data(as_text=True)
+
+
 def test_index_page_serves_accessible_markup():
     r = _client().get("/")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
+    assert 'src="chart.js"' in html          # the page loads the extracted render module
     # Screen-reader + keyboard affordances must be present (this is an HCI project).
     assert 'role="log"' in html and 'aria-live="polite"' in html   # live conversation region
     assert 'aria-label="Ask a question in plain English"' in html  # labelled input
@@ -82,6 +88,7 @@ def test_index_page_serves_accessible_markup():
 
 def test_cli_pick_model_prefers_llama(monkeypatch):
     import chat
+
     from src import llm
 
     monkeypatch.setattr(llm, "list_models", lambda: ["llama3.2:3b", "other"])

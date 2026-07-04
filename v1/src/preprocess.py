@@ -11,6 +11,8 @@ for the Jena Climate dataset.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -32,6 +34,12 @@ def load_data(
     time_col : name of the timestamp column.
     time_format : optional strptime format for fast/strict parsing.
     """
+    if not Path(path).exists():
+        raise FileNotFoundError(
+            f"Dataset not found at {path}. This dataset is gitignored, so it is not in the repo — "
+            "download the CSV (Jena Climate 2009-2016 from Kaggle / the MPI-BGC site) and place it "
+            "under code/data/. See the README for details."
+        )
     df = pd.read_csv(path)
     if time_col not in df.columns:
         raise KeyError(f"Time column {time_col!r} not found. Columns: {list(df.columns)}")

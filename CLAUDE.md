@@ -128,8 +128,9 @@ Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/report/MODELS.md`**.
 ## v1 layout (reorganised)
 
 `src/` (code) · `tests/` · `notebooks/` (00–04 + README) · `apps/` (chat.py + web/) ·
-`report/` (REPORT, EVALUATION, MODELS, FINETUNING) · `verify_results.py` (17/17 independent checks).
-See `v1/README.md`.
+`report/` (REPORT, EVALUATION, MODELS, DATA_QUALITY, HCI_USER_STUDY, FINETUNING; working notes in
+`report/notes/`) · `pyproject.toml` (package + pytest/ruff config) · `verify_results.py`
+(25/25 independent checks). See `v1/README.md`.
 
 ## How to run
 

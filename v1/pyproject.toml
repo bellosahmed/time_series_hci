@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "time-series-hci-v1"
+version = "1.0.0"
+description = "Verifiable natural-language time-series analytics (Jena climate) — code computes exact numbers, a local LLM only explains them."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# Abstract dependencies (lower bounds). The exact, reproducible pin set — including the
+# CUDA 12.8 torch build for the RTX 5070 — lives in requirements.txt; install that for an
+# environment identical to the tested one:  pip install -r requirements.txt
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "scipy>=1.13",
+    "scikit-learn>=1.5",
+    "statsmodels>=0.14",
+    "matplotlib>=3.8",
+    "flask>=3.0",
+]
+
+[project.optional-dependencies]
+# Deep detectors (CNN-AE, LSTM-AE, LSTM-forecaster). On the RTX 5070 use the pinned
+# CUDA build in requirements.txt; on CPU:  pip install torch --index-url .../whl/cpu
+deep = ["torch>=2.4"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+# Flat single-package layout: the 13 modules live in src/, imported as `src.*`
+# (kept flat deliberately — notebooks, apps, tests and the report all import `from src import …`).
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Put the project root on sys.path so `from src import …` resolves when running pytest
+# from here or from the repository root — replaces the old conftest.py bootstrap.
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["notebooks", "report"]
+
+[tool.ruff.lint]
+# Conservative, high-signal rules: pyflakes (F), pycodestyle (E/W), import order (I),
+# bugbear (B), and modern-Python upgrades (UP). E501 (line length) is handled above.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Apps bootstrap sys.path before importing `src`, so their imports are intentionally
+# not at the top of the file.
+"apps/*" = ["E402"]

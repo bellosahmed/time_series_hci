@@ -22,16 +22,15 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
-
-from . import analysis, anomaly, forecasting, llm, query_engine as qe, rag_system, reasoning
-
+from . import analysis, anomaly, forecasting, llm, rag_system, reasoning
+from . import query_engine as qe
 from .interface_parsing import (  # noqa: F401  re-exported for callers and tests
     INTENTS,
     LEGEND_EXPLANATIONS,
     SENSOR_ALIASES,
     _coerce_date,
     detect_intent,
+    is_causal_query,
     resolve_compare,
     resolve_day,
     resolve_legend_query,
@@ -39,6 +38,8 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
     resolve_sensors,
     resolve_threshold,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -65,6 +66,31 @@ class Interface:
         self.use_llm = use_llm
         self.model = model
         self.history: list[dict] = []  # recent turns, for follow-up resolution
+
+    def _routable(self, question: str) -> bool:
+        """True if the deterministic parser can route `question` (an intent/sensor/period/day).
+
+        Used to reject a garbled LLM rewrite: only a rewrite that maps to a real query is
+        allowed to replace the user's words.
+        """
+        cols = list(self.df.columns)
+        start, end, _ = resolve_period(question)
+        return bool(detect_intent(question) or resolve_sensors(question, cols)
+                    or start or end or resolve_day(question) is not None
+                    or resolve_legend_query(question))
+
+    def _needs_context(self, question: str) -> bool:
+        """True if `question` looks elliptical — i.e. not already a self-contained query.
+
+        A self-contained question has an intent *and* a sensor or a period (e.g. "hottest in
+        2013"); such questions are answered directly, without invoking the LLM rewriter. Only
+        elliptical follow-ups ("what about 2014?", "and the peak?") are rewritten.
+        """
+        cols = list(self.df.columns)
+        start, end, _ = resolve_period(question)
+        has_scope = bool(resolve_sensors(question, cols) or start or end
+                         or resolve_day(question) is not None)
+        return not (detect_intent(question) is not None and has_scope)
 
     def _context_for(self, sensor: str) -> str | None:
         snip = self.retriever.for_sensor(sensor)
@@ -180,12 +206,14 @@ class Interface:
         answered directly (single-shot), the latter being the documented no-model limitation.
         """
         resolved = question
-        if (resolve_legend_query(question) is None and self.use_llm
-                and self.history and llm.is_available()):
+        if (resolve_legend_query(question) is None and self.use_llm and self.history
+                and llm.is_available() and self._needs_context(question)):
             try:
                 rw = llm.rewrite_followup(question, self.history, model=self.model)
-                if rw and rw.strip() and rw.strip().lower() != question.strip().lower():
-                    resolved = rw.strip()
+                if rw and self._routable(rw) and rw.strip().lower() != question.strip().lower():
+                    resolved = rw.strip()   # accept only a rewrite the parser can actually route
+                elif rw:
+                    logger.info("follow-up rewrite %r not routable; using the question as-is.", rw)
             except Exception as exc:
                 logger.warning("follow-up rewrite failed (%s); using the question as-is.", exc)
 
@@ -213,7 +241,7 @@ class Interface:
         start, end, _ = resolve_period(question)
         return self.df.loc[start:end] if (start or end) else self.df
 
-    def _chart_for(self, ans: "Answer"):
+    def _chart_for(self, ans: Answer):
         """Build a small downsampled chart (line + optional markers / forecast band)."""
         if not ans.sensors or ans.intent in ("correlation", "compare", "missing"):
             return None
@@ -279,6 +307,20 @@ class Interface:
         sensor = sensors[0] if sensors else "T (degC)"  # default to temperature
         ctx = self._context_for(sensor)
 
+        # Causal questions ("does X cause Y?", "what causes…?"): we measure correlation, not
+        # causation — say so explicitly rather than pass a correlation off as an answer.
+        causal = is_causal_query(question)
+        if causal and len(sensors) < 2:
+            return self._reply(question, "correlation", None, sensors,
+                               computed=("This system measures correlation (how sensors move together), "
+                                         "not causation — it can't say what *causes* a change; that needs "
+                                         "controlled experiments or causal inference, which are out of "
+                                         "scope. Ask 'how does X relate to Y?' for their correlation, or "
+                                         "ask about anomalies to see which sensors moved together."),
+                               context=ctx)
+        if causal:
+            intent = "correlation"   # answer with the correlation, plus the causation caveat below
+
         # Compare two periods ("was 2013 hotter than 2014?").
         cmp = resolve_compare(question)
         if cmp and intent in (None, "compare", "max", "min", "mean", "trend", "weather"):
@@ -334,12 +376,21 @@ class Interface:
             r = qe.threshold_events(data, sensor, op, value)
             sign = "above" if op == ">" else "below"
             when = f", first on {qe.fmt_when(r['first'])}" if r["first"] is not None else ""
+            # A count is exact, but on a compass bearing it is a literal wrap-unaware comparison.
+            caveat = (" (note: wind direction is a compass bearing that wraps at 360°, so this is a "
+                      "literal angular comparison, not a directional 'more/less')"
+                      if sensor in analysis.CIRCULAR_SENSORS else "")
             return self._reply(question, "threshold", r, [sensor],
                                computed=(f"{sensor} was {sign} {value:g}{where} "
-                                         f"{r['count']} times ({r['pct']:.2f}% of readings){when}."),
+                                         f"{r['count']} times ({r['pct']:.2f}% of readings){when}.{caveat}"),
                                context=ctx)
 
         if intent == "forecast":
+            if sensor in analysis.CIRCULAR_SENSORS:
+                return self._reply(question, intent, None, [sensor],
+                                   computed=(f"{sensor} is a circular compass bearing (0–360°); it "
+                                             "can't be forecast with a linear time-series model here — "
+                                             "the wrap at 360° breaks the model."), context=ctx)
             try:
                 fc = forecasting.forecast(data[sensor], steps=14)
             except Exception as exc:
@@ -358,6 +409,12 @@ class Interface:
                                         "shocks (storms, heatwaves) can't be predicted, only detected later.")
 
         if intent == "trend":
+            if sensor in analysis.CIRCULAR_SENSORS:
+                return self._reply(question, intent, None, [sensor],
+                                   computed=(f"{sensor} is a circular compass bearing (0–360°); a "
+                                             "linear trend is not meaningful on it — the 0°/360° wrap "
+                                             "makes the slope arbitrary, so direction has no straight-"
+                                             "line 'rising/falling'."), context=ctx)
             slope = analysis.trend_slope(data[sensor])         # units per hour
             per_year = slope * 24 * 365.25
             direction = ("rising" if per_year > 0.05 else
@@ -405,6 +462,8 @@ class Interface:
             if len(sensors) < 2:
                 sensors = (sensors + ["T (degC)", "rho (g/m**3)"])[:2]
             a, b = sensors[0], sensors[1]
+            cause_note = (" Note: this is correlation, not causation — the system measures "
+                          "association, not cause." if causal else "")
             circ = [s for s in (a, b) if s in analysis.CIRCULAR_SENSORS]
             if len(circ) == 1:  # one angle + one linear sensor -> circular–linear correlation
                 deg = circ[0]
@@ -412,13 +471,14 @@ class Interface:
                 c = analysis.circular_linear_corr(data[deg], data[lin])
                 return self._reply(question, intent, c, [a, b],
                                    computed=f"circular–linear correlation({deg}, {lin}){where} = {c:.3f} "
-                                            f"(0–1, unsigned; {deg} is a compass angle).",
+                                            f"(0–1, unsigned; {deg} is a compass angle).{cause_note}",
                                    inferred="Wind direction wraps at 360°, so this uses a circular "
                                             "measure of association, not linear Pearson.")
             c = qe.get_correlation(data, a, b)
             rel = "move together" if c > 0 else "move in opposite directions"
             return self._reply(question, intent, c, [a, b],
-                               computed=f"correlation({a}, {b}){where} = {c:.3f}.", inferred=f"They {rel}.")
+                               computed=f"correlation({a}, {b}){where} = {c:.3f}.{cause_note}",
+                               inferred=f"They {rel}.")
 
         if intent == "missing":
             n = qe.count_missing(data, sensor)

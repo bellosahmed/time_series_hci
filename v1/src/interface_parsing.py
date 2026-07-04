@@ -46,20 +46,23 @@ SENSOR_ALIASES = {
 }
 
 INTENTS = {
-    "max": ["max", "maximum", "highest", "hottest", "peak", "warmest", "top", "biggest", "most"],
-    "min": ["min", "minimum", "lowest", "coldest", "smallest", "least"],
-    "mean": ["mean", "average", "typical", "normally"],
+    "max": ["max", "maximum", "highest", "hottest", "peak", "warmest", "top", "biggest", "most",
+            "hot", "record high"],
+    "min": ["min", "minimum", "lowest", "coldest", "smallest", "least", "cold", "record low"],
+    "mean": ["mean", "average", "typical", "normally", "usual"],
     "spread": ["std", "deviation", "variability", "spread", "variance", "vary", "fluctuate"],
     "correlation": ["correlation", "correlate", "related", "relationship", "relate", "versus",
-                    " vs ", "depend", "affect", "influence", "connection"],
+                    " vs ", "depend", "affect", "influence", "connection", "connected", "link",
+                    "linked", "associated", "associate"],
     "missing": ["missing", "gap", "gaps", "absent", "incomplete"],
     "forecast": ["forecast", "predict", "prediction", "projection", "next week", "next month",
-                 "next few days", "coming days", "future", "will it", "going to be"],
+                 "next few days", "coming days", "future", "will it", "going to be", "outlook"],
     "trend": ["trend", "trending", "rising", "falling", "increasing", "decreasing", "increase",
-              "decrease", "warming", "cooling", "going up", "going down", "over time"],
+              "decrease", "warming", "cooling", "going up", "going down", "over time",
+              "warmer", "colder", "hotter", "cooler"],
     "compare": ["compare", "comparison", "versus", "vs", "difference between"],
     "anomaly": ["anomaly", "anomalies", "unusual", "abnormal", "weird", "strange", "outlier",
-                "odd", "spike", "wrong", "problem"],
+                "outliers", "odd", "spike", "spikes", "anomalous", "wrong", "problem"],
     "weather": ["weather", "conditions", "climate"],
     "summary": ["summary", "summarise", "summarize", "describe", "overview", "tell me about"],
 }
@@ -145,6 +148,20 @@ def resolve_legend_query(question: str) -> str | None:
     if any(w in q for w in ("band", "shaded", "shade", "forecast range", "pink")):
         return "forecast"
     return "all"
+
+
+_CAUSAL_WORDS = ("cause", "causes", "caused", "causing", "causation", "leads to", "lead to",
+                 "responsible for", "due to", "because of", "what makes", "why does", "why is",
+                 "why are", "why did")
+
+
+def is_causal_query(question: str) -> bool:
+    """True if the question asks about *cause* ("does X cause Y?", "what causes…?", "why does…?").
+
+    The system measures correlation, not causation, so these are answered with an explicit
+    correlation-not-causation caveat rather than silently treated as a relationship query.
+    """
+    return any(w in question.lower() for w in _CAUSAL_WORDS)
 
 
 def detect_intent(question: str) -> str | None:
@@ -307,5 +324,9 @@ def resolve_threshold(question: str):
     if op is None:
         return None
     nums = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", q)]
+    # Drop bare integers in the year range so "above 30 in 2013" reads 30 (not 2013) as the
+    # threshold. Known limitation: a genuine integer threshold that happens to fall in
+    # 1900–2100 (e.g. "above 2000") is also dropped — harmless on this dataset, whose sensor
+    # magnitudes (°C, %, ~1000 mbar, m/s) never reach that range; a decimal ("2000.0") escapes it.
     nums = [n for n in nums if not (n.is_integer() and 1900 <= n <= 2100)]
     return (op, nums[0]) if nums else None

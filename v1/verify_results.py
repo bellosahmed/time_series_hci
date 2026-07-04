@@ -87,6 +87,17 @@ check("all-time max is a summer event (Jul 2015 heatwave)",
 mn = qe.get_min(df, S)
 check("all-time min is a winter event", mn.when.month in (12, 1, 2), f"{mn.when}")
 
+# 8b. reasoning is PHYSICALLY correct on the real extremes (validates the heuristic, not just
+# that it produces a plausible-sounding story)
+zmax = reasoning.sensor_zscores(df, mx.when)
+zmin = reasoning.sensor_zscores(df, mn.when)
+check("reasoning: temperature reads HIGH at the all-time heat extreme",
+      zmax["T (degC)"] > 1.5, f"{zmax['T (degC)']:+.1f} sigma")
+check("reasoning: temperature reads LOW at the all-time cold extreme",
+      zmin["T (degC)"] < -1.5, f"{zmin['T (degC)']:+.1f} sigma")
+check("reasoning verdict at the heat extreme is a real event (not a sensor glitch)",
+      "real weather event" in reasoning.describe_moment(df, mx.when))
+
 # 9. anomaly answer carries multi-sensor reasoning (the novelty) with a verdict
 aa = iface.ask("any unusual readings in 2014?")
 check("anomaly answer has reasoning", aa.inferred is not None and "σ" in (aa.inferred or ""))
@@ -98,6 +109,12 @@ fc = forecasting.forecast(df[S], steps=14)
 check("forecast bounds ordered & future",
       (fc["lower"] <= fc["mean"]).all() and (fc["mean"] <= fc["upper"]).all()
       and fc.index[0] > df.index[-1])
+
+# 10b. real-data recall: the z-score detector flags most DOCUMENTED events (not synthetic)
+resid_full = analysis.decompose(df[S], period=24)["resid"].dropna()
+ev = evaluation.events_recall(anomaly.zscore_anomalies(resid_full, threshold=4.0))
+check("z-score catches >= 3 of 5 documented real weather events", ev["caught"] >= 3,
+      f"caught {ev['caught']}/{ev['total']}, missed {ev['missed']}")
 
 # 11. point-adjusted recall >= strict recall (it can only help, never hurt)
 noisy, labels = evaluation.inject_spikes(df[S].iloc[:5000], n=40, magnitude=6.0)

@@ -142,6 +142,13 @@ def test_compass_point_cardinals():
     assert analysis.compass_point(359.0) == "N"   # wraps back to North
 
 
+def test_load_data_missing_file_gives_actionable_error(tmp_path):
+    with pytest.raises(FileNotFoundError) as e:
+        preprocess.load_data(str(tmp_path / "nope.csv"))
+    msg = str(e.value).lower()
+    assert "nope.csv" in msg and ("download" in msg or "gitignored" in msg)
+
+
 def test_compare_imputation_requires_datetime_index():
     s = pd.Series(np.linspace(0, 10, 50))     # RangeIndex, not DatetimeIndex
     with pytest.raises((TypeError, ValueError)):
@@ -174,6 +181,24 @@ def test_bootstrap_ci_has_width_for_imperfect_detector():
     assert 0.3 < ci["point"] < 0.7
     assert ci["upper"] - ci["lower"] > 0.0
     assert ci["lower"] <= ci["point"] <= ci["upper"]
+
+
+def test_bootstrap_ci_reports_sample_size():
+    idx, truth = _labelled(n=200, every=10)
+    ci = evaluation.bootstrap_ci(truth.copy(), truth, metric="recall", n_boot=100, seed=0)
+    assert ci["n"] == 200          # labelled sample size is exposed to contextualise CI width
+
+
+def test_benchmark_reports_confidence_interval():
+    idx = pd.date_range("2024-01-01", periods=2000, freq="h")
+    rng = np.random.default_rng(0)
+    clean = pd.Series(rng.normal(0.0, 1.0, 2000), index=idx)
+    def det(noisy):
+        return anomaly.zscore_anomalies(noisy, threshold=3.0)
+    res = evaluation.benchmark(clean, det, seeds=range(6), n=20, magnitude=8.0)
+    r = res["recall"]
+    assert {"mean", "std", "ci_low", "ci_high"} <= set(r)
+    assert r["ci_low"] <= r["mean"] <= r["ci_high"]
 
 
 def test_mcnemar_flags_clear_difference():
@@ -217,6 +242,18 @@ def test_ocsvm_flags_outliers_via_subsampled_fit():
     flags = anomaly.ocsvm_anomalies(df, nu=0.05, max_fit=100)  # forces the subsample path
     assert flags.dtype == bool
     assert int(flags.iloc[::100].sum()) >= 2
+
+
+def test_events_recall_counts_caught_events():
+    idx = pd.date_range("2010-07-01", "2010-07-25", freq="h")
+    flags = pd.Series(False, index=idx)
+    flags.loc["2010-07-10 12:00"] = True          # a flag inside the July-2010 heat window
+    events = [("2010 July heat", "2010-07-08", "2010-07-20"),
+              ("uncaught event", "2010-07-22", "2010-07-24")]
+    r = evaluation.events_recall(flags, events)
+    assert r["caught"] == 1 and r["total"] == 2
+    assert abs(r["recall"] - 0.5) < 1e-9
+    assert r["missed"] == ["uncaught event"]
 
 
 def test_label_from_events_marks_real_windows():

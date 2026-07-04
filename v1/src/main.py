@@ -3,8 +3,10 @@
 Runs the core analytics pipeline end-to-end on a time-series dataset:
 load -> preprocess -> analyse -> detect anomalies -> cluster -> exact queries.
 
-RAG + local LLM and the user interface are deliberately out of scope for v1's core;
-this script proves the computational ("truth") half works.
+This script is the headless entry point for the computational ("truth") half — it
+proves the pipeline runs end-to-end and prints headline numbers. The natural-language
+interface, RAG context, and local-LLM phrasing live in ``interface.py`` / ``rag_system.py``
+/ ``llm.py`` and are driven from ``apps/`` (``chat.py`` CLI, ``web/`` browser UI).
 
 Usage:
     python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"

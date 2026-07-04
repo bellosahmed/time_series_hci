@@ -32,6 +32,19 @@ def get_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _seed_torch(seed: int) -> None:
+    """Seed torch's global RNG for reproducibility.
+
+    Weight initialisation happens at model *construction*, so the seed must be set
+    **before** the model is built. The CNN path already does this inside
+    ``train_autoencoder`` (which builds the model itself); the LSTM detectors build
+    their model in the caller, so they must seed here first — otherwise the initial
+    weights are unseeded and scores drift run-to-run despite a fixed ``seed``.
+    """
+    import torch
+    torch.manual_seed(seed)
+
+
 def _free_cuda(model=None) -> None:
     """Release a model's GPU memory back to the driver (no-op on CPU).
 
@@ -297,6 +310,7 @@ def lstm_ae_scores(series: pd.Series, window: int = 24, epochs: int = 10,
     """Per-timestamp reconstruction error from an LSTM autoencoder."""
     z = standardise(series)
     Xtr, _ = _windows_from_array(z, window, step=window)
+    _seed_torch(seed)                                  # seed before building (weight init)
     model = _build_lstm_ae()
     _train(model, _to_seq(Xtr), epochs, 1e-3, 128, seed)
 
@@ -347,6 +361,7 @@ def lstm_forecast_scores(series: pd.Series, window: int = 24, epochs: int = 10,
     """Per-timestamp absolute forecast error (|actual - predicted|)."""
     z = standardise(series)
     Xtr, ytr, _ = _forecast_pairs(z, window, step=train_step)
+    _seed_torch(seed)                                  # seed before building (weight init)
     model = _build_lstm_forecaster()
     _train(model, Xtr, epochs, 1e-3, 128, seed, predict_y=ytr)
 

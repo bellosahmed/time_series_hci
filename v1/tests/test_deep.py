@@ -63,3 +63,21 @@ def test_lstm_forecast_flags_some_spikes(signal_with_spikes):
     # forecaster reacts at the spike (or the step right after it)
     near = spikes.union(spikes + pd.Timedelta(hours=1))
     assert flags.loc[flags.index.intersection(near)].sum() >= 2
+
+
+# --- reproducibility: same seed => identical scores ------------------------ #
+# The CNN path seeds before building its model; the LSTM detectors must do the
+# same, or their weight initialisation is unseeded and results drift run-to-run
+# (which would break the project's "seeded/reproducible deep models" claim).
+def test_lstm_ae_scores_reproducible(signal_with_spikes):
+    s, _ = signal_with_spikes
+    a = deep.lstm_ae_scores(s, window=24, epochs=3, seed=7)
+    b = deep.lstm_ae_scores(s, window=24, epochs=3, seed=7)
+    pd.testing.assert_series_equal(a, b)
+
+
+def test_lstm_forecast_scores_reproducible(signal_with_spikes):
+    s, _ = signal_with_spikes
+    a = deep.lstm_forecast_scores(s, window=24, epochs=3, seed=7)
+    b = deep.lstm_forecast_scores(s, window=24, epochs=3, seed=7)
+    pd.testing.assert_series_equal(a, b)

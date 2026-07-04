@@ -58,20 +58,27 @@ def list_models() -> list[str]:
 
 
 def generate(prompt: str, model: str = DEFAULT_MODEL, system: str = SYSTEM_PROMPT,
-             timeout: float = 60.0, max_tokens: int = 512) -> str:
+             timeout: float = 60.0, max_tokens: int = 512,
+             temperature: float = 0.2, seed: int = 0) -> str:
     """Send a prompt to the local Ollama model and return its text reply.
 
     `max_tokens` (Ollama's `num_predict`) is a generous **safety ceiling**, not a tight
     speed limit: it only stops pathological runaway generation. It's set well above what
     a 1-2 sentence explanation or short plan needs, so it never clips a wanted answer —
     correctness/completeness comes first.
+
+    `temperature` (low) and a fixed `seed` make generation **reproducible**: the same facts
+    yield the same phrasing across runs (given the same model build), which is what tames the
+    small model's stochasticity. The numbers are already guaranteed exact upstream (the query
+    engine) and checked downstream (`faithfulness`); this only stabilises the wording.
     """
     payload = json.dumps({
         "model": model,
         "prompt": prompt,
         "system": system,
         "stream": False,
-        "options": {"temperature": 0.2, "num_predict": max_tokens},  # low temp + length cap
+        # low temp + fixed seed => reproducible; length cap stops runaway generation
+        "options": {"temperature": temperature, "num_predict": max_tokens, "seed": seed},
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/generate", data=payload,
                                  headers={"Content-Type": "application/json"})
@@ -226,28 +233,48 @@ Answer: There were 66 unusual temperature readings in 2014, falling into 24 sepa
 """
 
 
-_DECIMAL = re.compile(r"-?\d+\.\d+")
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+_CLOCK = re.compile(r"\b\d{1,2}:\d{2}\b")
+
+
+def _guarded(v: float) -> bool:
+    """Which numbers the faithfulness check enforces.
+
+    Decimals (measured values) and integers with magnitude > 12 (counts like "24 windows",
+    years like 2015) are enforced. Small integers ≤ 12 are left tolerant: they overlap clock
+    hours (after a 12→AM/PM reformat), month numbers and single-digit counts, so enforcing
+    them would false-flag legitimate rephrasing ("16:00" → "4pm"). This residual gap (a
+    fabricated count ≤ 12) is a known limitation of the check.
+    """
+    return v != int(v) or abs(v) > 12
 
 
 def faithfulness(facts: str, explanation: str, tol: float = 0.1) -> dict:
     """Measure whether the LLM altered the *measured values*.
 
-    Compares the **decimal** numbers (37.04, -2.9, 0.03 …) in the source facts vs the
-    explanation, with a numeric tolerance so **rounding is allowed** ("34.93" -> "34.9"
-    is fine). Integers (years, clock times like 16:00) are ignored — they're legitimately
-    reformatted ("16:00" -> "4pm"). Returns `{ok, dropped, invented}`:
-    - **invented** = a decimal in the explanation that matches *no* source value → the
+    Compares the numbers in the source facts vs the explanation, with a numeric tolerance so
+    **rounding is allowed** ("34.93" → "34.9"). Enforces decimals *and* larger integers (counts,
+    years) — so a hallucinated count ("87 windows") or wrong year is caught — while tolerating
+    legitimate reformatting: clock times (`16:00` → `4pm`) are stripped first, and small integers
+    (≤ 12) are not enforced (see ``_guarded``). Returns ``{ok, dropped, invented}``:
+    - **invented** = an enforced number in the explanation that matches *no* source value → the
       serious failure (a hallucinated figure).
     - **dropped** = a source value omitted from the explanation → benign (summarising).
     """
-    src = [float(x) for x in _DECIMAL.findall(facts or "")]
-    exp = [float(x) for x in _DECIMAL.findall(explanation or "")]
+    facts = _CLOCK.sub(" ", facts or "")
+    explanation = _CLOCK.sub(" ", explanation or "")
+    src = [float(x) for x in _NUMBER.findall(facts)]
+    exp = [float(x) for x in _NUMBER.findall(explanation)]
 
     def near(v, pool):
+        # Integers (counts, years) must match near-exactly — the 2% relative slop is for
+        # rounding *decimals* ("34.93" → "34.9"), and would wrongly accept 2016 ≈ 2015.
+        if v == int(v):
+            return any(abs(v - s) < 0.5 for s in pool)
         return any(abs(v - s) <= tol + 0.02 * abs(s) for s in pool)
 
-    invented = sorted({round(v, 3) for v in exp if not near(v, src)})
-    dropped = sorted({round(v, 3) for v in src if not near(v, exp)})
+    invented = sorted({round(v, 3) for v in exp if _guarded(v) and not near(v, src)})
+    dropped = sorted({round(v, 3) for v in src if _guarded(v) and not near(v, exp)})
     return {"ok": not invented and not dropped, "dropped": dropped, "invented": invented}
 
 

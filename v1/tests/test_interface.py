@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src import interface, evaluation
+from src import evaluation, interface
 
 
 @pytest.fixture
@@ -30,6 +30,36 @@ def test_followup_is_rewritten_and_routed(df, monkeypatch):
     assert ans.value.value == df["T (degC)"].max()   # exact number still from the query engine
     assert ans.question == "and the peak?"           # original wording preserved for display
     assert ans.resolved == "what was the max temperature?"
+
+
+def test_standalone_question_is_not_rewritten(df, monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "phrased")
+    calls = {"n": 0}
+
+    def spy(q, h, **k):
+        calls["n"] += 1
+        return "what was the min temperature?"
+
+    monkeypatch.setattr(llm, "rewrite_followup", spy)
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = [{"question": "average humidity", "computed": "..."}]
+    ans = iface.ask("max temperature")
+    assert calls["n"] == 0            # intent+sensor => self-contained, rewrite never invoked
+    assert ans.intent == "max"
+
+
+def test_unroutable_rewrite_is_rejected(df, monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "phrased")
+    monkeypatch.setattr(llm, "rewrite_followup", lambda q, h, **k: "hello there my friend")
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = [{"question": "max temperature", "computed": "max ..."}]
+    ans = iface.ask("and?")
+    assert ans.resolved is None   # gibberish rewrite rejected; original kept, not silently applied
 
 
 def test_history_accumulates_across_turns(df):
@@ -95,6 +125,37 @@ def test_detect_intent():
     # word-boundary: short keywords must not match inside larger words
     assert interface.detect_intent("almost done") is None        # not "most" -> max
     assert interface.detect_intent("please stop now") is None    # not "top" -> max
+
+
+def test_causal_question_gives_correlation_with_causation_caveat(df):
+    ans = interface.Interface(df).ask("does humidity cause the temperature to change?")
+    assert ans.intent == "correlation"          # falls back to the honest measure
+    assert "causation" in ans.text.lower()      # explicit correlation-not-causation caveat
+
+
+def test_causal_question_without_pair_explains_no_causation(df):
+    ans = interface.Interface(df).ask("what causes temperature spikes?")
+    assert any(w in ans.text.lower() for w in ("causation", "correlation"))
+    assert "couldn't map" not in ans.text       # not the generic fallback
+
+
+def test_intent_paraphrase_coverage():
+    # Realistic paraphrasings must route correctly — guards against keyword brittleness
+    # regressing (each of these was a miss before the synonym lists were widened).
+    cases = {
+        "how hot did it get?": "max", "what was the record high?": "max", "peak temperature": "max",
+        "how cold did it get?": "min", "record low": "min", "coldest day": "min",
+        "what is the usual humidity?": "mean", "typical temperature": "mean",
+        "how does temperature link to humidity?": "correlation",
+        "is temperature associated with density?": "correlation",
+        "how are temperature and humidity connected?": "correlation",
+        "is it getting warmer?": "trend", "has it been warming over the years?": "trend",
+        "anything weird in 2014?": "anomaly", "were there strange readings?": "anomaly",
+        "any outliers?": "anomaly", "what is the outlook for next week?": "forecast",
+        "how much does it vary?": "spread", "any gaps in the data?": "missing",
+    }
+    for q, expected in cases.items():
+        assert interface.detect_intent(q) == expected, q
 
 
 def test_resolve_sensors(df):
@@ -204,6 +265,24 @@ def test_wd_max_does_not_report_linear_extreme():
     ans = interface.Interface(df).ask("maximum wind direction")
     # a linear max on a wrapped angle (~359.x) is meaningless — must be redirected
     assert "prevailing" in ans.computed.lower() or "circular" in ans.computed.lower()
+
+
+def test_wd_trend_is_refused_as_circular():
+    ans = interface.Interface(_wd_df()).ask("is wind direction rising over time?")
+    assert ans.intent == "trend"
+    assert any(w in ans.computed.lower() for w in ("circular", "compass", "wrap"))
+
+
+def test_wd_forecast_is_refused_as_circular():
+    ans = interface.Interface(_wd_df()).ask("forecast the wind direction")
+    assert ans.intent == "forecast"
+    assert any(w in ans.computed.lower() for w in ("circular", "compass", "wrap"))
+
+
+def test_wd_threshold_flags_circular_caveat():
+    ans = interface.Interface(_wd_df()).ask("how often was wind direction above 200?")
+    assert ans.intent == "threshold"
+    assert any(w in ans.computed.lower() for w in ("circular", "compass", "wrap"))
 
 
 def test_wd_correlation_is_circular_linear_unsigned():

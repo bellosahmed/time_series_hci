@@ -13,7 +13,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-
 # Known Central-European weather events within the Jena record (2009–2016), used as REAL
 # (not synthetic) ground-truth anomaly windows. Windows are approximate and were chosen from
 # documented events and cross-checked against the record's own temperature extremes — an honest
@@ -69,10 +68,28 @@ def inject_spikes(series: pd.Series, n: int = 50, magnitude: float = 5.0,
     positions = rng.choice(len(series), size=n, replace=False)
     signs = rng.choice([-1.0, 1.0], size=n)
     bump = magnitude * series.std()
-    for pos, sign in zip(positions, signs):
+    for pos, sign in zip(positions, signs, strict=True):
         out.iloc[pos] = out.iloc[pos] + sign * bump
         labels.iloc[pos] = True
     return out, labels
+
+
+def events_recall(flags: pd.Series, events=None) -> dict:
+    """Real-data recall: how many *documented* events the detector flagged at least once.
+
+    Unlike the synthetic-spike protocol (exact but artificial labels), this scores a detector
+    against the ``KNOWN_EVENTS`` — actual, documented Central-European weather events — treating
+    an event as *caught* if the detector flags any point inside its window (the natural
+    point-adjusted criterion for coarse, week-scale event windows). Returns
+    ``{caught, total, recall, missed}``. This is an honest, non-synthetic complement to the
+    injected-spike numbers.
+    """
+    events = events or KNOWN_EVENTS
+    flags = flags.astype(bool)
+    missed = [name for name, start, end in events if not flags.loc[start:end].any()]
+    caught = len(events) - len(missed)
+    return {"caught": caught, "total": len(events),
+            "recall": caught / len(events) if events else 0.0, "missed": missed}
 
 
 def score(pred: pd.Series, truth: pd.Series) -> Scores:
@@ -120,15 +137,17 @@ def score_point_adjusted(pred: pd.Series, truth: pd.Series) -> Scores:
     return score(point_adjust(pred, truth), truth)
 
 
-def benchmark(clean: pd.Series, detector, seeds=range(10),
+def benchmark(clean: pd.Series, detector, seeds=None,
               n: int = 50, magnitude: float = 6.0) -> dict:
     """Repeatable evaluation: inject spikes with many random `seeds` and report
     mean±std of precision/recall/F1 (strict **and** point-adjusted).
 
     `detector` maps a noisy Series -> boolean anomaly flags. Averaging over seeds turns
     a single lucky run into a protocol with variance, which is what makes the numbers
-    defensible.
+    defensible. `seeds` defaults to ``range(10)``.
     """
+    if seeds is None:
+        seeds = range(10)
     rows = []
     for s in seeds:
         noisy, labels = inject_spikes(clean, n=n, magnitude=magnitude, seed=int(s))
@@ -137,7 +156,11 @@ def benchmark(clean: pd.Series, detector, seeds=range(10),
         rows.append((st.precision, st.recall, st.f1, pa.precision, pa.recall, pa.f1))
     arr = np.array(rows)
     keys = ["precision", "recall", "f1", "pa_precision", "pa_recall", "pa_f1"]
-    return {k: {"mean": float(arr[:, i].mean()), "std": float(arr[:, i].std())}
+    return {k: {"mean": float(arr[:, i].mean()), "std": float(arr[:, i].std()),
+                # percentile CI across seeds — a defensible uncertainty on expected performance,
+                # not just a spread; honest reporting for a necessarily small labelled set.
+                "ci_low": float(np.percentile(arr[:, i], 2.5)),
+                "ci_high": float(np.percentile(arr[:, i], 97.5))}
             for i, k in enumerate(keys)}
 
 
@@ -180,6 +203,7 @@ def bootstrap_ci(pred: pd.Series, truth: pd.Series, metric: str = "recall",
         "lower": float(np.quantile(boot, alpha / 2)),
         "upper": float(np.quantile(boot, 1 - alpha / 2)),
         "n_boot": n_boot,
+        "n": int(n),   # labelled sample size — the driver of the interval width
     }
 
 

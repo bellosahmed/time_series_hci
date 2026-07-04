@@ -186,7 +186,8 @@ Flask for the web UI; an optional local Ollama model for phrasing. Dependencies 
 ### 4.4 Testing
 **87 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
 routing (incl. circular wind-direction handling and the LLM trust-gate), the Flask/CLI app layer,
-synthetic evaluation with confidence intervals, and the deep / ARIMA detectors. An independent
+the client-side chart/legend JavaScript (run in Node), synthetic evaluation with confidence
+intervals, and the deep / ARIMA detectors. An independent
 harness (`verify_results.py`) additionally recomputes results a different way and passes **21/21**
 checks (plus one advisory LLM-faithfulness vote); `reproduce.sh` regenerates everything in one command.
 
@@ -229,6 +230,13 @@ genuine background anomalies are flagged but count as false positives against sy
 | LSTM Autoencoder | 0.93 | 1.00 | 0.96 |
 | LSTM Forecaster | 0.93 | 1.00 | 0.96 |
 
+**Real-event recall (non-synthetic).** As an honest complement to the synthetic-spike numbers, each
+detector is also scored against the **five documented Central-European events** (2009 cold snap, 2010
+July heat, 2012 February cold wave, 2013 August heat, 2015 heatwave): an event counts as caught if the
+detector flags any point inside its window. The z-score/STL-residual detector catches **4 of 5** (it
+misses the 2015 heatwave — STL absorbs the sustained warmth, so the residual does not spike), a result
+verified in `verify_results.py`. This measures detection on *real* anomalies rather than injected ones.
+
 Flagged residual anomalies have a mean |residual| of **8.09 °C vs 1.00 °C** overall — i.e. they are
 genuinely extreme. Methods overlap partially because each sees something different: z-score and
 ARIMA react to large residual/forecast errors, Isolation Forest to unusual multi-sensor
@@ -256,9 +264,13 @@ other answer, it needs no computation and cannot be fabricated.
 of recent turns, so elliptical follow-ups resolve in context: after *"show the anomalies in 2013"*, the
 question *"what about 2014?"* is rewritten to a standalone question and answered for 2014, and *"what is
 the red dot?"* is answered as a legend question. Crucially, the model only rewrites the *language*; the
-deterministic query engine still computes every number, preserving the trust guarantee. Without the
-model the interface remains single-shot (each question answered independently) — the documented
-no-model limitation.
+deterministic query engine still computes every number, preserving the trust guarantee. Two guards
+contain the risk of a bad rewrite: the rewriter is invoked **only for elliptical follow-ups** (a
+question that already parses to an intent plus a sensor or period is answered directly, unchanged),
+and a rewrite is **accepted only if the deterministic parser can route it** — a garbled rewrite is
+rejected and the original question kept. The rewrite that is used is also shown to the user
+("understood as…"). Without the model the interface remains single-shot (each question answered
+independently) — the documented no-model limitation.
 
 ### 5.6 Offline operation and GPU
 The full pipeline runs offline using only local libraries. Deep-model training is verified on both
@@ -269,7 +281,12 @@ Point estimates alone are not defensible on a small labelled set, so detector qu
 with uncertainty. On the labelled synthetic-spike protocol, the z-score/STL-residual detector achieves
 **recall 0.78 (95 % bootstrap CI 0.64–0.90)** and **precision 0.89 (0.76–0.98)** (2 000 resamples,
 seeded). A paired **McNemar test** comparing Isolation Forest and the z-score detector on the same
-points rejects the null of equal error patterns (**p ≈ 1×10⁻¹⁹**, 64 discordant points). This
+points rejects the null of equal error patterns (**p ≈ 1×10⁻¹⁹**, 64 discordant points). Averaged
+over **8 random seeds**, the detector's performance is recall **0.87 (95 % CI 0.73–0.97)**, precision
+**0.92 (0.83–1.00)**, F1 **0.90 (0.80–0.99)** — a seed-robust estimate with an explicit interval.
+Every interval also carries its labelled sample size `n`, so its width is read in context; the
+intervals are deliberately wide because the labelled set is necessarily small, and are framed as
+**indicative** rather than confirmatory. This McNemar
 difference must be read with the class imbalance in mind (§5.3): per-point accuracy is dominated by
 the ~99 % normal class, and Isolation Forest's fixed contamination prior over-flags this slice, so the
 test confirms the two detectors make *significantly different* errors rather than crowning a winner —
@@ -281,15 +298,22 @@ Wind direction `wd (deg)` is a compass bearing that wraps at 360°, so linear st
 it. Previously the interface answered *"maximum wind direction"* with **359.8°** — a meaningless linear
 extremum that ignores the wrap. The interface now routes circular sensors through circular statistics
 and instead reports the **prevailing (circular-mean) direction 196.6° (S), circular spread 71.3°**, and
-uses an unsigned circular–linear coefficient for correlation. This closes a genuine hole in the
-"exact numbers" guarantee: the truth layer must be correct for *every* sensor, not only the linear ones.
+uses an unsigned circular–linear coefficient for correlation. The handling is complete across the
+interface: **trend** and **forecast** on a bearing are declined with an explanation (a linear slope is
+dominated by the 0°/360° wrap; ARIMA cannot model a wrapping series), and a directional **threshold**
+count is still exact but carries a wrap caveat. This closes a genuine hole in the "exact numbers"
+guarantee: the truth layer must be correct — or honestly decline — for *every* sensor, not only the
+linear ones.
 
 ### 5.9 LLM faithfulness (the trust guarantee, measured)
 The central claim — the LLM explains but never computes — is verified rather than assumed. Every LLM
-answer is passed through a faithfulness check that compares the decimal figures in the explanation
-against the computed facts (rounding tolerated); if the model introduces a number that matches no
-computed value, the interface **discards the phrasing and falls back to the exact template**, so a
-fabricated figure cannot reach the user. Across the verification questions, run as a **majority-of-3
+answer is passed through a faithfulness check that compares the figures in the explanation against the
+computed facts (rounding tolerated); if the model introduces a number that matches no computed value,
+the interface **discards the phrasing and falls back to the exact template**, so a fabricated figure
+cannot reach the user. The check enforces both decimals *and* larger integers — so a hallucinated
+**count** ("87 windows") or a **wrong year** is caught — while tolerating legitimate reformatting
+(clock times such as `16:00`→`4pm` are stripped, and single-digit counts ≤ 12 are left tolerant, a
+documented residual gap). Across the verification questions, run as a **majority-of-3
 vote** (the 3-billion-parameter model is stochastic), the LLM introduced **0 invented numbers**. This
 turns "trust us, it only explains" into a measured, reproducible result.
 
@@ -325,21 +349,43 @@ method for trustworthy natural-language analytics.
   set of *documented real-event* windows (2010 July heat, 2012 February cold wave, etc.) used as
   approximate ground truth — not a gold-standard labelled benchmark.
 - **Threshold/contamination** parameters are chosen priors (justified by sensitivity sweeps), not learned.
-- **Interface routing** is keyword-based with an optional LLM planner; it handles a defined set of
-  intents, not fully arbitrary phrasing.
-- **Small explanation model.** The local LLM is a 3B model; it is stochastic and can mis-phrase
-  qualitative context. This is contained (not eliminated) by the faithfulness gate and prompt
-  constraints, which guarantee only the *numbers*, not the surrounding prose.
+- **Interface routing** is keyword-based with an optional LLM planner. Coverage is measured by a
+  paraphrase test suite (23 realistic rephrasings across all intents route correctly, including
+  plurals and comparative forms), and truly novel phrasing falls through to the LLM planner — but it
+  still handles a *defined* set of intents, not fully arbitrary language.
+- **Correlation, not causation.** The system quantifies association, not cause. Causal questions
+  ("does X cause Y?", "what causes…?") are answered honestly: the correlation is given (when a sensor
+  pair is identified) with an explicit *correlation-is-not-causation* caveat, or, for an unpaired
+  question, with a statement that causal inference is out of scope. Genuine causal discovery is future
+  work. The question vocabulary is likewise a defined set (max/min/mean/spread/trend/compare/
+  correlation/threshold/anomaly/forecast/weather/summary + legend), not open-ended analytics.
+- **Small explanation model.** The local LLM is a 3B model; its qualitative prose is weaker than a
+  large model's. The impact is bounded, not eliminated: the faithfulness gate and prompt constraints
+  guarantee the *numbers* (not the surrounding prose), and generation is now **reproducible** — a fixed
+  seed and low temperature make the same facts yield the same phrasing across runs (verified: two
+  seeded runs produce identical output), so the model's stochasticity no longer affects repeatability.
+  A larger local model can be substituted via the existing `model` parameter with no code change.
 
 ### 7.2 Threats to validity
 - **Construct validity.** Synthetic spikes may not resemble real anomalies; we mitigate by *also*
   evaluating on documented real events and by reporting the honest precision caveat (§5.3).
 - **Statistical-conclusion validity.** Labelled points are few, so we report **bootstrap CIs and a
   paired McNemar test** rather than bare point estimates (§5.7); results are framed as indicative.
-- **External validity.** A single primary domain risks over-fitting conclusions to weather; we address
-  this by demonstrating the same architecture on an unrelated domain (EU trade, **Appendix B**).
-- **Reproducibility.** All randomness is seeded, dependencies are pinned (`requirements.txt`), and
-  `reproduce.sh` regenerates every counted result; the stochastic LLM check is advisory only.
+- **External validity.** A single primary domain risks over-fitting conclusions to weather. We address
+  this at two levels. First, the **computational core is dataset-agnostic**: a generalisation test suite
+  runs the *actual* v1 modules (query engine, anomaly detector, interface) on a non-weather domain
+  (simulated server metrics — `cpu_load`, `mem_gb`) and confirms exact statistics and anomaly detection
+  still hold. The dataset-specific parts are the ingestion/preprocessing adapter and the interface's
+  sensor vocabulary (aliases), which are swapped per domain. Second, the **whole architecture** is shown
+  transferred to a real, unrelated domain — EU trade (**Appendix B**) — where a sibling implementation
+  reproduces the same guarantees. Together these separate "the method generalises" (evidenced) from
+  "this exact vocabulary generalises" (it does not, by design).
+- **Reproducibility & deployment.** All randomness is seeded, dependencies are pinned
+  (`requirements.txt`), and `reproduce.sh` regenerates every counted result; the stochastic LLM check
+  is advisory only. The dataset is gitignored (licensing/size), so a missing file now raises a clear,
+  actionable error pointing to where to obtain it. The web UI uses Flask's built-in server, adequate
+  for the project's local single-user scope; `create_app()` is factored so it can be served behind a
+  production WSGI server (e.g. waitress/gunicorn) unchanged.
 - **No human evaluation yet.** The interface's usability and trust benefits are argued from design and
   exact-answer correctness, **not yet measured with users**. A within-subjects study (spreadsheet vs
   template vs AI mode, 8 ground-truth-graded tasks, SUS/trust) is designed and ready to run

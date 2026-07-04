@@ -27,7 +27,7 @@ V1 = HERE.parent.parent                             # .../v1
 sys.path.insert(0, str(V1))
 DATA = V1.parent / "data" / "jena_climate_2009_2016.csv"
 
-from src import preprocess, interface, llm          # noqa: E402
+from src import interface, llm, preprocess  # noqa: E402
 
 SUGGESTIONS = [
     "What was the hottest temperature?",
@@ -125,6 +125,9 @@ def main() -> None:
                 port = p
                 break
     print(f"\n  Open  http://localhost:{port}\n")
+    # This is Flask's built-in server — fine for local single-user use (the project's scope).
+    # For a real deployment, serve `create_app()` behind a production WSGI server, e.g.:
+    #   waitress-serve --port 3030 'apps.web.app:create_app'   (or gunicorn)
     app.run(host="127.0.0.1", port=port, debug=False)
 
 
