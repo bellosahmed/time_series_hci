@@ -100,6 +100,53 @@ def resolve_sensors(question: str, columns) -> list[str]:
     return found
 
 
+# Fixed explanations of the chart markers — facts the system knows, so answering a
+# "what is the red dot?" question needs no computation and cannot be hallucinated. The
+# LLM (when on) only rephrases these; the meanings themselves are code.
+LEGEND_EXPLANATIONS = {
+    "anomaly": "A solid red dot marks an anomaly — a reading flagged as unusual, where its "
+               "residual z-score passed the detection threshold.",
+    "borderline": "A dashed amber ring marks a borderline point — close to the anomaly threshold "
+                  "but not flagged. It is shown to convey uncertainty: a near-miss, not a confirmed anomaly.",
+    "max": "A solid orange dot marks the maximum — the point in view where the highest value occurred.",
+    "min": "A solid blue dot marks the minimum — the point in view where the lowest value occurred.",
+    "forecast": "The shaded band is the 80% forecast range, and the line inside it is the forecast mean.",
+    "all": "Chart legend: the blue line is the observed data; a solid red dot is an anomaly (flagged "
+           "unusual); a dashed amber ring is a borderline near-miss (close to the threshold, not flagged); "
+           "a solid orange dot is the maximum and a solid blue dot the minimum; a shaded band is the 80% "
+           "forecast range.",
+}
+
+_LEGEND_MARKER_WORDS = ("dot", "circle", "ring", "marker", "legend", "symbol", "colour", "color",
+                        "band", "shaded", "shade")
+_LEGEND_MEANING_WORDS = ("what", "mean", "meaning", "explain", "represent", "stand for", "which", "why")
+
+
+def resolve_legend_query(question: str) -> str | None:
+    """Detect a question about the chart legend/markers -> a marker key, else None.
+
+    Fires only when the text both names a marker cue (dot/circle/ring/legend/band/colour…) *and*
+    asks for its meaning (what/mean/explain…), so ordinary data questions ("what was the max?")
+    are not captured. Returns one of the ``LEGEND_EXPLANATIONS`` keys.
+    """
+    q = question.lower()
+    is_marker = any(w in q for w in _LEGEND_MARKER_WORDS)
+    is_meaning = ("legend" in q) or any(w in q for w in _LEGEND_MEANING_WORDS)
+    if not (is_marker and is_meaning):
+        return None
+    if any(w in q for w in ("dashed", "dotted", "amber", "hollow", "ring", "borderline")):
+        return "borderline"
+    if "red" in q:
+        return "anomaly"
+    if "orange" in q:
+        return "max"
+    if "blue" in q:
+        return "min"
+    if any(w in q for w in ("band", "shaded", "shade", "forecast range", "pink")):
+        return "forecast"
+    return "all"
+
+
 def detect_intent(question: str) -> str | None:
     """Classify a question into one intent via whole-word keyword matching.
 

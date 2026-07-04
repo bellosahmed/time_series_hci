@@ -13,6 +13,18 @@ def test_is_available_returns_bool():
     assert isinstance(llm.is_available(), bool)
 
 
+def test_rewrite_followup_none_without_history(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    assert llm.rewrite_followup("what about 2014?", [], model="m") is None
+
+
+def test_rewrite_followup_uses_generate(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "hottest in 2014?\n")
+    hist = [{"question": "hottest in 2013?", "computed": "max T (degC) was 34.0 on ..."}]
+    assert llm.rewrite_followup("what about 2014?", hist, model="m") == "hottest in 2014?"
+
+
 def test_explain_raises_without_server():
     if llm.is_available():
         pytest.skip("Ollama is running; skip the unavailable-path test.")

@@ -28,11 +28,13 @@ from . import analysis, anomaly, forecasting, llm, query_engine as qe, rag_syste
 
 from .interface_parsing import (  # noqa: F401  re-exported for callers and tests
     INTENTS,
+    LEGEND_EXPLANATIONS,
     SENSOR_ALIASES,
     _coerce_date,
     detect_intent,
     resolve_compare,
     resolve_day,
+    resolve_legend_query,
     resolve_period,
     resolve_sensors,
     resolve_threshold,
@@ -51,6 +53,7 @@ class Answer:
     inferred: str | None = None
     chart: object = None
     borderline: list = field(default_factory=list)  # near-threshold "almost anomalies"
+    resolved: str | None = None  # standalone rewrite of a follow-up (transparency), if any
 
 
 class Interface:
@@ -61,6 +64,7 @@ class Interface:
         self.retriever = rag_system.Retriever()
         self.use_llm = use_llm
         self.model = model
+        self.history: list[dict] = []  # recent turns, for follow-up resolution
 
     def _context_for(self, sensor: str) -> str | None:
         snip = self.retriever.for_sensor(sensor)
@@ -167,13 +171,36 @@ class Interface:
                            inferred=f"{extreme} was {direction} on this measure.")
 
     def ask(self, question: str) -> Answer:
-        """Answer a question and attach a small chart payload for the web UI."""
-        ans = self._answer(question)
+        """Answer a question and attach a small chart payload for the web UI.
+
+        Supports conversational follow-ups: with the LLM on and prior turns in ``self.history``,
+        an elliptical follow-up ("what about 2014?") is rewritten into a standalone question
+        before routing. The rewrite only resolves language/context — every number is still
+        computed by the deterministic query engine. Legend questions and the LLM-off case are
+        answered directly (single-shot), the latter being the documented no-model limitation.
+        """
+        resolved = question
+        if (resolve_legend_query(question) is None and self.use_llm
+                and self.history and llm.is_available()):
+            try:
+                rw = llm.rewrite_followup(question, self.history, model=self.model)
+                if rw and rw.strip() and rw.strip().lower() != question.strip().lower():
+                    resolved = rw.strip()
+            except Exception as exc:
+                logger.warning("follow-up rewrite failed (%s); using the question as-is.", exc)
+
+        ans = self._answer(resolved)
+        ans.question = question                 # keep the user's own wording for display
+        if resolved != question:
+            ans.resolved = resolved             # transparency: what we understood it as
         try:
             ans.chart = self._chart_for(ans)
         except Exception as exc:
             logger.warning("chart build failed for %r (%s).", question, exc)
             ans.chart = None
+
+        self.history.append({"question": question, "resolved": resolved, "computed": ans.computed})
+        self.history = self.history[-6:]        # keep a short rolling window
         return ans
 
     def _scoped(self, question: str, sensor: str):
@@ -233,6 +260,13 @@ class Interface:
                              "upper": [round(float(v), 2) for v in fc["upper"]]}}
 
     def _answer(self, question: str) -> Answer:
+        # Legend/marker questions ("what is the red dot?") are explained from a fixed
+        # knowledge base — the meaning is a known fact, so no computation is involved.
+        marker = resolve_legend_query(question)
+        if marker is not None:
+            return self._reply(question, "legend", marker, [],
+                               computed=LEGEND_EXPLANATIONS[marker])
+
         intent, sensors, start, end, label, thr, day = self._understand(question)
 
         # Did the user ask about a sensor this dataset doesn't have?

@@ -121,6 +121,7 @@ const qInput = document.getElementById('q');
 const sendBtn = document.getElementById('send');
 const useLlm = document.getElementById('useLlm');
 const modelSel = document.getElementById('model');
+let convo = [];   // recent {question, computed} turns, sent so follow-ups resolve in context
 
 function esc(s){ return (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
@@ -205,6 +206,8 @@ function addBot(data){
     // AI on: the prose is the answer, and we list the exact figures below it.
     // AI off: the exact figure IS the answer, so we don't repeat it below.
     const answer = llmOn ? data.text : (data.computed || data.text);
+    // Transparency: if a follow-up was rewritten to a standalone question, show what we understood.
+    const resolvedNote = data.resolved ? `<div class="tag">↳ understood as: “${esc(data.resolved)}”</div>` : '';
     let details = '';
     if (llmOn && data.computed) details += fact('num','📊','The exact figures', data.computed);
     if (data.context)  details += fact('bg','ℹ️','Background', data.context);
@@ -218,10 +221,14 @@ function addBot(data){
     }
     m.innerHTML = `<div class="bubble">`+
                   `<div class="answer">${esc(answer)}</div>`+
+                  resolvedNote+
                   (details?`<div class="details">${details}</div>`:'')+
                   chartHtml+
                   `<div class="tag"><span class="pill">${how}</span></div>`+
                   `</div>`;
+    // Remember this turn so the next follow-up ("what about 2014?") has context.
+    convo.push({question:data.question, computed:data.computed||''});
+    if(convo.length>6) convo = convo.slice(-6);
   }
   chat.appendChild(m); chat.scrollTop = chat.scrollHeight;
 }
@@ -234,7 +241,7 @@ async function ask(text){
   chat.scrollTop = chat.scrollHeight;
   try{
     const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({question:text, use_llm:useLlm.checked, model:modelSel.value})});
+      body: JSON.stringify({question:text, use_llm:useLlm.checked, model:modelSel.value, history:convo})});
     const data = await r.json();
     thinking.remove(); addBot(data);
   }catch(e){ thinking.remove(); addBot({error:String(e)}); }

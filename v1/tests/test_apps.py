@@ -61,6 +61,15 @@ def test_models_route_shape():
     assert isinstance(d["models"], list)
 
 
+def test_ask_route_accepts_history_and_returns_resolved_key():
+    r = _client().post("/api/ask", json={
+        "question": "max temperature",
+        "history": [{"question": "min temperature", "computed": "min ..."}],
+    })
+    assert r.status_code == 200
+    assert "resolved" in r.get_json()   # follow-up transparency field is exposed
+
+
 def test_index_page_serves_accessible_markup():
     r = _client().get("/")
     assert r.status_code == 200

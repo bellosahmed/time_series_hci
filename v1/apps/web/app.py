@@ -82,10 +82,13 @@ def create_app(df: pd.DataFrame | None = None) -> Flask:
         question = (body.get("question") or "").strip()
         use_llm = bool(body.get("use_llm"))
         model = body.get("model") or "llama3.2:3b"
+        history = body.get("history") or []   # recent turns from the client (server stays stateless)
         if not question:
             return jsonify({"error": "empty question"}), 400
         try:
             iface = interface.Interface(df, use_llm=use_llm, model=model)
+            # Seed conversation memory so follow-ups ("what about 2014?") resolve against prior turns.
+            iface.history = [h for h in history if isinstance(h, dict)][-6:]
             ans = iface.ask(question)
             return jsonify({
                 "question": ans.question,
@@ -96,6 +99,7 @@ def create_app(df: pd.DataFrame | None = None) -> Flask:
                 "context": ans.context,
                 "inferred": ans.inferred,
                 "chart": ans.chart,
+                "resolved": ans.resolved,
                 "used_llm": use_llm and llm.is_available(),
             })
         except Exception as exc:  # keep the UI alive on any error

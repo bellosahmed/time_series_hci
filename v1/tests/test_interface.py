@@ -17,6 +17,74 @@ def df():
     )
 
 
+def test_followup_is_rewritten_and_routed(df, monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "phrased")
+    monkeypatch.setattr(llm, "rewrite_followup", lambda q, h, **k: "what was the max temperature?")
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = [{"question": "average temperature", "computed": "mean ..."}]
+    ans = iface.ask("and the peak?")
+    assert ans.intent == "max"                       # routed via the rewritten question
+    assert ans.value.value == df["T (degC)"].max()   # exact number still from the query engine
+    assert ans.question == "and the peak?"           # original wording preserved for display
+    assert ans.resolved == "what was the max temperature?"
+
+
+def test_history_accumulates_across_turns(df):
+    iface = interface.Interface(df)
+    iface.ask("max temperature")
+    iface.ask("min temperature")
+    assert len(iface.history) == 2
+    assert iface.history[-1]["question"] == "min temperature"
+
+
+def test_no_rewrite_when_llm_off(df, monkeypatch):
+    from src import llm
+    calls = {"n": 0}
+    monkeypatch.setattr(llm, "rewrite_followup", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), "x")[1])
+    iface = interface.Interface(df, use_llm=False)
+    iface.history = [{"question": "max temperature", "computed": "..."}]
+    iface.ask("what about the min?")
+    assert calls["n"] == 0        # single-shot when the model is off (the accepted limitation)
+
+
+def test_legend_question_skips_rewrite(df, monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "phrased")
+
+    def boom(*a, **k):
+        raise AssertionError("a legend question must not be rewritten")
+
+    monkeypatch.setattr(llm, "rewrite_followup", boom)
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = [{"question": "show anomalies", "computed": "..."}]
+    assert iface.ask("what is the red dot?").intent == "legend"
+
+
+def test_resolve_legend_query_maps_markers():
+    r = interface.resolve_legend_query
+    assert r("what is the red dot?") == "anomaly"
+    assert r("what does the dotted circle mean?") == "borderline"
+    assert r("what's the dashed amber ring?") == "borderline"
+    assert r("what is the orange dot?") == "max"
+    assert r("what is the blue dot?") == "min"
+    assert r("what does the shaded band mean?") == "forecast"
+    assert r("explain the legend") == "all"
+    # not a legend question -> None (normal routing)
+    assert r("what was the max temperature?") is None
+    assert r("hottest in 2013") is None
+
+
+def test_interface_answers_legend_question_not_fallback(df):
+    ans = interface.Interface(df).ask("what is the red dot?")
+    assert ans.intent == "legend"
+    assert "anomaly" in ans.text.lower()
+    assert "couldn't map" not in ans.text  # not the default fallback
+
+
 def test_detect_intent():
     assert interface.detect_intent("what was the highest temperature?") == "max"
     assert interface.detect_intent("lowest reading") == "min"

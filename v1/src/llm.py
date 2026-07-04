@@ -118,6 +118,37 @@ def classify(question: str, intents: list[str], sensors: list[str],
     return {"intent": intent, "sensors": valid_sensors}
 
 
+REWRITE_SYSTEM = (
+    "You rewrite a user's short follow-up message into ONE self-contained question about a weather "
+    "time-series dataset, using the recent conversation only for context. You DO NOT answer it, and "
+    "you must NEVER output any number, statistic, temperature, count, or measurement. If the message "
+    "is already self-contained, return it unchanged. Reply with ONLY the rewritten question."
+)
+
+
+def rewrite_followup(question: str, history: list[dict], model: str = DEFAULT_MODEL) -> str | None:
+    """Rewrite an elliptical follow-up into a standalone question, using recent turns.
+
+    ``history`` is a list of recent ``{"question", "computed"}`` turns (oldest→newest). The model
+    only resolves *language and context* — e.g. after "hottest in 2013?", the follow-up
+    "what about 2014?" becomes "hottest in 2014?" — so the deterministic query engine can then
+    compute the exact answer. The model never produces a number itself. Returns the rewritten
+    question, or None if Ollama is unavailable, there is no history, or the reply is empty.
+    """
+    if not is_available() or not history:
+        return None
+    convo = "\n".join(f"User: {h.get('question', '')}\nAnswer: {h.get('computed', '')}"
+                      for h in history[-3:])
+    prompt = (f"Recent conversation:\n{convo}\n\nUser's new message: {question}\n\n"
+              "Rewrite it as one standalone question.")
+    try:
+        out = generate(prompt, model=model, system=REWRITE_SYSTEM, timeout=30.0)
+    except (urllib.error.URLError, OSError):
+        return None
+    out = (out or "").strip().strip('"').strip()
+    return out.splitlines()[0].strip() if out else None
+
+
 PLAN_SYSTEM = (
     "You translate a user's question about a weather time-series into a STRUCTURED query plan. "
     "You DO NOT answer the question and you must NEVER output any data value, statistic, "
