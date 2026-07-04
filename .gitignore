@@ -22,6 +22,12 @@ models/
 *.faiss
 chroma/
 
+# Generated presentations / office docs (keep source .py, not the binary)
+*.pptx
+*.ppt
+*.docx
+*.xlsx
+
 # OS / editor
 .DS_Store
 .idea/

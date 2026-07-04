@@ -26,7 +26,7 @@ but **not the data** — v1 is temperature, v2 is trade.
 
 - **Dataset:** `code/data/eu_trade_monthly.csv` — 292 months × 54 columns (27 EU countries ×
   exports/imports), 2002–2026, € millions. Real anomalies: 2008 crisis, COVID-2020, 2022 energy.
-  Fetched via `code/v2/get_trade_data.py` (Eurostat API). Gitignored.
+  Fetched via `code/v2/tools/get_trade_data.py` (Eurostat API). Gitignored.
 - **Pipeline (`v2/src/`):** preprocess · analysis · anomaly · reasoning (multi-country shared-shock) ·
   forecasting (SARIMA + backtest) · query_engine (truth layer) · interface · llm · rag_system
   (BM25 + LSA + BERT + chunking) · clustering (countries) · deep_anomaly (autoencoder).
@@ -77,9 +77,9 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 - GPU: **NVIDIA GeForce RTX 5070 Laptop (Blackwell, sm_120, 8 GB)**, driver 595.71, CUDA 13.2.
 - Installed **torch 2.11.0+cu128** (CUDA 12.8 build, required for Blackwell sm_120):
   `pip install torch --index-url https://download.pytorch.org/whl/cu128`.
-- All deep models are **device-aware** via `deep_anomaly.get_device()` (auto: cuda → cpu).
+- All deep models are **device-aware** via `deep.get_device()` (auto: cuda → cpu).
   Pass `device="cpu"` / `device="cuda"` to override.
-- **GPU memory:** inference is **batched** (`_squared_errors`, `deep_lstm._predict_batched`) so the
+- **GPU memory:** inference is **batched** (`deep._squared_errors`, `deep._predict_batched`) so the
   full ~70k-window series is never resident at once; `_free_cuda()` returns memory after each model.
   This avoids CUDA OOM in notebook 04 even on the 8 GB card. If a stale kernel still hogs VRAM,
   **Restart Kernel** to free it.
@@ -96,8 +96,7 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 | `anomaly.py` | z-score (global + rolling), Isolation Forest, anomaly windows; `evaluation.py` adds **point-adjusted** metrics |
 | `clustering.py` | daily features + K-means day-types |
 | `query_engine.py` | **exact** max/min/mean/std/correlation/missing — the truth layer |
-| `deep_anomaly.py` | 1D CNN autoencoder (per-point reconstruction error) |
-| `deep_lstm.py` | LSTM autoencoder + LSTM forecaster |
+| `deep.py` | deep detectors in one module: 1D CNN autoencoder + LSTM autoencoder + LSTM forecaster (per-point reconstruction / forecast error) |
 | `forecasting.py` | ARIMA forecast-error anomalies (deseasonalised) + `forecast()` (14-day ahead, 80% band) |
 | `reasoning.py` | multi-sensor anomaly explanation (per-sensor z-scores, co-movement) — wired into the interface's anomaly answers (a cross-sensor explanation feature, not the headline) |
 | `rag_system.py` | local TF-IDF retriever over sensor KB + trust-aware explainer (LLM-ready) |
@@ -124,7 +123,7 @@ Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/report/MODELS.md`**.
 ## Tests (`v1/tests/`) — 48 passing, 1 skipped
 
 `test_query_engine` · `test_interface` (interface + evaluation) · `test_reasoning` ·
-`test_deep_anomaly` · `test_deep_lstm` · `test_forecasting` · `test_llm`.
+`test_deep` · `test_forecasting` · `test_llm`.
 
 ## v1 layout (reorganised)
 

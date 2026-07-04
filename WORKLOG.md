@@ -5,6 +5,53 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-02
+
+### v1 tidy-up: dedupe deep modules + robust test bootstrap
+- **Scope:** best-practices pass on **v1 only** (arrange / combine / document) — no behaviour change.
+- **Combine (dedupe deep detectors):** the CNN- and LSTM-autoencoder scorers each carried their own
+  copy of (a) the z-standardisation step and (b) the overlapping-window error-averaging loop. Both
+  are now single shared helpers in `deep_anomaly.py` — `standardise()` and
+  `average_overlapping_windows()` — imported by `deep_lstm.py`. Removed `deep_lstm._standardise` and
+  two duplicated averaging loops.
+- **Arrange:** added `v1/conftest.py` so the suite resolves `from src import ...` from any working
+  directory (previously only worked as `python -m pytest` run from inside `v1/`; a bare `pytest` or a
+  run from the repo root failed to import `src`).
+- **Verify:** **48 passed, 1 skipped**; `verify_results.py` **17/17**. Confirmed the same results
+  when running the suite from the repository root (the conftest fix).
+
+### v1 made newcomer-readable: merge deep modules + rewrite README
+- **Goal:** make v1 easy for a newcomer (and me) to understand — clear where to start, grouped,
+  documented — without changing behaviour.
+- **Combine:** merged `deep_anomaly.py` + `deep_lstm.py` into a single **`src/deep.py`** ("all deep
+  detectors in one place": CNN-AE, LSTM-AE, LSTM-forecaster). Public API unchanged. Merged the two
+  test files into `tests/test_deep.py`. Updated the notebook imports via aliasing
+  (`deep_anomaly as da` → `deep as da`, `deep_lstm as dl` → `deep as dl`) so every existing `da.*` /
+  `dl.*` call still resolves — no in-cell code changes and no re-run needed. src modules: 14 → 13.
+- **Document:** rewrote `v1/README.md` as a guided onboarding doc — plain "what it does", a numbered
+  **reading order** (README → walkthrough notebook → query_engine → interface → anomaly/reasoning), a
+  **layers diagram** grouping the 13 modules into Data → Detect → Truth → Explain → Interface, and
+  copy-paste run/test commands. Updated `CLAUDE.md` module table + test list to match `deep.py`.
+- **Verify:** **48 passed, 1 skipped**; `verify_results.py` **17/17** (unchanged).
+
+### v2 made newcomer-readable: declutter root + rewrite README
+- **Goal:** same treatment as v1 — arrange / clean / document — no behaviour change. (v2 has a single
+  deep module, so there was no deep-module merge to do here.)
+- **Arrange (declutter root):** moved the 16 developer scripts off the top level into **`v2/tools/`** —
+  14 `build_*_notebook.py` (notebook generators) + `get_trade_data.py` + `get_bilateral_demo.py`
+  (Eurostat fetchers). Root now holds only `verify_results.py` beside the real structure
+  (`src/ tests/ notebooks/ apps/ report/`). Fixed each script's output path to survive the move:
+  builders now write to `Path(__file__).parents[1]/"notebooks"`, fetchers to
+  `HERE.parent.parent/"data"`. Verified the builders resolve to `v2/notebooks/*.ipynb` via a
+  write-stubbed dry run (executed notebooks left untouched) and the fetchers to `code/data/`.
+- **Arrange:** added `v2/conftest.py` (same `src`-on-path fix as v1).
+- **Document:** rewrote `v2/README.md` in the same onboarding style — "what it does", a numbered
+  **reading order**, the **layers diagram** (Data → Detect → Truth → Explain → Interface) over the 12
+  `src/` modules, corrected run commands (`tools/get_trade_data.py`, web app) and the test count
+  (**79**). Updated `CLAUDE.md` + `GLOSSARY.md` references to `tools/get_trade_data.py`.
+- **Verify:** **79 passed**; `verify_results.py` **13/13**; identical when run from the repo root
+  (the conftest fix); executed notebooks unchanged.
+
 ## 2026-06-28
 
 ### v1 review, fixes, and notebook consolidation (9 → 6)
