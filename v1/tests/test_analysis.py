@@ -148,6 +148,52 @@ def test_compare_imputation_requires_datetime_index():
         preprocess.compare_imputation(s)
 
 
+# --- statistical rigor: bootstrap CIs + paired significance test ---
+
+def _labelled(n=300, every=10):
+    idx = pd.date_range("2024-01-01", periods=n, freq="h")
+    truth = pd.Series(False, index=idx)
+    truth.iloc[::every] = True
+    return idx, truth
+
+
+def test_bootstrap_ci_brackets_perfect_recall():
+    idx, truth = _labelled()
+    ci = evaluation.bootstrap_ci(truth.copy(), truth, metric="recall", n_boot=200, seed=0)
+    assert ci["point"] == 1.0
+    assert ci["lower"] <= ci["point"] <= ci["upper"]
+    assert 0.0 <= ci["lower"] <= ci["upper"] <= 1.0
+
+
+def test_bootstrap_ci_has_width_for_imperfect_detector():
+    idx, truth = _labelled(n=300, every=10)
+    pred = truth.copy()
+    for p in list(range(0, 300, 10))[::2]:   # drop half the positives -> recall ~0.5
+        pred.iloc[p] = False
+    ci = evaluation.bootstrap_ci(pred, truth, metric="recall", n_boot=500, seed=1)
+    assert 0.3 < ci["point"] < 0.7
+    assert ci["upper"] - ci["lower"] > 0.0
+    assert ci["lower"] <= ci["point"] <= ci["upper"]
+
+
+def test_mcnemar_flags_clear_difference():
+    idx, truth = _labelled(n=200, every=10)
+    good = truth.copy()                      # correct everywhere
+    bad = pd.Series(False, index=idx)        # flags nothing -> wrong on every positive
+    res = evaluation.mcnemar_test(good, bad, truth)
+    assert res["only_a_correct"] == int(truth.sum())
+    assert res["only_b_correct"] == 0
+    assert 0.0 <= res["p_value"] <= 1.0
+    assert res["p_value"] < 0.05
+
+
+def test_mcnemar_identical_detectors_not_significant():
+    idx, truth = _labelled(n=100, every=10)
+    res = evaluation.mcnemar_test(truth.copy(), truth.copy(), truth)
+    assert res["n_discordant"] == 0
+    assert res["p_value"] == 1.0
+
+
 # --- G4: additional detectors (LOF, One-Class SVM) + real labeled events ---
 
 def _features_with_outliers(n=500, seed=0):
