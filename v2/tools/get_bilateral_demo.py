@@ -26,7 +26,7 @@ PARTNERS = {  # code -> friendly name
 INDIC = {"MIO_EXP_VAL": "EXP", "MIO_IMP_VAL": "IMP"}
 
 HERE = Path(__file__).resolve().parent
-OUT = HERE.parent / "data" / "eu_trade_by_partner.csv"
+OUT = HERE.parent.parent / "data" / "eu_trade_by_partner.csv"
 
 
 def fetch(indic: str) -> pd.DataFrame:

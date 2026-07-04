@@ -418,7 +418,7 @@ something we *saw* here. That is exactly what makes the methodology defensible.
 # ----------------------------------------------------------------------------- write
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "01_eda.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "01_eda.ipynb"
 out.parent.mkdir(parents=True, exist_ok=True)
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

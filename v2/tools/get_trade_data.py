@@ -26,7 +26,7 @@ FIXED = "format=JSON&indic=ET-T&partner=WORLD&unit=MIO-EUR-NSA"
 AGGREGATES = {"EU", "EA"}
 
 HERE = Path(__file__).resolve().parent
-OUT = HERE.parent / "data" / "eu_trade_monthly.csv"
+OUT = HERE.parent.parent / "data" / "eu_trade_monthly.csv"
 
 
 def fetch_flow(flow: str) -> pd.DataFrame:

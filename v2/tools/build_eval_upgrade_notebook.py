@@ -114,6 +114,6 @@ crises with strong precision and recall, and the ensemble is the best single cho
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "14_evaluation_upgrade.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "14_evaluation_upgrade.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

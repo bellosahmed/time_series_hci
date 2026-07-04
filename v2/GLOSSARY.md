@@ -72,4 +72,4 @@ If we want any of these later, we'd pull them from a different Eurostat partner 
 - Units: **€ millions** (e.g. `DE_EXP = 50330` → Germany exported €50.33 **billion** that month).
 - Frequency: **monthly**, Jan 2002 → Apr 2026 (292 months).
 - Missing values: **none**.
-- Source: Eurostat `ei_eteu27_2020_m` via API → saved locally (see `get_trade_data.py`).
+- Source: Eurostat `ei_eteu27_2020_m` via API → saved locally (see `tools/get_trade_data.py`).

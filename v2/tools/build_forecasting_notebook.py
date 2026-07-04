@@ -147,6 +147,6 @@ md(r"""## Step 5 · Limitations (state these in the report)
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "06_forecasting.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "06_forecasting.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

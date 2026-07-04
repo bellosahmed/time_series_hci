@@ -119,6 +119,6 @@ comparison, and the final results tables; then the web app + write-up.""")
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "08_interface.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "08_interface.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

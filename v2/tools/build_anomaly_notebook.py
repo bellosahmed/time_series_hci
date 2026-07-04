@@ -182,6 +182,6 @@ explain it as a shared shock (the interpretation layer), then the query engine +
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "04_anomaly.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "04_anomaly.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

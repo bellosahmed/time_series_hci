@@ -135,6 +135,6 @@ and country-to-country correlations, built on these preprocessed signals.""")
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "02_preprocess.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "02_preprocess.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

@@ -134,6 +134,6 @@ computes, the LLM only explains (trust-aware answers).""")
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "07_query_engine.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "07_query_engine.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

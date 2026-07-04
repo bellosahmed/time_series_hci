@@ -142,6 +142,6 @@ This is the evidence base for the report.""")
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "10_evaluation.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "10_evaluation.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")

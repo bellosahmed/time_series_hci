@@ -101,6 +101,6 @@ and retrieval still returns *context only* — the query engine remains the sole
 
 nb["cells"] = cells
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-out = Path(__file__).resolve().parent / "notebooks" / "13_chunking_bert.ipynb"
+out = Path(__file__).resolve().parents[1] / "notebooks" / "13_chunking_bert.ipynb"
 nbf.write(nb, out)
 print("Wrote", out, "with", len(cells), "cells")
