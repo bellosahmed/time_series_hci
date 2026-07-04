@@ -58,6 +58,24 @@ code item. **87 tests pass (1 skipped).**
 - **"Verifiable NL Analytics" framing** (Abstract, §1.6, §6): reframed the contribution from a weather
   demo to a reusable pattern (truth layer + LLM explanation + automated faithfulness verification).
 
+### Chart legend + legend Q&A + conversational follow-ups (2026-07-04, third pass)
+User feedback while using the web page: the chart markers were unlabelled, and they wanted to *ask*
+about them and get real answers, plus dataset follow-ups "like a normal AI". **96 tests pass.**
+
+- **Adaptive chart legend** (web): labels each marker with a matching swatch (observed line, max, min,
+  anomaly, borderline ring, forecast band); shows only markers present; omitted on plain line charts.
+- **Legend / marker Q&A.** New deterministic handler: *"what is the red dot?"*, *"what does the dotted
+  circle mean?"*, *"explain the legend"* now return real explanations (from a fixed knowledge base) instead
+  of the default fallback. The meanings are facts in code; the LLM only rephrases them — no hallucination
+  risk. (`interface_parsing.resolve_legend_query` + `LEGEND_EXPLANATIONS`.)
+- **Conversational follow-ups (memory).** The interface keeps a short rolling history; with the LLM on, an
+  elliptical follow-up is rewritten into a standalone question (`llm.rewrite_followup`) which the query
+  engine then answers exactly — the model rewrites *language*, code still computes *numbers*. Verified live:
+  "show anomalies in 2013" → "what about 2014?" correctly answered 2014; "what is the red dot?" → legend.
+  Web sends recent turns per request (server stays stateless) and shows an "understood as…" line for
+  transparency; the CLI keeps history in-session. LLM-off stays single-shot (documented limitation).
+- **Report:** §5.5 gains "Reading the chart (legend)" and "Conversational follow-ups" notes.
+
 ---
 
 ## 2026-07-02
