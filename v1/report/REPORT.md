@@ -163,8 +163,8 @@ Data → Preprocess → Behaviour analysis → Anomaly detection → Clustering
 ```
 
 ### 4.2 Modules (`v1/src/`)
-`preprocess` · `analysis` · `anomaly` · `clustering` · `query_engine` · `deep_anomaly` (CNN-AE)
-· `deep_lstm` (LSTM-AE, LSTM forecaster) · `forecasting` (ARIMA) · `reasoning` · `rag_system`
+`preprocess` · `analysis` · `anomaly` · `clustering` · `query_engine` · `deep` (CNN-AE,
+LSTM-AE, LSTM forecaster) · `forecasting` (ARIMA) · `reasoning` · `rag_system`
 · `interface` · `main`.
 
 ### 4.3 Technology
