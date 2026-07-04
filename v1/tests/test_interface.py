@@ -66,6 +66,31 @@ def test_llm_error_falls_back_to_template_and_logs(df, monkeypatch, caplog):
     assert any("ollama exploded" in r.getMessage() for r in caplog.records)
 
 
+def test_llm_inventing_a_number_is_rejected_for_template(df, monkeypatch, caplog):
+    # If the LLM fabricates a figure absent from the computed facts, the interface must
+    # reject its phrasing and fall back to the trustworthy template — numbers stay exact.
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "The max was 999.99 degrees.")
+    iface = interface.Interface(df, use_llm=True)
+    with caplog.at_level("WARNING"):
+        ans = iface.ask("max temperature")
+    assert "999.99" not in ans.text        # fabricated number never reaches the user
+    assert "Computed" in ans.text          # template fallback used instead
+    assert any("invented" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_llm_faithful_phrasing_is_kept(df, monkeypatch):
+    # When the LLM only rewords the exact facts (no invented numbers), keep its phrasing.
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "Nicely worded, no figures here.")
+    ans = interface.Interface(df, use_llm=True).ask("max temperature")
+    assert ans.text == "Nicely worded, no figures here."
+
+
 def _wd_df(n=120, seed=0):
     idx = pd.date_range("2024-01-01", periods=n, freq="h")
     rng = np.random.default_rng(seed)

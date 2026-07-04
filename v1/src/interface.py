@@ -69,8 +69,16 @@ class Interface:
         """Produce the answer text: local LLM if enabled+available, else template."""
         if self.use_llm and llm.is_available():
             try:
-                return llm.explain(question, computed=computed, context=context,
-                                   inferred=inferred, model=self.model)
+                out = llm.explain(question, computed=computed, context=context,
+                                  inferred=inferred, model=self.model)
+                # Trust gate: if the model fabricated a figure absent from the computed
+                # facts, discard its phrasing and use the exact template instead.
+                facts = " ".join(filter(None, [computed, inferred]))
+                invented = llm.faithfulness(facts, out)["invented"]
+                if invented:
+                    logger.warning("LLM invented %s for %r; using template.", invented, question)
+                else:
+                    return out
             except Exception as exc:
                 # Log, don't swallow: a silently-dead LLM once went unnoticed for weeks.
                 logger.warning("LLM phrasing failed (%s); using template.", exc)

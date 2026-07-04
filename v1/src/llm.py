@@ -31,7 +31,10 @@ SYSTEM_PROMPT = (
     "You are given facts that were COMPUTED by deterministic code. "
     "Rephrase them into one or two clear, friendly sentences for a non-expert. "
     "RULES: never invent, change, round, or add any number; never contradict the "
-    "given facts; if a value is not provided, do not guess it. Explain only what is given."
+    "given facts; if a value is not provided, do not guess it. "
+    "Do NOT add any qualifier that is not in the facts — no seasons, months, weather "
+    "descriptions, compass directions, or cause/effect claims unless they appear verbatim "
+    "in the facts (e.g. never call a July date 'winter'). Explain only what is given."
 )
 
 
