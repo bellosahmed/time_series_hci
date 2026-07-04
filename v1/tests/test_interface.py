@@ -48,6 +48,27 @@ def test_ask_correlation(df):
     assert len(ans.sensors) == 2
 
 
+def _big_df(n=600, seed=0):
+    idx = pd.date_range("2024-01-01", periods=n, freq="h")
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({"T (degC)": rng.normal(10, 3, n)}, index=idx)
+
+
+def test_anomaly_answer_exposes_borderline_list():
+    ans = interface.Interface(_big_df()).ask("any unusual readings?")
+    assert ans.intent == "anomaly"
+    assert isinstance(ans.borderline, list)  # near-threshold windows are exposed
+
+
+def test_chart_renders_borderline_marks(df):
+    iface = interface.Interface(df)
+    ts = df.index[5]
+    ans = interface.Answer("q", "anomaly", "t", value=[], sensors=["T (degC)"])
+    ans.borderline = [{"start": ts, "end": ts, "n_points": 1}]
+    chart = iface._chart_for(ans)
+    assert "borderline" in {m["kind"] for m in chart["marks"]}
+
+
 def test_llm_error_falls_back_to_template_and_logs(df, monkeypatch, caplog):
     # A dead/erroring LLM must not fail silently (the G2 "silently dead LLM" class of bug):
     # the answer falls back to the template AND the failure is logged, not swallowed.

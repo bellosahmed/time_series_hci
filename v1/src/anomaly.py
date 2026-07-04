@@ -24,6 +24,21 @@ def zscore_anomalies(series: pd.Series, threshold: float = 3.0) -> pd.Series:
     return (z.abs() > threshold).rename("zscore_anomaly")
 
 
+def zscore_borderline(
+    series: pd.Series, threshold: float = 3.0, lower_factor: float = 0.75
+) -> pd.Series:
+    """Flag *near-threshold* points: ``lower_factor*threshold < |z| <= threshold``.
+
+    These are the "almost anomalies" — unusual enough to be worth showing, but below the
+    flagging cut-off. Surfacing them lets the UI communicate uncertainty (a soft band around
+    the hard yes/no line) instead of a binary verdict. Disjoint from ``zscore_anomalies`` by
+    construction. Returns a boolean Series aligned to the input.
+    """
+    s = series.astype(float)
+    z = ((s - s.mean()) / s.std(ddof=0)).abs()
+    return ((z > lower_factor * threshold) & (z <= threshold)).rename("zscore_borderline")
+
+
 def rolling_zscore_anomalies(
     series: pd.Series, window: int = 24, threshold: float = 3.0
 ) -> pd.Series:

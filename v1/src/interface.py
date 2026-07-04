@@ -50,6 +50,7 @@ class Answer:
     context: str | None = None
     inferred: str | None = None
     chart: object = None
+    borderline: list = field(default_factory=list)  # near-threshold "almost anomalies"
 
 
 class Interface:
@@ -210,6 +211,11 @@ class Interface:
                 if ts in s.index:
                     marks.append({"x": ts.isoformat(), "y": round(float(s.loc[ts]), 2),
                                   "kind": "anomaly"})
+            for w in ans.borderline[:80]:            # near-threshold "almost anomalies"
+                ts = w["start"]
+                if ts in s.index:
+                    marks.append({"x": ts.isoformat(), "y": round(float(s.loc[ts]), 2),
+                                  "kind": "borderline"})
         return {"label": sensor,
                 "x": [t.isoformat() for t in ds.index],
                 "y": [round(float(v), 2) for v in ds.values],
@@ -387,8 +393,11 @@ class Interface:
 
         if intent == "anomaly":
             decomp = analysis.decompose(data[sensor], period=24)
-            flags = anomaly.zscore_anomalies(decomp["resid"].dropna(), threshold=4.0)
+            resid = decomp["resid"].dropna()
+            flags = anomaly.zscore_anomalies(resid, threshold=4.0)
             windows = qe.get_anomaly_windows(flags)
+            # Borderline: near-threshold "almost anomalies" — surfaced as uncertainty, not counted.
+            border_windows = qe.get_anomaly_windows(anomaly.zscore_borderline(resid, threshold=4.0))
             # Multi-sensor reasoning: explain *why* the first
             # flagged moment looked unusual — what every sensor did at that timestamp.
             inferred = None
@@ -399,9 +408,14 @@ class Interface:
                     logger.warning("reasoning failed at %s (%s).", windows[0]["start"], exc)
                     inferred = None
             first = f"First anomaly on {qe.fmt_when(windows[0]['start'])}." if windows else None
-            return self._reply(question, intent, windows, [sensor],
-                               computed=f"{int(flags.sum())} anomalous {sensor} readings{where} in {len(windows)} windows.",
-                               context=first or ctx, inferred=inferred)
+            border_note = (f" ({len(border_windows)} more borderline near-misses)"
+                           if border_windows else "")
+            ans = self._reply(question, intent, windows, [sensor],
+                              computed=f"{int(flags.sum())} anomalous {sensor} readings{where} "
+                                       f"in {len(windows)} windows{border_note}.",
+                              context=first or ctx, inferred=inferred)
+            ans.borderline = border_windows
+            return ans
 
         if intent == "summary":
             s = qe.sensor_summary(data, sensor)

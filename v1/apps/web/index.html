@@ -156,6 +156,9 @@ function drawChart(c){
     svg+=`<line x1="${dv.toFixed(1)}" y1="${P-6}" x2="${dv.toFixed(1)}" y2="${H-P}" stroke="#cbd5e1" stroke-dasharray="3 3"/>`;
   }
   (c.marks||[]).forEach(mk=>{ const cx=sx(Date.parse(mk.x)), cy=sy(mk.y);
+    if(mk.kind==='borderline'){  // near-threshold: hollow amber ring = "uncertain, not flagged"
+      svg+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" fill="none" stroke="#d97706" stroke-width="1.4" stroke-dasharray="2 1.5"/>`;
+      return; }
     const col = mk.kind==='anomaly'?'#dc2626':(mk.kind==='max'?'#ea580c':'#0ea5e9');
     svg+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4" fill="${col}"/>`; });
   const fmt=d=>new Date(d).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'2-digit'});
@@ -182,7 +185,9 @@ function addBot(data){
     const how = llmOn ? 'explained by local AI' : 'exact answer from the data';
     let chartHtml = '';
     if (data.chart && data.chart.x && data.chart.x.length > 1){
-      const cap = '📈 ' + esc(data.chart.label) + (data.chart.forecast ? ' — history + 14-day forecast' : '');
+      const hasBorderline = (data.chart.marks||[]).some(m=>m.kind==='borderline');
+      const cap = '📈 ' + esc(data.chart.label) + (data.chart.forecast ? ' — history + 14-day forecast' : '')
+                  + (hasBorderline ? ' · dashed amber = borderline (near-threshold)' : '');
       chartHtml = `<div class="chartwrap"><div class="chartcap">${cap}</div>${drawChart(data.chart)}</div>`;
     }
     m.innerHTML = `<div class="bubble">`+
