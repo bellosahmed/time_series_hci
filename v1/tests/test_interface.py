@@ -48,6 +48,24 @@ def test_ask_correlation(df):
     assert len(ans.sensors) == 2
 
 
+def test_llm_error_falls_back_to_template_and_logs(df, monkeypatch, caplog):
+    # A dead/erroring LLM must not fail silently (the G2 "silently dead LLM" class of bug):
+    # the answer falls back to the template AND the failure is logged, not swallowed.
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)  # isolate the phrasing path
+
+    def boom(*a, **k):
+        raise RuntimeError("ollama exploded")
+
+    monkeypatch.setattr(llm, "explain", boom)
+    iface = interface.Interface(df, use_llm=True)
+    with caplog.at_level("WARNING"):
+        ans = iface.ask("max temperature")
+    assert "Computed" in ans.text  # template fallback still produced a correct answer
+    assert any("ollama exploded" in r.getMessage() for r in caplog.records)
+
+
 def _wd_df(n=120, seed=0):
     idx = pd.date_range("2024-01-01", periods=n, freq="h")
     rng = np.random.default_rng(seed)

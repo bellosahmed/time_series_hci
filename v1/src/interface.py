@@ -16,10 +16,13 @@ Flow:  question -> interpret (intent + sensor) -> query engine (truth)
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from . import analysis, anomaly, forecasting, llm, query_engine as qe, rag_system, reasoning
 
@@ -68,8 +71,9 @@ class Interface:
             try:
                 return llm.explain(question, computed=computed, context=context,
                                    inferred=inferred, model=self.model)
-            except Exception:
-                pass  # fall back to template on any LLM error
+            except Exception as exc:
+                # Log, don't swallow: a silently-dead LLM once went unnoticed for weeks.
+                logger.warning("LLM phrasing failed (%s); using template.", exc)
         return rag_system.explain(f"Q: {question}", computed=computed,
                                   context=context, inferred=inferred)
 
@@ -158,7 +162,8 @@ class Interface:
         ans = self._answer(question)
         try:
             ans.chart = self._chart_for(ans)
-        except Exception:
+        except Exception as exc:
+            logger.warning("chart build failed for %r (%s).", question, exc)
             ans.chart = None
         return ans
 
@@ -289,7 +294,8 @@ class Interface:
         if intent == "forecast":
             try:
                 fc = forecasting.forecast(data[sensor], steps=14)
-            except Exception:
+            except Exception as exc:
+                logger.warning("forecast failed for %s (%s).", sensor, exc)
                 return self._reply(question, intent, None, [sensor],
                                    computed=f"I couldn't fit a forecast for {sensor}{where}.",
                                    context=ctx)
@@ -381,7 +387,8 @@ class Interface:
             if windows:
                 try:
                     inferred = reasoning.describe_moment(data, windows[0]["start"])
-                except Exception:
+                except Exception as exc:
+                    logger.warning("reasoning failed at %s (%s).", windows[0]["start"], exc)
                     inferred = None
             first = f"First anomaly on {qe.fmt_when(windows[0]['start'])}." if windows else None
             return self._reply(question, intent, windows, [sensor],
