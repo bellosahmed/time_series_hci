@@ -48,6 +48,39 @@ def test_ask_correlation(df):
     assert len(ans.sensors) == 2
 
 
+def _wd_df(n=120, seed=0):
+    idx = pd.date_range("2024-01-01", periods=n, freq="h")
+    rng = np.random.default_rng(seed)
+    ang = (rng.normal(0, 8, n)) % 360   # tight cluster near 0/360
+    return pd.DataFrame(
+        {"T (degC)": rng.normal(10, 5, n), "wd (deg)": ang}, index=idx
+    )
+
+
+def test_wd_mean_is_circular_not_linear():
+    df = _wd_df()
+    ans = interface.Interface(df).ask("average wind direction")
+    assert ans.sensors == ["wd (deg)"]
+    m = ans.value["mean"]
+    # circular mean sits near 0/360, never the linear ~180 of a wrapped cluster
+    assert min(m, 360 - m) < 30
+    assert "prevailing" in ans.computed.lower() or "circular" in ans.computed.lower()
+
+
+def test_wd_max_does_not_report_linear_extreme():
+    df = _wd_df()
+    ans = interface.Interface(df).ask("maximum wind direction")
+    # a linear max on a wrapped angle (~359.x) is meaningless — must be redirected
+    assert "prevailing" in ans.computed.lower() or "circular" in ans.computed.lower()
+
+
+def test_wd_correlation_is_circular_linear_unsigned():
+    df = _wd_df()
+    ans = interface.Interface(df).ask("relationship between wind direction and temperature")
+    assert ans.intent == "correlation"
+    assert 0.0 <= ans.value <= 1.0
+
+
 def test_resolve_period():
     assert interface.resolve_period("hottest in 2013")[:2] == ("2013-01-01", "2013-12-31")
     assert interface.resolve_period("average in july 2015")[:2] == ("2015-07-01", "2015-07-31")

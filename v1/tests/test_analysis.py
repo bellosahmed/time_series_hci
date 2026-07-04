@@ -118,6 +118,30 @@ def test_analyze_all_sensors_wd_uses_circular():
     assert out.loc["wd (deg)", "top_corr_sensor"] == "T (degC)"
 
 
+def test_circular_stats_deg_wraps_around_zero():
+    # a cluster straddling 0/360 — a linear mean would be a meaningless ~180
+    s = pd.Series([350.0, 355.0, 0.0, 5.0, 10.0])
+    stats = analysis.circular_stats_deg(s)
+    assert 0.0 <= stats["mean"] < 360.0
+    assert min(stats["mean"], 360.0 - stats["mean"]) < 15.0   # near 0/360, not 180
+    assert stats["std"] >= 0.0
+
+
+def test_circular_stats_deg_ignores_nan():
+    s = pd.Series([10.0, np.nan, 20.0, 30.0])
+    stats = analysis.circular_stats_deg(s)
+    assert 0.0 <= stats["mean"] < 360.0
+    assert np.isfinite(stats["std"])
+
+
+def test_compass_point_cardinals():
+    assert analysis.compass_point(0.0) == "N"
+    assert analysis.compass_point(90.0) == "E"
+    assert analysis.compass_point(180.0) == "S"
+    assert analysis.compass_point(270.0) == "W"
+    assert analysis.compass_point(359.0) == "N"   # wraps back to North
+
+
 def test_compare_imputation_requires_datetime_index():
     s = pd.Series(np.linspace(0, 10, 50))     # RangeIndex, not DatetimeIndex
     with pytest.raises((TypeError, ValueError)):

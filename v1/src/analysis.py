@@ -81,6 +81,31 @@ def _circular_stats_rad(rad: np.ndarray) -> tuple[float, float]:
     return mean_ang, circ_std
 
 
+def circular_stats_deg(series_deg: pd.Series) -> dict:
+    """Circular mean and standard deviation (in degrees) for an angular series.
+
+    Wind direction wraps at 360°, so the ordinary mean/std are invalid — the linear mean
+    of a cluster straddling 0°/360° lands near 180° (the exact wrong way, and the linear
+    max/min just report ~359°/~0° regardless of the prevailing wind). This computes the
+    *circular* mean (the prevailing direction) and circular std, ignoring NaN. Returns
+    ``{"mean": deg in [0, 360), "std": deg}``.
+    """
+    rad = np.deg2rad(series_deg.astype(float).to_numpy())
+    mean_ang, circ_std = _circular_stats_rad(rad)
+    mean_deg = float(np.rad2deg(mean_ang)) % 360.0
+    if mean_deg >= 360.0:  # guard tiny-negative angles rounding up to exactly 360
+        mean_deg = 0.0
+    return {"mean": mean_deg, "std": float(np.rad2deg(circ_std))}
+
+
+_COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def compass_point(deg: float) -> str:
+    """Nearest 8-point compass label for an angle in degrees (0°=N, 90°=E, 180°=S, 270°=W)."""
+    return _COMPASS[int((float(deg) % 360.0) / 45.0 + 0.5) % 8]
+
+
 def circular_zscore_anomalies(series_deg: pd.Series, threshold: float = 3.0) -> pd.Series:
     """Flag angular outliers in a circular (degrees) series such as wind direction.
 

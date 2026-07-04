@@ -315,6 +315,22 @@ class Interface:
                                inferred="This is the straight-line trend only; weather also has "
                                         "strong seasonal cycles, so short windows can mislead.")
 
+        # Circular sensors (wind direction) wrap at 360°, so linear max/min/mean/std are
+        # invalid — route them through circular statistics instead (a linear "max" just
+        # reports ~359° regardless of the actual prevailing wind).
+        if sensor in analysis.CIRCULAR_SENSORS and intent in ("max", "min", "mean", "spread"):
+            cs = analysis.circular_stats_deg(data[sensor])
+            prevailing = analysis.compass_point(cs["mean"])
+            if intent in ("max", "min"):
+                computed = (f"{sensor} is a circular compass bearing (0–360°), so a plain "
+                            f"{'maximum' if intent == 'max' else 'minimum'} is meaningless "
+                            f"(359° and 1° are 2° apart, not 358°). Prevailing direction{where} "
+                            f"is {cs['mean']:.1f}° ({prevailing}), circular spread {cs['std']:.1f}°.")
+            else:
+                computed = (f"{sensor}{where}: prevailing (circular mean) direction "
+                            f"{cs['mean']:.1f}° ({prevailing}), circular std {cs['std']:.1f}°.")
+            return self._reply(question, intent, cs, [sensor], computed=computed, context=ctx)
+
         if intent == "max":
             r = qe.get_max(data, sensor)
             return self._reply(question, intent, r, [sensor],
@@ -335,6 +351,16 @@ class Interface:
             if len(sensors) < 2:
                 sensors = (sensors + ["T (degC)", "rho (g/m**3)"])[:2]
             a, b = sensors[0], sensors[1]
+            circ = [s for s in (a, b) if s in analysis.CIRCULAR_SENSORS]
+            if len(circ) == 1:  # one angle + one linear sensor -> circular–linear correlation
+                deg = circ[0]
+                lin = b if deg == a else a
+                c = analysis.circular_linear_corr(data[deg], data[lin])
+                return self._reply(question, intent, c, [a, b],
+                                   computed=f"circular–linear correlation({deg}, {lin}){where} = {c:.3f} "
+                                            f"(0–1, unsigned; {deg} is a compass angle).",
+                                   inferred="Wind direction wraps at 360°, so this uses a circular "
+                                            "measure of association, not linear Pearson.")
             c = qe.get_correlation(data, a, b)
             rel = "move together" if c > 0 else "move in opposite directions"
             return self._reply(question, intent, c, [a, b],
