@@ -37,6 +37,27 @@ test-first; **84 tests pass (1 skipped)**, `verify_results.py` **21/21** (+1 adv
   `aria-live` conversation region, labelled input/select, visible `:focus-visible` rings (was
   `outline:none`), and `role=img`/`<title>` on the chart SVG.
 
+### Report refresh + borderline-anomaly marker (2026-07-04, second pass)
+Brainstormed scope with the user (the HCI study itself was **deferred** — it needs real participants,
+which cannot be fabricated). Then did the agreed write-up items in `v1/report/REPORT.md` plus one
+code item. **87 tests pass (1 skipped).**
+
+- **Borderline-anomaly marker (code, test-first).** New `anomaly.zscore_borderline` flags near-threshold
+  points (0.75×–1× threshold); the interface exposes them (`Answer.borderline`) and the web chart draws
+  them as dashed amber rings ("uncertain, not flagged") with a caption hint. Real 2014 query: 24 anomaly
+  windows **+ 81 borderline near-misses**. Shows uncertainty instead of a hard binary.
+- **Report Results refreshed** to current numbers: 87 tests / 21-of-21 harness (was "21 tests" / "7/7");
+  LLM now integrated + faithfulness-checked (was "future"). New subsections — **§5.7** statistical rigor
+  (z-score recall 0.78, 95% CI 0.64–0.90; precision 0.89, 0.76–0.98; McNemar IForest-vs-z p≈1e-19, read
+  honestly against class imbalance), **§5.8** circular wind fix (359.8° → prevailing 196.6° S), **§5.9**
+  measured LLM faithfulness (0 invented numbers, majority-of-3).
+- **Limitations → Limitations & Threats to Validity** (§7): construct / statistical-conclusion /
+  external / reproducibility validity, and an honest "no human study yet" note.
+- **Generalisation appendix** (Appendix B): the identical architecture on v2 (EU trade) — catches 2008 +
+  COVID, forecast MAPE 4.0%, AE 0.21 ≤ IForest 0.36, 0 invented numbers — evidence the method is general.
+- **"Verifiable NL Analytics" framing** (Abstract, §1.6, §6): reframed the contribution from a weather
+  demo to a reusable pattern (truth layer + LLM explanation + automated faithfulness verification).
+
 ---
 
 ## 2026-07-02
