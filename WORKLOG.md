@@ -5,6 +5,40 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-04
+
+### Supervisor-feedback code pass (v1) — correctness, rigor, robustness, a11y
+Worked through the code-only items in `v1/report/impro.md` (write-up items deferred). All changes
+test-first; **84 tests pass (1 skipped)**, `verify_results.py` **21/21** (+1 advisory). Highlights:
+
+- **Circular wind-direction fix (correctness).** The interface routed `wd (deg)` through *linear*
+  max/min/mean/correlation — "maximum wind direction" returned a meaningless ~359.8° regardless of the
+  actual wind. Added `analysis.circular_stats_deg` + `compass_point`; the interface now answers with
+  the circular mean / std (prevailing direction, e.g. **196.6° S** on the real data) and uses the
+  circular–linear coefficient for correlation. Closes the hole in the "exact numbers" claim.
+- **No more silent failures.** The four `except Exception` swallows in `interface.py` (LLM phrasing,
+  chart, forecast, reasoning) now log a warning first — the G2 "silently-dead LLM for weeks" bug lived
+  in one of these.
+- **LLM trust gate.** Every LLM explanation is now checked with `llm.faithfulness`; if it invents a
+  number absent from the computed facts, the interface **discards it and uses the exact template**, so
+  a hallucinated figure can never reach the user. Prompt also hardened against invented qualifiers
+  (the 3B model calling a July date "winter").
+- **Statistical rigor.** Added `evaluation.bootstrap_ci` (percentile CI on precision/recall/f1) and
+  `evaluation.mcnemar_test` (paired significance test, e.g. Isolation Forest vs z-score). Both wired
+  into `verify_results.py` as deterministic checks.
+- **Stable verification.** The stochastic LLM-faithfulness check is now **advisory + majority-of-3**,
+  so the headline count no longer flaps 19/20 ↔ 20/20 (was flaky). Now 3/3 clean, reported separately.
+- **App tests.** `apps/web/app.py` refactored to a `create_app(df)` factory (data loads in the factory,
+  not at import) so the Flask routes are unit-tested against a tiny frame; added a CLI `pick_model`
+  test. Closes the "no tests for apps/" gap.
+- **Reproducibility.** Pinned `requirements.txt` to exact tested versions (Python 3.12.13; added scipy,
+  dropped unused seaborn) and added `reproduce.sh` (one command → seeded tests + verification banner).
+- **Accessibility (HCI).** Web UI: real `<button>` chips (keyboard/Enter/Space), `role=log` +
+  `aria-live` conversation region, labelled input/select, visible `:focus-visible` rings (was
+  `outline:none`), and `role=img`/`<title>` on the chart SVG.
+
+---
+
 ## 2026-07-02
 
 ### v1 tidy-up: dedupe deep modules + robust test bootstrap
