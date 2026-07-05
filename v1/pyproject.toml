@@ -27,7 +27,10 @@ dependencies = [
 # Deep detectors (CNN-AE, LSTM-AE, LSTM-forecaster). On the RTX 5070 use the pinned
 # CUDA build in requirements.txt; on CPU:  pip install torch --index-url .../whl/cpu
 deep = ["torch>=2.4"]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+# Optional retrieval/detection extras (baselines & advanced methods; core runs without them):
+#   BM25 baseline, dense sentence-transformer retriever, Matrix-Profile discord detector.
+advanced = ["rank-bm25>=0.2", "sentence-transformers>=3.0", "stumpy>=1.12"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 
 # Flat single-package layout: the 13 modules live in src/, imported as `src.*`
 # (kept flat deliberately — notebooks, apps, tests and the report all import `from src import …`).
@@ -56,3 +59,16 @@ ignore = ["E501"]
 # Apps bootstrap sys.path before importing `src`, so their imports are intentionally
 # not at the top of the file.
 "apps/*" = ["E402"]
+
+[tool.mypy]
+# Lightweight, non-strict static typing on the source layer — a rigour signal that catches
+# obvious type mismatches without demanding a full annotation pass on numeric/pandas-heavy
+# code. Third-party stubs (pandas, sklearn, statsmodels, torch) are not required.
+python_version = "3.12"
+files = ["src"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = false
+# attr-defined/union-attr are disabled because the interface deliberately reuses a local across
+# Extremum/dict query results and carries a dynamic `value: object` field on Answer.
+disable_error_code = ["var-annotated", "assignment", "arg-type", "index", "union-attr", "attr-defined", "operator", "return-value", "call-overload"]

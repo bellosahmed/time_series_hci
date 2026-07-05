@@ -62,6 +62,17 @@ false alarms. Computed with `evaluation.confusion()`.
 - **Deep models** — capture unusual *shapes / sequences* and reach very high recall, at a small
   training cost (seconds on CPU). The CNN-AE is the simplest default; the LSTM variants and the
   forecaster are comparison baselines.
+- **Matrix Profile (discords)** — a *shape*-based detector (`anomaly.matrix_profile_anomalies`, via
+  `stumpy`): it finds subsequences whose nearest neighbour elsewhere in the series is far away — an
+  "unrepeated pattern". **Honest caveat:** on the injected *point*-spike benchmark it scores only
+  **P/R/F1 = 0.04 / 0.12 / 0.06** (window=24) — and that is *expected*, not a failure. An isolated
+  spike is not a discord; Matrix Profile is the wrong tool for point anomalies and the right tool for
+  anomalous *patterns* (e.g. an oddly-shaped daily curve). It is included to broaden the method
+  comparison and to make this shape-vs-point distinction concrete, not as a point-spike competitor.
+
+Additional classical detectors `anomaly.lof_anomalies` (Local Outlier Factor — density-based) and
+`anomaly.ocsvm_anomalies` (One-Class SVM — boundary-based) are also available as multi-sensor
+alternatives to Isolation Forest.
 
 ## Design note
 

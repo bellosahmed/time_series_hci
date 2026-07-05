@@ -37,7 +37,7 @@ New to the code? Read in this order — each step is small and builds on the las
 
 ## The code, grouped into layers
 
-The 13 modules in `src/` fall into five layers — data flows top to bottom:
+The modules in `src/` fall into five layers — data flows top to bottom:
 
 ```
   preprocess → analysis            (1. get & describe the data)
@@ -53,23 +53,26 @@ The 13 modules in `src/` fall into five layers — data flows top to bottom:
   reasoning · rag_system · llm       (4. explain WHY, in words)
         │
         ▼
-  interface  →  apps/ (chat, web)   (5. question in, answer out)
+  interface · agent  →  apps/        (5. question in, answer out;
+       (chat, web)                       agent = multi-step tool-use)
 ```
 
 | Layer | Module | What it does |
 | --- | --- | --- |
 | **1. Data** | `preprocess.py` | load, clean (`-9999` sentinels), interpolate, align to hourly |
 | | `analysis.py` | rolling stats, STL decomposition, correlations |
-| **2. Detect** | `anomaly.py` | z-score (global + rolling) and Isolation Forest detectors |
+| **2. Detect** | `anomaly.py` | z-score (global + rolling), Isolation Forest, LOF, One-Class SVM, **Matrix Profile** detectors |
 | | `forecasting.py` | ARIMA forecast-error anomalies + a 14-day forecast |
 | | `deep.py` | the three deep detectors: CNN-AE, LSTM-AE, LSTM forecaster (GPU-aware) |
 | | `evaluation.py` | inject synthetic anomalies → precision/recall/F1/confusion |
 | | `clustering.py` | daily features + K-means "day types" |
 | **3. Truth** | `query_engine.py` | **exact** max/min/mean/std/correlation/missing — verified `== pandas` |
 | **4. Explain** | `reasoning.py` | *why* a moment is anomalous (which sensors moved together) |
-| | `rag_system.py` | local TF-IDF context retrieval + trust-aware template explainer |
-| | `llm.py` | optional local Ollama layer — rewords facts, never changes numbers |
-| **5. Interface** | `interface.py` | natural-language question → query engine → trust-aware answer |
+| | `rag_system.py` | local retrieval — TF-IDF, **BM25**, **LSA/SVD**, and a **dense sentence-transformer** retriever — + trust-aware template explainer |
+| | `retrieval_eval.py` | IR metrics for the retriever (Precision@k, Recall@k, MRR, MAP, NDCG) over labelled + paraphrase query sets |
+| | `llm.py` | optional local Ollama layer — rewords facts, never changes numbers; model auto-pick + agentic planning |
+| **5. Interface** | `interface.py` | NL question → query engine → trust-aware answer (max/min/mean/trend/compare/threshold/anomaly/forecast/weather/**day-type**/summary) |
+| | `agent.py` | **agentic multi-step tool-use** — LLM plans query-engine tool calls; every number still computed, faithfulness-gated |
 | | `main.py` | run the whole pipeline once, end to end |
 
 ---
@@ -94,7 +97,12 @@ python3.12 -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (de
 ```bash
 python3.12 apps/chat.py "what was the hottest temperature?"
 python3.12 apps/chat.py --llm                          # interactive
+python3.12 apps/chat.py --agent "compare the hottest of 2013, 2014 and 2015"   # multi-step tool-use
 ```
+
+> `--agent` plans several query-engine tool calls for a multi-step question. The LLM chooses the
+> tools; every number is still computed deterministically and faithfulness-checked. Pull a larger
+> model (`ollama pull llama3.1:8b`, or set `TSHCI_MODEL`) and it is used automatically.
 
 **Launch the web app** (prints a URL, e.g. http://localhost:3030):
 
@@ -110,8 +118,10 @@ python3.12 apps/web/app.py
 ## How to check it works
 
 ```bash
-python3.12 -m pytest tests/       # 48 passed, 1 skipped (the LLM test needs Ollama)
-python3.12 verify_results.py      # 25/25 independent checks (results == pandas, LLM invents 0 numbers)
+python3.12 -m pytest tests/       # 173 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
+python3.12 verify_results.py      # 29/29 independent checks (results == pandas, day-types, retriever IR metrics, LLM invents 0 numbers)
+python3.12 -m ruff check src tests apps    # lint (clean)
+python3.12 -m mypy                # lightweight static typing (clean)
 ```
 
 `verify_results.py` is the trust gate: it re-computes headline results independently and confirms the
@@ -128,7 +138,8 @@ LLM never introduced a number that isn't in the data.
 | `notebooks/` | 5 Jupyter notebooks — walkthrough, EDA, methods, interface, deep models (see `notebooks/README.md`) |
 | `apps/` | things you **run**: `chat.py` (CLI) and `web/` (browser app) |
 | `report/` | things you **read**: the write-up, evaluation, model comparison (see below) |
-| `verify_results.py` | the 25/25 independent verification of results |
+| `docs/` | design & review notes: `UNDERSTANDING_V1.md`, `ASSESSMENT_AND_RECOMMENDATIONS.md`, `AGENTIC_AND_POLISH.md`, `RETRIEVAL_EVALUATION.md`, `CHAT_MEMORY_PLAN.md` |
+| `verify_results.py` | the 29/29 independent verification of results |
 | `pyproject.toml` | package metadata + pytest/ruff config (puts `src` on the path from any directory) |
 
 ### Docs in `report/`

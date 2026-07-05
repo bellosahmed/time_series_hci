@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from . import analysis, anomaly, forecasting, llm, rag_system, reasoning
+from . import analysis, anomaly, clustering, forecasting, llm, rag_system, reasoning
 from . import query_engine as qe
 from .interface_parsing import (  # noqa: F401  re-exported for callers and tests
     INTENTS,
@@ -66,6 +66,15 @@ class Interface:
         self.use_llm = use_llm
         self.model = model
         self.history: list[dict] = []  # recent turns, for follow-up resolution
+        self._daytypes: tuple | None = None  # lazily-built K-means day-types (labels, profiles)
+
+    def _day_types(self):
+        """Lazily compute K-means day-types once: (labels per day, per-cluster mean features)."""
+        if self._daytypes is None:
+            feats = clustering.daily_features(self.df)
+            labels = clustering.kmeans_cluster(feats, k=4)
+            self._daytypes = (labels, clustering.cluster_profiles(feats, labels))
+        return self._daytypes
 
     def _routable(self, question: str) -> bool:
         """True if the deterministic parser can route `question` (an intent/sensor/period/day).
@@ -306,6 +315,35 @@ class Interface:
                               f"{', '.join(self.df.columns)}.", None, [])
         sensor = sensors[0] if sensors else "T (degC)"  # default to temperature
         ctx = self._context_for(sensor)
+
+        # Day-type classification ("what kind of day was 5 Jan 2014?"): surface the K-means
+        # clustering through the interface (it was previously reachable only via main.py).
+        if intent == "daytype":
+            labels, profiles = self._day_types()
+            names = clustering.day_type_labels(profiles)
+            tcol = "mean_T (degC)" if "mean_T (degC)" in profiles.columns else profiles.columns[0]
+            if day is not None and day[2] is not None:          # a specific, dated day
+                m, d, y, day_label = day
+                key = pd.Timestamp(year=y, month=m, day=d)
+                if key not in labels.index:
+                    return Answer(question, "daytype",
+                                  f"I have no daily data for {day_label} to classify.", None, [])
+                cl = int(labels.loc[key])
+                return self._reply(question, "daytype", {"cluster": cl, "label": names[cl]},
+                                   ["T (degC)"],
+                                   computed=(f"{day_label} was a '{names[cl]}' day (K-means day-type "
+                                             f"{cl} of {len(names)}; that type averages "
+                                             f"{profiles.loc[cl, tcol]:.1f}°C)."),
+                                   context=ctx,
+                                   inferred="Day-types are K-means clusters over each day's "
+                                            "mean/std/min/max across all sensors, coldest→warmest.")
+            bits = "; ".join(f"'{names[c]}' (~{profiles.loc[c, tcol]:.1f}°C)"
+                             for c in sorted(names, key=lambda c: profiles.loc[c, tcol]))
+            return self._reply(question, "daytype", names, [],
+                               computed=f"The record groups into {len(names)} K-means day-types: {bits}.",
+                               context=ctx,
+                               inferred="Ask e.g. 'what kind of day was 5 January 2014?' to "
+                                        "classify a specific day.")
 
         # Causal questions ("does X cause Y?", "what causes…?"): we measure correlation, not
         # causation — say so explicitly rather than pass a correlation off as an answer.

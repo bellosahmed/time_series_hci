@@ -64,6 +64,10 @@ INTENTS = {
     "anomaly": ["anomaly", "anomalies", "unusual", "abnormal", "weird", "strange", "outlier",
                 "outliers", "odd", "spike", "spikes", "anomalous", "wrong", "problem"],
     "weather": ["weather", "conditions", "climate"],
+    # daytype is BEFORE summary so "describe the day-types" routes here, not to summary
+    "daytype": ["day type", "day types", "day-type", "day-types", "type of day", "types of day",
+                "kind of day", "kinds of day", "sort of day", "day category", "categorise the day",
+                "categorize the day", "classify the day"],
     "summary": ["summary", "summarise", "summarize", "describe", "overview", "tell me about"],
 }
 
@@ -316,17 +320,34 @@ def resolve_compare(question: str):
 def resolve_threshold(question: str):
     """Detect a comparison + numeric value -> (op, value), else None.
 
-    Four-digit numbers in the year range are treated as periods, not thresholds.
+    The threshold is taken as the number that *follows* the comparison word, so
+    "above 30 in 2013" reads 30 (not the year 2013). This position-based rule also
+    fixes the old year-range edge case: "above 2000" now correctly reads 2000 as a
+    genuine threshold (a year-range number is accepted only when it sits directly
+    after the comparison word), while "above average in 2015" yields no threshold.
     """
     q = question.lower()
-    op = next((o for o, words in COMPARE.items()
-               if any(re.search(rf"\b{re.escape(w)}\b", q) for w in words)), None)
-    if op is None:
+    # Earliest comparison word wins, and we remember where it ends (op_end).
+    best: tuple[int, int, str] | None = None
+    for o, words in COMPARE.items():
+        for w in words:
+            m = re.search(rf"\b{re.escape(w)}\b", q)
+            if m and (best is None or m.start() < best[0]):
+                best = (m.start(), m.end(), o)
+    if best is None:
         return None
-    nums = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", q)]
-    # Drop bare integers in the year range so "above 30 in 2013" reads 30 (not 2013) as the
-    # threshold. Known limitation: a genuine integer threshold that happens to fall in
-    # 1900–2100 (e.g. "above 2000") is also dropped — harmless on this dataset, whose sensor
-    # magnitudes (°C, %, ~1000 mbar, m/s) never reach that range; a decimal ("2000.0") escapes it.
-    nums = [n for n in nums if not (n.is_integer() and 1900 <= n <= 2100)]
-    return (op, nums[0]) if nums else None
+    _, op_end, op = best
+    after = [(m.start(), float(m.group()))
+             for m in re.finditer(r"-?\d+(?:\.\d+)?", q) if m.start() >= op_end]
+    # Prefer the first non-year-range number after the comparison word (a clear threshold
+    # like 30 or -5), so a trailing scope year ("above 30 in 2013") is ignored.
+    non_year = [v for _, v in after if not (v.is_integer() and 1900 <= v <= 2100)]
+    if non_year:
+        return (op, non_year[0])
+    # Only a year-range number follows: accept it as a genuine threshold ("above 2000")
+    # solely when it sits directly after the comparison word (nothing but spaces between),
+    # which separates it from a scope year ("above average in 2015" -> no threshold).
+    for pos, v in after:
+        if q[op_end:pos].strip() == "":
+            return (op, v)
+    return None

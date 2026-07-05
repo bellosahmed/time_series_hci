@@ -106,6 +106,36 @@ def test_plan_rejects_garbage(monkeypatch):
     assert llm.plan("hello", ["max"], ["T (degC)"]) is None
 
 
+def test_pick_model_prefers_pulled_then_default(monkeypatch):
+    # explicit request always wins
+    assert llm.pick_model(requested="my-model") == "my-model"
+    # otherwise the first *pulled* preferred model is chosen (larger first)
+    monkeypatch.setattr(llm, "list_models", lambda: ["llama3.2:3b", "llama3.1:8b"])
+    assert llm.pick_model() == "llama3.1:8b"
+    # none of the preferred models pulled -> fall back to DEFAULT_MODEL
+    monkeypatch.setattr(llm, "list_models", lambda: ["something-else"])
+    assert llm.pick_model() == llm.DEFAULT_MODEL
+
+
+def test_plan_steps_parses_and_shape_validates(monkeypatch):
+    """plan_steps() parses the JSON step list and normalises each step's shape — no server."""
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: (
+        '{"steps":[{"tool":"extremum","args":{"sensor":"T (degC)","kind":"max",'
+        '"start":"2013-06-01","end":"2013-08-31"}},{"tool":"average","args":null},'
+        '{"bad":"no tool key"}]}'))
+    steps = llm.plan_steps("compare summers", [{"name": "extremum", "description": "",
+                                                "params": ("sensor",)}], ["T (degC)"])
+    assert [s["tool"] for s in steps] == ["extremum", "average"]  # malformed 3rd step dropped
+    assert steps[1]["args"] == {}                                 # null args -> {}
+
+
+def test_plan_steps_none_on_garbage(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "no json here")
+    assert llm.plan_steps("hi", [], ["T (degC)"]) is None
+
+
 def test_live_generation_if_available():
     if not llm.is_available():
         pytest.skip("Ollama not running.")

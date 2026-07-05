@@ -18,7 +18,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from src import (preprocess, query_engine as qe, interface, anomaly, analysis,  # noqa: E402
-                 evaluation, forecasting, reasoning, llm)
+                 evaluation, forecasting, reasoning, llm, rag_system, retrieval_eval, clustering)
 
 DATA = ROOT.parent / "data" / "jena_climate_2009_2016.csv"
 S = "T (degC)"
@@ -152,7 +152,38 @@ mc = evaluation.mcnemar_test(ifpred, pred, labels)
 check("McNemar (IForest vs z-score) returns a valid p-value in [0,1]",
       0.0 <= mc["p_value"] <= 1.0, f"p={mc['p_value']:.3g} n_discordant={mc['n_discordant']}")
 
-# 16. LLM faithfulness — ADVISORY + majority-of-3. The 3B model is stochastic, so we vote
+# 16. clustering day-types are meaningful (temperature-ordered) AND reachable via the interface.
+feats_c = clustering.daily_features(df)
+labels_c = clustering.kmeans_cluster(feats_c, k=4)
+prof_c = clustering.cluster_profiles(feats_c, labels_c)
+names_c = clustering.day_type_labels(prof_c)
+k_summer, k_winter = pd.Timestamp(2015, 7, 4), pd.Timestamp(2015, 1, 15)
+warmer = (k_summer in labels_c.index and k_winter in labels_c.index
+          and prof_c.loc[int(labels_c.loc[k_summer]), "mean_T (degC)"]
+          > prof_c.loc[int(labels_c.loc[k_winter]), "mean_T (degC)"])
+check("clustering: a summer day is a warmer day-type than a winter day", warmer,
+      f"{names_c[int(labels_c.loc[k_summer])]} vs {names_c[int(labels_c.loc[k_winter])]}")
+adt = iface.ask("what kind of day was 4 July 2015?")
+check("interface exposes day-type classification for a real day",
+      adt.intent == "daytype" and isinstance(adt.value, dict) and "label" in adt.value,
+      adt.value.get("label") if isinstance(adt.value, dict) else "n/a")
+
+# 17. retrieval-quality evaluation (IR metrics on a hand-labelled query set). Evaluates the RAG
+# *retriever* (not the truth layer) with Precision@k / Recall@k / MRR / MAP / NDCG, and checks
+# the LSA retriever produces valid metrics on the same ground truth. See docs/RETRIEVAL_EVALUATION.md.
+gt = retrieval_eval.GROUND_TRUTH
+tfidf_metrics = retrieval_eval.evaluate_retriever(rag_system.Retriever(), gt, k=3)
+check("retriever IR metrics valid & TF-IDF MRR >= 0.8 on labelled queries",
+      all(0.0 <= tfidf_metrics[m] <= 1.0 for m in ("p_at_k", "r_at_k", "mrr", "map", "ndcg"))
+      and tfidf_metrics["mrr"] >= 0.8,
+      f"MRR={tfidf_metrics['mrr']:.2f} MAP={tfidf_metrics['map']:.2f} R@3={tfidf_metrics['r_at_k']:.2f}")
+lsa_metrics = retrieval_eval.evaluate_retriever(rag_system.LSARetriever(), gt, k=3)
+check("LSA retriever runs & returns valid IR metrics in [0,1]",
+      all(0.0 <= lsa_metrics[m] <= 1.0 for m in ("mrr", "map", "r_at_k"))
+      and lsa_metrics["mrr"] >= 0.8,
+      f"MRR={lsa_metrics['mrr']:.2f} MAP={lsa_metrics['map']:.2f}")
+
+# 17. LLM faithfulness — ADVISORY + majority-of-3. The 3B model is stochastic, so we vote
 # over 3 runs per question and REPORT the result without letting it flip the headline count
 # (previously this check made the total flap between 19/20 and 20/20 run to run).
 if llm.is_available() and llm.list_models():

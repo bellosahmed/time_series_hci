@@ -106,6 +106,38 @@ def ocsvm_anomalies(
     return pd.Series(model.predict(X) == -1, index=features.index, name="ocsvm_anomaly")
 
 
+def matrix_profile_anomalies(
+    series: pd.Series, window: int = 24, threshold: float = 4.0
+) -> pd.Series:
+    """Matrix-Profile *discord* detector (via stumpy) — shape-based, not point-based.
+
+    The matrix profile stores, for every length-``window`` subsequence, the z-normalised
+    Euclidean distance to its most similar subsequence elsewhere in the series. A subsequence
+    with an unusually large nearest-neighbour distance is a **discord**: a shape that repeats
+    nowhere else — the classic time-series anomaly. Unlike z-score / Isolation Forest (which
+    judge points), this catches anomalous *patterns* (an odd daily curve), so it complements
+    them in the detector comparison.
+
+    A discord is flagged with a robust cutoff — median + ``threshold`` × (scaled MAD) of the
+    profile, resistant to the discords themselves — and its anchor (subsequence start) point is
+    marked. Returns a boolean Series (True = anomaly) aligned to ``series``'s index. Requires
+    the optional ``stumpy`` dependency.
+    """
+    import stumpy
+
+    s = series.astype(float).dropna()
+    m = int(window)
+    flags = pd.Series(False, index=series.index, name="matrixprofile_anomaly")
+    if len(s) <= m + 1:
+        return flags
+    mp = np.asarray(stumpy.stump(s.to_numpy(), m=m)[:, 0], dtype=float)  # NN distance per subsequence
+    med = float(np.median(mp))
+    mad = float(np.median(np.abs(mp - med))) or 1e-9
+    is_discord = mp > med + threshold * 1.4826 * mad          # 1.4826 -> MAD approximates std
+    flags.loc[s.index[np.flatnonzero(is_discord)]] = True     # mark each discord's start point
+    return flags
+
+
 def threshold_sensitivity(series: pd.Series,
                           thresholds=(2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)) -> dict:
     """Anomaly count at each z-score threshold — evidence for the chosen value.

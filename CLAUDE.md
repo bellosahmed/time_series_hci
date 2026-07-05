@@ -48,11 +48,13 @@ but **not the data** — v1 is temperature, v2 is trade.
 | Area | State |
 | --- | --- |
 | Preprocessing, analysis, anomaly detection, clustering, query engine | ✅ done |
-| NL interface, RAG retriever (TF-IDF), multi-sensor reasoning | ✅ done |
+| NL interface (incl. **day-type** classification), retrieval, multi-sensor reasoning | ✅ done |
 | Deep models: CNN-AE, LSTM-AE, LSTM-Forecaster | ✅ done |
 | Forecasting: ARIMA | ✅ done |
 | Evaluation: vs pandas ground truth + labeled (synthetic) precision/recall | ✅ done |
-| Tests | ✅ 48 passing (1 skipped) |
+| Tests | ✅ 173 passing (1 skipped); ruff + mypy clean; coverage 92% |
+| Agentic multi-step tool-use (`agent.py`), embedding-RAG option, larger-model auto-pick | ✅ done |
+| Retrieval eval (P@k/R@k/MRR/MAP/NDCG) + TF-IDF/BM25/LSA/dense retrievers; Matrix Profile detector (COP509 IR) | ✅ done |
 | Local LLM (Ollama) explanation layer | ⏳ deferred to write-up stage |
 | Write-up / report | ⏳ to do |
 
@@ -93,14 +95,16 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 | --- | --- |
 | `preprocess.py` | load, clean (`-9999` sentinels), interpolate, align to hourly |
 | `analysis.py` | rolling stats, STL decomposition, correlations |
-| `anomaly.py` | z-score (global + rolling), Isolation Forest, anomaly windows; `evaluation.py` adds **point-adjusted** metrics |
-| `clustering.py` | daily features + K-means day-types |
+| `anomaly.py` | z-score (global + rolling), Isolation Forest, **LOF**, **One-Class SVM**, **Matrix Profile** (discords, stumpy), anomaly windows; `evaluation.py` adds **point-adjusted** metrics |
+| `clustering.py` | daily features + K-means day-types (wired into the interface as the **day-type** intent) |
 | `query_engine.py` | **exact** max/min/mean/std/correlation/missing — the truth layer |
 | `deep.py` | deep detectors in one module: 1D CNN autoencoder + LSTM autoencoder + LSTM forecaster (per-point reconstruction / forecast error) |
 | `forecasting.py` | ARIMA forecast-error anomalies (deseasonalised) + `forecast()` (14-day ahead, 80% band) |
 | `reasoning.py` | multi-sensor anomaly explanation (per-sensor z-scores, co-movement) — wired into the interface's anomaly answers (a cross-sensor explanation feature, not the headline) |
-| `rag_system.py` | local TF-IDF retriever over sensor KB + trust-aware explainer (LLM-ready) |
-| `interface.py` | NL question → query engine → trust-aware answer. Intents: max/min/mean/spread/correlation/missing/summary + **trend · compare · weather(day report) · threshold · anomaly(+reasoning)** + **forecast** (14-day). Scopes to any year/month/**season**/**day**/range. Attaches a downsampled **chart** for the web UI. With `use_llm`, `llm.plan` parses free phrasing into a structured plan (fills gaps only; never computes numbers) |
+| `rag_system.py` | local retrieval over sensor KB — TF-IDF, **BM25**, **LSA** (TF-IDF→SVD), **dense sentence-transformer** (all-MiniLM-L6-v2) — + trust-aware explainer |
+| `retrieval_eval.py` | IR metrics (Precision@k/Recall@k/MRR/MAP/NDCG) + labelled query set to evaluate/compare retrievers (COP509 IR material) |
+| `interface.py` | NL question → query engine → trust-aware answer. Intents: max/min/mean/spread/correlation/missing/summary + **trend · compare · weather(day report) · threshold · anomaly(+reasoning) · day-type(K-means)** + **forecast** (14-day). Scopes to any year/month/**season**/**day**/range. Attaches a downsampled **chart** for the web UI. With `use_llm`, `llm.plan` parses free phrasing into a structured plan (fills gaps only; never computes numbers) |
+| `agent.py` | **agentic multi-step tool-use** (still numberless): LLM plans query-engine tool calls (extremum/average/correlation/threshold/anomaly_count) for multi-step questions; executor runs each == pandas; synthesis is faithfulness-gated; falls back to single-step `interface`. `chat.py --agent` |
 | `main.py` | end-to-end pipeline entry point |
 
 ## Notebooks (`v1/notebooks/`)
@@ -117,20 +121,25 @@ Notebooks consolidated 9 → 5 (28 June 2026). Run with the **`py312-tshci`** ke
 
 ## Models implemented
 
-Statistical (z-score) · Forecasting (ARIMA) · Classical ML (Isolation Forest) ·
-Deep (CNN-AE, LSTM-AE, LSTM-Forecaster). Full table: **`v1/report/MODELS.md`**.
+Statistical (z-score) · Forecasting (ARIMA) · Classical ML (Isolation Forest, LOF, One-Class SVM) ·
+Shape/discords (Matrix Profile) · Deep (CNN-AE, LSTM-AE, LSTM-Forecaster).
+Full table: **`v1/report/MODELS.md`**.
 
-## Tests (`v1/tests/`) — 48 passing, 1 skipped
+## Tests (`v1/tests/`) — 173 passing, 1 skipped (coverage 92%)
 
 `test_query_engine` · `test_interface` (interface + evaluation) · `test_reasoning` ·
-`test_deep` · `test_forecasting` · `test_llm`.
+`test_deep` · `test_forecasting` · `test_llm` · `test_agent` (agentic tool-use) ·
+`test_rag` (TF-IDF/BM25/LSA/dense retrievers) · `test_retrieval_eval` (IR metrics + paraphrase gap) ·
+`test_anomaly` (incl. Matrix Profile) · `test_clustering` · `test_main` · `test_preprocess` · `test_apps` · `test_generalization` · `test_web_js`.
 
 ## v1 layout (reorganised)
 
 `src/` (code) · `tests/` · `notebooks/` (00–04 + README) · `apps/` (chat.py + web/) ·
 `report/` (REPORT, EVALUATION, MODELS, DATA_QUALITY, HCI_USER_STUDY, FINETUNING; working notes in
-`report/notes/`) · `pyproject.toml` (package + pytest/ruff config) · `verify_results.py`
-(25/25 independent checks). See `v1/README.md`.
+`report/notes/`) · `docs/` (UNDERSTANDING_V1, ASSESSMENT_AND_RECOMMENDATIONS, AGENTIC_AND_POLISH,
+RETRIEVAL_EVALUATION, CHAT_MEMORY_PLAN) · `pyproject.toml` (package + pytest/ruff/mypy config) · `verify_results.py`
+(29/29 independent checks). Quality gates: pytest 173, verify 29/29, ruff clean, mypy clean, coverage 92%.
+See `v1/README.md`.
 
 ## How to run
 
@@ -160,6 +169,14 @@ python apps/web/app.py            # website (prints the URL)
 
 ## Remaining work
 
-1. **Ollama / local LLM** — drop-in explainer (the `rag_system.explain` interface is ready).
+1. **HCI user study** — the grade-gating item (SUS, task accuracy vs spreadsheet, trust); start
+   ethics approval in parallel. See `report/HCI_USER_STUDY.md` + `docs/ASSESSMENT_AND_RECOMMENDATIONS.md`.
 2. **Write-up** — methodology, results, limitations.
-3. Optional: Matrix Profile (`stumpy`), LOF / One-Class SVM, a multi-sensor deep model.
+3. Cheap credibility: GitHub Actions CI (pytest + ruff + verify), coverage number, `git tag v1.0`.
+4. Optional: Matrix Profile (`stumpy`), LOF / One-Class SVM, a multi-sensor deep model.
+
+**Done (2026-07-05):** agentic multi-step tool-use (`agent.py`), embedding-RAG option, larger-model
+auto-pick, `resolve_threshold` fix, mypy — see `docs/AGENTIC_AND_POLISH.md`. Retrieval evaluation
+(`retrieval_eval.py`: P@k/R@k/MRR/MAP/NDCG) + four retrievers (TF-IDF/BM25/LSA/**dense** MiniLM) +
+Matrix Profile detector, from COP509 IR material — see `docs/RETRIEVAL_EVALUATION.md`. Key result:
+dense embeddings measurably beat keyword retrieval on paraphrases (MRR 0.267 → 0.500).

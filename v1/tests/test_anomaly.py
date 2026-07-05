@@ -2,8 +2,31 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src import anomaly
+
+
+def test_matrix_profile_flags_injected_discord():
+    pytest.importorskip("stumpy")
+    # a clean repeating daily sine (period 24) so most subsequences have close neighbours...
+    n = 24 * 30
+    idx = pd.date_range("2024-01-01", periods=n, freq="h")
+    s = pd.Series(np.sin(np.arange(n) * 2 * np.pi / 24), index=idx)
+    # ...then corrupt one day into a flat/odd shape that repeats nowhere -> a discord
+    s.iloc[24 * 15:24 * 16] = 5.0
+    flags = anomaly.matrix_profile_anomalies(s, window=24)
+    assert flags.dtype == bool and flags.index.equals(s.index)
+    # a discord anchor should be flagged within the corrupted window (allow the window's span)
+    window_flagged = flags.iloc[24 * 14:24 * 16].any()
+    assert window_flagged and flags.sum() < n            # flags the discord, not everything
+
+
+def test_matrix_profile_short_series_is_safe():
+    pytest.importorskip("stumpy")
+    s = pd.Series([1.0, 2.0, 3.0])
+    flags = anomaly.matrix_profile_anomalies(s, window=24)   # window > len -> no crash
+    assert flags.dtype == bool and not flags.any()
 
 
 def test_zscore_borderline_flags_near_threshold_only():

@@ -307,10 +307,27 @@ def test_resolve_period_seasons():
     assert start == "2012-12-01" and end == "2013-02-28" and "winter" in label
 
 
+def test_ask_daytype_classifies_specific_day():
+    # a warming ramp across 60 days so K-means finds distinct day-types
+    idx = pd.date_range("2013-01-01", periods=24 * 60, freq="h")
+    base = 20.0 * np.arange(len(idx)) / len(idx)
+    df = pd.DataFrame({"T (degC)": base + np.random.default_rng(0).normal(0, 1, len(idx))}, index=idx)
+    ans = interface.Interface(df).ask("what kind of day was 2 January 2013?")
+    assert ans.intent == "daytype"                      # clustering is now reachable via the interface
+    assert isinstance(ans.value, dict) and "label" in ans.value
+    assert ans.value["label"] in ans.text
+
+
 def test_resolve_threshold():
     assert interface.resolve_threshold("how often above 30 degrees?") == (">", 30.0)
     assert interface.resolve_threshold("colder than -5 in 2014") == ("<", -5.0)
     assert interface.resolve_threshold("what is the average?") is None  # no comparison
+    # scope year after the threshold is ignored (the number follows the comparison word)
+    assert interface.resolve_threshold("how often above 30 in 2013?") == (">", 30.0)
+    # year-range edge case fixed: a genuine threshold in 1900-2100 right after "above" is kept
+    assert interface.resolve_threshold("times above 2000") == (">", 2000.0)
+    # but a year that is only a scope (not directly after the comparison word) is not a threshold
+    assert interface.resolve_threshold("above average in 2015") is None
 
 
 def test_ask_scopes_to_year():

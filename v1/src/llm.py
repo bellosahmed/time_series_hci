@@ -19,12 +19,41 @@ Setup (run once, locally):
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
 
 OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.2:3b"
+
+# Default model — overridable without editing code via `TSHCI_MODEL`. The 3B model is fast
+# and fine for *rephrasing* (the faithfulness gate guarantees the numbers regardless); a
+# larger model mainly reduces wrong *qualifiers* (the residual the gate can't catch), so it
+# is offered as an easy opt-in rather than a hard requirement.
+DEFAULT_MODEL = os.environ.get("TSHCI_MODEL", "llama3.2:3b")
+
+# Preferred models, larger/stronger first, for `pick_model` auto-selection. Only ones that
+# are actually pulled into the local Ollama are chosen; otherwise we fall back to DEFAULT_MODEL.
+PREFERRED_MODELS = ("llama3.1:8b", "qwen2.5:7b", "mistral:7b", "llama3.2:3b")
+
+
+def pick_model(prefer: tuple[str, ...] | list[str] | None = None,
+               requested: str | None = None) -> str:
+    """Choose an Ollama model to use.
+
+    `requested` (an explicit user choice) always wins. Otherwise the first model in
+    `prefer` (default: `PREFERRED_MODELS`, larger first) that is actually pulled locally is
+    used — so a bigger model is picked up automatically when present — and if none are
+    pulled we fall back to `DEFAULT_MODEL`. This is the "larger local model option": pull a
+    bigger model (or set `TSHCI_MODEL`) and it is used with no code change.
+    """
+    if requested:
+        return requested
+    pulled = set(list_models())
+    for m in (prefer or PREFERRED_MODELS):
+        if m in pulled:
+            return m
+    return DEFAULT_MODEL
 
 SYSTEM_PROMPT = (
     "You are the explanation layer of a time-series analytics system. "
@@ -296,4 +325,82 @@ def explain(question: str, computed: str, context: str | None = None,
         facts.append(f"Reasoning: {inferred}")
     prompt = (FEWSHOT + "\nNow write the Answer for this one, in the same style:\n"
               + "\n".join(facts) + "\n\nAnswer:")
+    return generate(prompt, model=model)
+
+
+# --- Agentic, still-numberless tool-use ---------------------------------------------------
+# For MULTI-STEP questions ("compare the three hottest summers and explain why one stood out")
+# the LLM plans WHICH deterministic query-engine tools to call, in what order, with which
+# arguments — but it never computes a value. Every number in the final answer comes from
+# executing a tool against pandas (see `agent.py`), and the synthesized narrative is checked
+# by `faithfulness` just like the single-step path. This keeps the flexibility of an agent
+# without reintroducing hallucination: the truth layer still owns every number.
+
+AGENT_SYSTEM = (
+    "You are a query PLANNER for a weather time-series analytics system. You break the user's "
+    "question into an ordered list of tool calls that the system will EXECUTE to get exact "
+    "numbers. You choose only WHICH tools and WHICH arguments (sensors, dates, operator). You "
+    "must NEVER compute or output any data value, statistic, temperature, or count yourself. "
+    "Respond with ONLY compact JSON, no prose."
+)
+
+
+def plan_steps(question: str, tools: list[dict], sensors: list[str],
+               model: str = DEFAULT_MODEL) -> list[dict] | None:
+    """Decompose a multi-step question into an ordered list of tool calls.
+
+    `tools` is a list of ``{name, description, params}`` specs (from ``agent.Agent.tool_specs``).
+    Returns a list of ``{"tool", "args"}`` dicts (shape-validated only; ``agent.execute_step``
+    does the semantic validation and runs them), or None if Ollama is unavailable or the reply
+    can't be parsed. The model orchestrates; it never produces a data value.
+    """
+    if not is_available():
+        return None
+    tool_lines = "\n".join(f'- {t["name"]}({", ".join(t["params"])}): {t["description"]}'
+                           for t in tools)
+    prompt = (
+        f"Question: {question}\n"
+        f"Allowed sensor columns: {sensors}\n"
+        "Everyday words map to columns: temperature->T (degC), humidity->rh (%), "
+        "pressure->p (mbar), density->rho (g/m**3), wind->wv (m/s), dew->Tdew (degC).\n"
+        "The data is hourly weather covering 2009-01 to 2016-12. Express any time window as "
+        "start/end calendar dates (YYYY-MM-DD); seasons: spring=Mar-May, summer=Jun-Aug, "
+        "autumn=Sep-Nov, winter=Dec-Feb.\n"
+        "Available tools:\n" + tool_lines + "\n"
+        "Plan the ordered tool calls needed to answer the question. For a comparison, emit one "
+        "call per item being compared. Use only the allowed tools and columns.\n"
+        'Return JSON ONLY: {"steps": [{"tool": <tool name>, "args": {<arg>: <value>, ...}}, ...]}'
+    )
+    try:
+        out = generate(prompt, model=model, system=AGENT_SYSTEM, timeout=45.0)
+        match = re.search(r"\{.*\}", out, re.S)
+        if not match:
+            return None
+        data = json.loads(match.group(0))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("steps"), list):
+        return None
+    steps: list[dict] = []
+    for st in data["steps"]:
+        if isinstance(st, dict) and isinstance(st.get("tool"), str):
+            args = st.get("args")
+            steps.append({"tool": st["tool"], "args": args if isinstance(args, dict) else {}})
+    return steps or None
+
+
+def explain_synthesis(question: str, facts: list[str], model: str = DEFAULT_MODEL) -> str:
+    """Compose one narrative answer from several exact computed facts (agentic mode).
+
+    Mirrors `explain`, but synthesizes across multiple facts (comparing/summarizing them).
+    The numbers come only from `facts`; the model just weaves them into prose and must keep
+    every number and date exactly — the caller then runs `faithfulness` over the result.
+    """
+    if not is_available():
+        raise RuntimeError("Ollama is not running; use the deterministic template instead.")
+    joined = "\n".join(f"- {f}" for f in facts)
+    prompt = (FEWSHOT + "\nNow synthesize ONE short, friendly answer from these exact computed "
+              "facts, comparing or summarizing them as the question asks. Keep every number and "
+              f"date exactly as given; do not add any number that is not below.\n"
+              f"Question: {question}\nComputed facts:\n{joined}\n\nAnswer:")
     return generate(prompt, model=model)

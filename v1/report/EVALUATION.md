@@ -72,6 +72,43 @@ K-means (k=4) on per-day feature vectors yields temperature-ordered clusters wit
 mean daily temperatures of **1.4, 11.5, 16.4, 19.2 °C** — a clean cold→warm gradient
 that maps onto winter → spring/autumn → summer. Clusters are meaningful.
 
+**Choice of k (justified, not assumed).** `clustering.kmeans_selection` scores inertia (elbow) +
+silhouette across k (plotted in notebook 02). Honestly, the **silhouette peaks at k=2** (0.287, a coarse
+warm/cold split); **k=4** (0.173) is a *deliberate interpretability trade-off* — four seasonal day-types
+at a modest silhouette cost, with the inertia elbow bending around k≈3–4. Stating this pre-empts the
+"why k=4?" question.
+
+## 3b. Retrieval quality (RAG retriever — IR metrics)
+
+The truth layer is verified `== pandas`; the RAG **retriever** that grounds explanations is
+evaluated separately with standard IR measures (Precision@k, Recall@k, MRR, MAP, NDCG) over a
+10-query standard set + a 5-query paraphrase set (query → relevant sensor doc). Retrievers compared on
+the same labels — the table is with the **original one-line docs** (the finding below shows what
+enriching them did):
+
+| retriever | standard R@3 | standard MRR | paraphrase R@3 | paraphrase MRR |
+| --- | --- | --- | --- | --- |
+| TF-IDF (VSM baseline) | 0.900 | 0.900 | 0.400 | 0.267 |
+| BM25 (Okapi) | 0.900 | 0.900 | 0.200 | 0.067 |
+| LSA (TF-IDF → truncated SVD) | 0.900 | 0.900 | 0.400 | 0.267 |
+| **Dense** (sentence-transformers `all-MiniLM-L6-v2`) | **1.000** | **0.933** | **0.600** | **0.500** |
+
+**Finding (honest):** with the *original* one-line docs the three keyword methods tie on standard
+queries (MRR 0.900) and the dense encoder leads on paraphrases (0.500 vs 0.267). But **enriching the
+knowledge base** with everyday synonyms (a cheap ~14-string edit, made after this evaluation exposed the
+gap) closed it for everyone — paraphrase MRR rose to **1.000 for TF-IDF/BM25/LSA** and 0.867 for dense.
+So on a small curated KB, **document quality dominates the retriever**: better descriptions beat a neural
+model, and cheap TF-IDF becomes the sensible default. Full before/after + per-query evidence:
+`docs/RETRIEVAL_EVALUATION.md`.
+
+**Held-out generalisation (not teaching to the test).** Because enrichment adds the words the paraphrase
+set probes, we also test a **held-out set** (n=6) whose every descriptive word is *verified absent* from
+the KB. There the keyword methods collapse to **MRR 0.250** (no word to match) while the **dense encoder
+generalises to 0.556** — real but imperfect. The fair claim: *enriched docs win on the everyday words
+users use; the dense retriever is what still helps on words the KB has never seen.* Two `verify_results.py`
+checks guard the baselines. Together with the LLM **faithfulness** gate (the RAG "faithfulness" measure),
+both halves of the RAG system — retrieve well, generate faithfully — are now evaluated.
+
 ## 4. Offline operation
 
 The entire pipeline uses only local libraries (pandas, numpy, scikit-learn, statsmodels,

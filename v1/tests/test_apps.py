@@ -86,15 +86,16 @@ def test_index_page_serves_accessible_markup():
     assert 'focus-visible' in html                                 # visible keyboard focus ring
 
 
-def test_cli_pick_model_prefers_llama(monkeypatch):
+def test_cli_pick_model_prefers_larger_pulled_model(monkeypatch):
     import chat
 
     from src import llm
 
+    # the CLI now delegates to llm.pick_model: prefer the largest pulled model, else the default
     monkeypatch.setattr(llm, "list_models", lambda: ["llama3.2:3b", "other"])
     assert chat.pick_model(None) == "llama3.2:3b"
-    monkeypatch.setattr(llm, "list_models", lambda: ["other"])
-    assert chat.pick_model(None) == "other"
+    monkeypatch.setattr(llm, "list_models", lambda: ["llama3.1:8b", "llama3.2:3b"])
+    assert chat.pick_model(None) == "llama3.1:8b"    # larger model auto-preferred
     monkeypatch.setattr(llm, "list_models", lambda: [])
-    assert chat.pick_model(None) == "llama3.2:3b"  # PREFERRED fallback when none pulled
-    assert chat.pick_model("custom") == "custom"  # explicit request always wins
+    assert chat.pick_model(None) == llm.DEFAULT_MODEL  # fallback when none pulled
+    assert chat.pick_model("custom") == "custom"      # explicit request always wins
