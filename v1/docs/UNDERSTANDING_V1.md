@@ -119,11 +119,11 @@ python3.12 apps/chat.py --llm "how warm did it get in summer 2013?"   # with Oll
 python3.12 apps/web/app.py        # prints http://localhost:3030
 
 # 4. The tests — the best way to see what each module *promises* to do
-python3.12 -m pytest                       # all 120
+python3.12 -m pytest                       # all 182
 python3.12 -m pytest tests/test_query_engine.py -v   # one module
 
 # 5. The independent proof the numbers are right
-python3.12 verify_results.py       # 25/25
+python3.12 verify_results.py       # 29/29
 
 # 6. One-command reproduce (seeded tests + verification banner)
 bash reproduce.sh

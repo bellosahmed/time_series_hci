@@ -3,8 +3,8 @@
 Built **2026-07-05** from the COP509 Information-Retrieval material (Evaluation Measures + LSI +
 RAG lectures). This is the "review-later" record of **what was done, why, and what the numbers were**.
 
-**State after this work:** 169 tests pass (1 skipped) · `verify_results.py` **29/29** · ruff clean ·
-mypy clean · coverage 92%. Retrievers compared: **TF-IDF, BM25, LSA, and a dense sentence-transformer**;
+**State after this work (2026-07-05):** 169 tests pass (1 skipped) · `verify_results.py` **29/29** ·
+ruff clean · mypy clean · coverage 92%. *(Current gates as of 2026-07-06: **182 tests** / **29/29**.)* Retrievers compared: **TF-IDF, BM25, LSA, and a dense sentence-transformer**;
 the sensor knowledge base was then **enriched** and the effect re-measured (see the enrichment section).
 
 ---
@@ -31,7 +31,7 @@ fix that, and the **LSI** lecture provides a second retriever to compare against
    - **`dense_retriever()`** — a dense **sentence-transformer** (`all-MiniLM-L6-v2`, the module's
      recommended encoder) via `EmbeddingRetriever`, with an automatic TF-IDF fallback when the model
      is unavailable.
-3. **Two `verify_results.py` checks** (now 27/27) that recompute the metrics and guard the TF-IDF and
+3. **Two `verify_results.py` checks** (part of the 29/29) that recompute the metrics and guard the TF-IDF and
    LSA baselines (dense/BM25 excluded to keep the trust gate dependency-light).
 4. **Tests** — `tests/test_retrieval_eval.py` (metrics vs hand-computed values + end-to-end +
    paraphrase gap) and retriever cases in `tests/test_rag.py` (BM25, LSA, dense — the last two skip
@@ -224,7 +224,7 @@ is the one that still helps when a query uses words the KB has never seen.* Guar
 ## Reproduce
 ```bash
 cd code/v1
-python3.12 verify_results.py     # 27/27 (includes the two retrieval checks)
+python3.12 verify_results.py     # 29/29 (includes the two retrieval checks)
 python3.12 -m pytest tests/test_retrieval_eval.py tests/test_rag.py
 python3.12 -c "from src import rag_system, retrieval_eval as re; \
 print(re.evaluate_retriever(rag_system.Retriever(), k=3)); \

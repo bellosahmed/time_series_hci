@@ -104,11 +104,26 @@ python3.12 apps/chat.py --agent "compare the hottest of 2013, 2014 and 2015"   #
 > tools; every number is still computed deterministically and faithfulness-checked. Pull a larger
 > model (`ollama pull llama3.1:8b`, or set `TSHCI_MODEL`) and it is used automatically.
 
-**Launch the web app** (prints a URL, e.g. http://localhost:3030):
+**Launch the web app** — serves the chat UI on **http://localhost:3030**:
 
 ```bash
-python3.12 apps/web/app.py
+python3.12 apps/web/app.py            # open http://localhost:3030
 ```
+
+It picks the port in this order: **command-line argument → `PORT` env var → 3030**. If that port is
+taken it automatically steps up to the next free one (and prints which it used), so the server always
+starts:
+
+```bash
+python3.12 apps/web/app.py 3050       # force a specific port
+PORT=8080 python3.12 apps/web/app.py  # or via the PORT env var
+```
+
+Stop it with `Ctrl-C` (or `pkill -f apps/web/app.py` if it's running in the background).
+
+> The browser UI is a small **React** app (React + `htm` vendored under `apps/web/vendor/` — no build
+> step, fully offline; just run `app.py`). Charts offer a **Day / Month** resolution toggle, and a
+> year-vs-year question draws a **two-line comparison**. `chart.js` holds the unit-tested SVG renderer.
 
 > The local LLM is **optional**. With no Ollama installed, every answer still works — you just get the
 > exact computed figures in plain template form instead of LLM-reworded prose.

@@ -1,7 +1,7 @@
 // Unit tests for the pure client-side render helpers (chart.js). Run: `node chart.test.js`.
 // Also driven from the Python suite via tests/test_web_js.py (skipped if node is absent).
 const assert = require('assert');
-const { esc, drawChart, swatch, legendHtml } = require('./chart.js');
+const { esc, drawChart, swatch, lineSwatch, legendHtml } = require('./chart.js');
 
 // --- esc ---
 assert.strictEqual(esc('<a>&'), '&lt;a&gt;&amp;');
@@ -35,5 +35,21 @@ assert.ok(svg.includes('role="img"') && svg.includes('<title>'));   // accessibl
 assert.ok(svg.includes('#dc2626'));                                 // anomaly mark
 assert.ok(svg.includes('stroke-dasharray="2 1.5"'));                // borderline ring
 assert.ok(svg.trim().endsWith('</svg>'));
+
+// --- drawChart + legendHtml: two-series comparison overlay ---
+const cmp = {
+  label: 'T (degC) — 2013', monthaxis: true,
+  x: [new Date(2000, 0, 1).toISOString(), new Date(2000, 6, 1).toISOString()],
+  y: [2, 20],
+  series2: { label: 'T (degC) — 2014',
+             x: [new Date(2000, 0, 1).toISOString(), new Date(2000, 6, 1).toISOString()],
+             y: [4, 24] },
+};
+const csvg = drawChart(cmp);
+assert.ok(csvg.includes('#2563eb') && csvg.includes('#e07a34'));   // both series drawn
+assert.ok(csvg.includes('compared with T (degC) — 2014'));         // accessible description
+const clg = legendHtml(cmp);
+assert.ok(clg.includes('T (degC) — 2013') && clg.includes('T (degC) — 2014'));  // both named
+assert.ok(lineSwatch('#e07a34').includes('#e07a34'));
 
 console.log('chart.test.js: all assertions passed');

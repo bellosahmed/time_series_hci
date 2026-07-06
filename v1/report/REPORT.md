@@ -1,11 +1,12 @@
 # Time-Series Data Analysis Through a Natural HCI Interface
 
 **MSc Project Report (Draft)**
-_Author: Bello Ahmed · Loughborough University · Last updated: 4 July 2026_
+_Author: Bello Ahmed · Loughborough University · Last updated: 6 July 2026_
 
-> This is a working draft generated from the implemented system and its measured results.
-> Placeholders marked **[ADD]** are for you to complete (exact citations, personal reflection,
-> supervisor-specific framing). Numbers come from the actual runs in `v1/notebooks/`.
+> This is a working draft generated from the implemented system and its measured results. All numbers
+> come from the actual runs in `v1/notebooks/` and the test/verification suites. Remaining author
+> tasks are personal reflection and any supervisor-specific framing; reference formatting should be
+> confirmed against the department's exact style guide.
 
 ---
 
@@ -85,23 +86,48 @@ conclusions and future work.
 
 ## 2. Literature Review
 
-**Themes.** (1) real-world multi-sensor monitoring datasets; (2) statistical behaviour modelling;
-(3) anomaly detection (statistical, classical ML, deep learning); (4) evaluation challenges;
-(5) explainability and interaction; (6) local / privacy-preserving design.
+This work sits at the intersection of six strands: multi-sensor monitoring data, statistical
+behaviour modelling, anomaly detection, evaluation methodology, explainable/interactive systems, and
+local privacy-preserving deployment.
 
-**Key methods and references** _(verify exact citations — **[ADD]**)_:
-- Isolation Forest — Liu, Ting & Zhou (2008).
-- STL decomposition — Cleveland et al. (1990).
-- LSTM for anomaly detection — Malhotra et al. (2015).
-- TCN / 1D CNN for sequences — Bai, Kolter & Koltun (2018).
-- Deep anomaly detection survey — Pang et al. (2021).
-- Benchmark critique — Wu & Keogh (2021).
-- Retrieval-Augmented Generation — Lewis et al. (2020).
-- Datasets — M100 ExaData (Borghesi et al.), Vigoya data-centre temperature, RUAD.
+**Monitoring datasets.** Multi-sensor environmental and infrastructure monitoring produces long,
+seasonal, multivariate series that carry real data-quality faults. Comparable annotated collections
+include the data-centre temperature dataset of Vigoya *et al.* (2020) and the M100 ExaData
+supercomputer-telemetry campaign (Borghesi *et al.*, 2023). The Jena Climate record used here shares
+their multivariate, strongly-seasonal character while adding documented `-9999` sensor faults, making
+it a realistic testbed for a pipeline that must both clean and reason about the data.
+
+**Statistical behaviour modelling.** Seasonal-Trend decomposition using Loess (STL; Cleveland *et
+al.*, 1990) separates a series into trend, seasonal and residual components, and classical
+Box–Jenkins ARIMA modelling (Box and Jenkins, 1970) captures autocorrelated structure. Both underpin
+the residual- and forecast-error anomaly signals used in this project.
+
+**Anomaly detection.** Approaches span statistical residual tests; distance/density methods such as
+the Local Outlier Factor (Breunig *et al.*, 2000) and the One-Class SVM (Schölkopf *et al.*, 2001);
+the tree-based Isolation Forest (Liu, Ting and Zhou, 2008); shape-based discords via the Matrix
+Profile (Yeh *et al.*, 2016); and deep unsupervised detectors — LSTM encoder–decoders (Malhotra *et
+al.*, 2015) and temporal convolutional networks (Bai, Kolter and Koltun, 2018). Pang *et al.* (2021)
+survey the deep family. This project implements a representative detector from each family and
+compares them on an equal footing rather than advocating a single method.
+
+**Evaluation methodology.** Wu and Keogh (2021) show that many time-series anomaly benchmarks are
+flawed and create an "illusion of progress", which motivates this project's reliance on *synthetic
+injection with known labels*, point-adjusted metrics, bootstrap confidence intervals and a paired
+significance test rather than a single headline score.
+
+**Explainability, retrieval and interaction.** Retrieval-Augmented Generation (Lewis *et al.*, 2020)
+grounds language-model output in retrieved evidence; the retriever here is evaluated with classical
+information-retrieval ranking — TF-IDF weighting after Sparck Jones (1972), BM25 (Robertson and
+Zaragoza, 2009) and Latent Semantic Analysis (Deerwester *et al.*, 1990) — alongside a dense
+Sentence-BERT encoder (Reimers and Gurevych, 2019). Critically, language models are prone to
+*hallucination*, fabricating fluent but unsupported facts (Ji *et al.*, 2023); in a numerical-analytics
+setting this is unacceptable, and it directly motivates the strict computation/explanation separation
+and the automated faithfulness check that define this project's contribution.
 
 **Gap.** Many works *detect* anomalies, but few combine **exact numerical querying + natural-language
-explanation + an HCI interface + local, privacy-preserving deployment**. This project targets that
-intersection, and additionally separates computation from explanation to guarantee numerical trust.
+explanation + an interactive interface + local, privacy-preserving deployment**, and fewer still
+*guarantee* that the explanation introduces no figure absent from the computed facts. This project
+targets that intersection, separating computation from explanation to make numerical trust verifiable.
 
 ---
 
@@ -184,11 +210,11 @@ Flask for the web UI; an optional local Ollama model for phrasing. Dependencies 
 (Blackwell) with the cu128 PyTorch build; results are equivalent to CPU.
 
 ### 4.4 Testing
-**87 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
+**182 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
 routing (incl. circular wind-direction handling and the LLM trust-gate), the Flask/CLI app layer,
 the client-side chart/legend JavaScript (run in Node), synthetic evaluation with confidence
-intervals, and the deep / ARIMA detectors. An independent
-harness (`verify_results.py`) additionally recomputes results a different way and passes **21/21**
+intervals, the retriever IR metrics, and the deep / ARIMA detectors. An independent
+harness (`verify_results.py`) additionally recomputes results a different way and passes **29/29**
 checks (plus one advisory LLM-faithfulness vote); `reproduce.sh` regenerates everything in one command.
 
 ---
@@ -202,10 +228,11 @@ correct, confirming the pipeline handles the data soundly.
 
 ### 5.2 Query-engine correctness
 On the full dataset, every exact query matched the independent `pandas` ground truth **exactly**
-(values and timestamps): the `verify_results.py` harness passes **21/21** cross-checks — max, min,
+(values and timestamps): the `verify_results.py` harness passes **29/29** cross-checks — max, min,
 mean and correlation equal pandas; scoped and threshold queries equal the corresponding pandas slice;
-per-sensor availability and skew are recomputed and agree — and the unit suite (**87 tests**) covers
-the same guarantees. This establishes the trust guarantee the architecture depends on.
+per-sensor availability and skew are recomputed and agree; and the retriever IR metrics are
+independently reproduced — and the unit suite (**182 tests**) covers the same guarantees. This
+establishes the trust guarantee the architecture depends on.
 
 ### 5.3 Anomaly-detection comparison
 | Model | Type | Flags | Time | Precision* | Recall* | F1* |
@@ -411,16 +438,76 @@ work:
 ---
 
 ## References
-**[ADD]** Format per your department's gu(e.g. Harvard/IEEE). Core entries to include: Isolation
-Forest (2008); STL (1990); Malhotra et al. (2015); Bai et al. (2018); Pang et al. (2021); Wu & Keogh
-(2021); Lewis et al. (2020); the M100 ExaData, Vigoya and RUAD dataset papers.
+
+_Author–date (Harvard) style; confirm against the department's exact style guide before submission._
+
+Bai, S., Kolter, J.Z. and Koltun, V. (2018) *An Empirical Evaluation of Generic Convolutional and
+Recurrent Networks for Sequence Modeling*. arXiv:1803.01271.
+
+Borghesi, A., Molan, M., Milano, M. and Bartolini, A. (2023) 'M100 ExaData: a data collection
+campaign on the CINECA Marconi100 Tier-0 supercomputer', *Scientific Data*, 10, 288.
+
+Box, G.E.P. and Jenkins, G.M. (1970) *Time Series Analysis: Forecasting and Control*. San Francisco:
+Holden-Day.
+
+Breunig, M.M., Kriegel, H.-P., Ng, R.T. and Sander, J. (2000) 'LOF: Identifying Density-Based Local
+Outliers', *Proceedings of the ACM SIGMOD International Conference on Management of Data*, pp. 93–104.
+
+Cleveland, R.B., Cleveland, W.S., McRae, J.E. and Terpenning, I. (1990) 'STL: A Seasonal-Trend
+Decomposition Procedure Based on Loess', *Journal of Official Statistics*, 6(1), pp. 3–73.
+
+Deerwester, S., Dumais, S.T., Furnas, G.W., Landauer, T.K. and Harshman, R. (1990) 'Indexing by
+Latent Semantic Analysis', *Journal of the American Society for Information Science*, 41(6),
+pp. 391–407.
+
+Ji, Z., Lee, N., Frieske, R., Yu, T., Su, D., Xu, Y., Ishii, E., Bang, Y.J., Madotto, A. and Fung, P.
+(2023) 'Survey of Hallucination in Natural Language Generation', *ACM Computing Surveys*, 55(12),
+pp. 1–38.
+
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttler, H., Lewis, M.,
+Yih, W., Rocktäschel, T., Riedel, S. and Kiela, D. (2020) 'Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks', *Advances in Neural Information Processing Systems (NeurIPS)*, 33,
+pp. 9459–9474.
+
+Liu, F.T., Ting, K.M. and Zhou, Z.-H. (2008) 'Isolation Forest', *Proceedings of the IEEE
+International Conference on Data Mining (ICDM)*, pp. 413–422.
+
+Malhotra, P., Vig, L., Shroff, G. and Agarwal, P. (2015) 'Long Short Term Memory Networks for Anomaly
+Detection in Time Series', *Proceedings of the European Symposium on Artificial Neural Networks
+(ESANN)*, pp. 89–94.
+
+Pang, G., Shen, C., Cao, L. and van den Hengel, A. (2021) 'Deep Learning for Anomaly Detection: A
+Review', *ACM Computing Surveys*, 54(2), pp. 1–38.
+
+Reimers, N. and Gurevych, I. (2019) 'Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks',
+*Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing (EMNLP)*,
+pp. 3982–3992.
+
+Robertson, S. and Zaragoza, H. (2009) 'The Probabilistic Relevance Framework: BM25 and Beyond',
+*Foundations and Trends in Information Retrieval*, 3(4), pp. 333–389.
+
+Schölkopf, B., Platt, J.C., Shawe-Taylor, J., Smola, A.J. and Williamson, R.C. (2001) 'Estimating the
+Support of a High-Dimensional Distribution', *Neural Computation*, 13(7), pp. 1443–1471.
+
+Sparck Jones, K. (1972) 'A Statistical Interpretation of Term Specificity and its Application in
+Retrieval', *Journal of Documentation*, 28(1), pp. 11–21.
+
+Vigoya, L., Fernandez, D., Carneiro, V. and Cacheda, F. (2020) 'Annotated Dataset for Anomaly
+Detection in a Data Center with IoT Sensors', *Sensors*, 20(13), 3745.
+
+Wu, R. and Keogh, E.J. (2021) 'Current Time Series Anomaly Detection Benchmarks are Flawed and are
+Creating the Illusion of Progress', *IEEE Transactions on Knowledge and Data Engineering*.
+
+Yeh, C.-C.M., Zhu, Y., Ulanova, L., Begum, N., Ding, Y., Dau, H.A., Silva, D.F., Mueen, A. and Keogh,
+E. (2016) 'Matrix Profile I: All Pairs Similarity Joins for Time Series', *Proceedings of the IEEE
+International Conference on Data Mining (ICDM)*, pp. 1317–1322.
 
 ## Appendix A — How to run
 ```bash
 cd code/v1
 python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
-python -m pytest tests/          # 87 pass (1 skipped)
-python verify_results.py         # 21/21 independent checks
+python -m pytest tests/          # 182 pass (1 skipped)
+python verify_results.py         # 29/29 independent checks
 bash reproduce.sh                # both of the above, with an environment banner
 ```
 Notebooks `00`–`04` reproduce the code walkthrough, exploration/visualisation, methods and evaluation,

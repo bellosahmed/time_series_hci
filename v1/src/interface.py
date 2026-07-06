@@ -31,8 +31,10 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
     _coerce_date,
     detect_intent,
     is_causal_query,
+    is_followup_cue,
     resolve_compare,
     resolve_day,
+    resolve_followup,
     resolve_legend_query,
     resolve_period,
     resolve_sensors,
@@ -215,16 +217,28 @@ class Interface:
         answered directly (single-shot), the latter being the documented no-model limitation.
         """
         resolved = question
-        if (resolve_legend_query(question) is None and self.use_llm and self.history
-                and llm.is_available() and self._needs_context(question)):
-            try:
-                rw = llm.rewrite_followup(question, self.history, model=self.model)
-                if rw and self._routable(rw) and rw.strip().lower() != question.strip().lower():
-                    resolved = rw.strip()   # accept only a rewrite the parser can actually route
-                elif rw:
-                    logger.info("follow-up rewrite %r not routable; using the question as-is.", rw)
-            except Exception as exc:
-                logger.warning("follow-up rewrite failed (%s); using the question as-is.", exc)
+        # Attempt follow-up resolution when the question is elliptical, or when a continuation cue
+        # ("and…", "what about…") means it should inherit the prior scope even if it restates an
+        # intent/sensor (e.g. "and the coldest?" -> the coldest *in the year we were discussing*).
+        if (resolve_legend_query(question) is None and self.history
+                and (self._needs_context(question) or is_followup_cue(question))):
+            used = False
+            # Richer path first: with the LLM on, let it rewrite free-form ellipsis.
+            if self.use_llm and llm.is_available():
+                try:
+                    rw = llm.rewrite_followup(question, self.history, model=self.model)
+                    if rw and self._routable(rw) and rw.strip().lower() != question.strip().lower():
+                        resolved = rw.strip()   # accept only a rewrite the parser can actually route
+                        used = True
+                    elif rw:
+                        logger.info("follow-up rewrite %r not routable; trying deterministic memory.", rw)
+                except Exception as exc:
+                    logger.warning("follow-up rewrite failed (%s); trying deterministic memory.", exc)
+            # Deterministic follow-up memory: works with the LLM off, and backs up an unusable rewrite.
+            if not used:
+                det = resolve_followup(question, self.history, list(self.df.columns))
+                if det and self._routable(det) and det.strip().lower() != question.strip().lower():
+                    resolved = det.strip()
 
         ans = self._answer(resolved)
         ans.question = question                 # keep the user's own wording for display
@@ -250,9 +264,22 @@ class Interface:
         start, end, _ = resolve_period(question)
         return self.df.loc[start:end] if (start or end) else self.df
 
+    @staticmethod
+    def _series_payload(s):
+        """{x, y} for a pandas Series, timestamps ISO-formatted and values rounded."""
+        return {"x": [t.isoformat() for t in s.index],
+                "y": [round(float(v), 2) for v in s.values]}
+
     def _chart_for(self, ans: Answer):
-        """Build a small downsampled chart (line + optional markers / forecast band)."""
-        if not ans.sensors or ans.intent in ("correlation", "compare", "missing"):
+        """Build a small chart payload (line + optional markers / forecast / comparison).
+
+        The payload carries day- and month-resampled ``views`` so the web UI can offer a
+        day-by-day / month-by-month toggle; the top-level ``x``/``y`` mirror the default view
+        (kept for back-compatibility with older readers and the JS unit tests).
+        """
+        if ans.intent == "compare" and isinstance(ans.value, dict) and "yA" in ans.value:
+            return self._compare_chart(ans.sensors[0], ans.value) if ans.sensors else None
+        if not ans.sensors or ans.intent in ("correlation", "missing"):
             return None
         sensor = ans.sensors[0]
         if sensor not in self.df.columns:
@@ -263,8 +290,8 @@ class Interface:
         if ans.intent == "forecast" and ans.value is not None:
             return self._forecast_chart(sensor, data, ans.value)
         s = data[sensor].dropna()
-        step = max(1, len(s) // 220)
-        ds = s.iloc[::step]
+        if not len(s):
+            return None
         marks = []
         if ans.intent in ("max", "min") and hasattr(ans.value, "when"):
             marks = [{"x": ans.value.when.isoformat(), "y": round(float(ans.value.value), 2),
@@ -280,10 +307,57 @@ class Interface:
                 if ts in s.index:
                     marks.append({"x": ts.isoformat(), "y": round(float(s.loc[ts]), 2),
                                   "kind": "borderline"})
-        return {"label": sensor,
-                "x": [t.isoformat() for t in ds.index],
-                "y": [round(float(v), 2) for v in ds.values],
-                "marks": marks}
+
+        # Aggregate to whole days / months so the line is aligned and readable at any span.
+        # A view is only offered when it has enough points to be meaningful (>= 2).
+        span_days = (s.index[-1] - s.index[0]).total_seconds() / 86400 if len(s) > 1 else 0.0
+        views: dict = {}
+        if span_days >= 1.5:
+            day = s.resample("1D").mean().dropna()
+            step = max(1, len(day) // 400)           # cap a multi-year daily line
+            views["day"] = self._series_payload(day.iloc[::step])
+        if span_days >= 55:
+            month = s.resample("1MS").mean().dropna()
+            if len(month) >= 2:
+                views["month"] = self._series_payload(month)
+
+        if views:
+            default = "month" if (span_days > 365 and "month" in views) else "day"
+            base = views[default]
+        else:                                         # sub-day scope: keep raw hourly readings
+            step = max(1, len(s) // 220)
+            base = self._series_payload(s.iloc[::step])
+            default = None
+        return {"label": sensor, "marks": marks, "views": views, "default": default, **base}
+
+    def _compare_chart(self, sensor, val):
+        """Overlay two years' month-of-year profiles so a comparison shows a real chart.
+
+        Both years are mapped onto a shared synthetic year (2000) so their monthly means line
+        up on a Jan-Dec axis; the UI labels months only (``monthaxis``). Returns None if either
+        year lacks enough monthly coverage to draw a line.
+        """
+        if sensor not in self.df.columns:
+            return None
+        s = self.df[sensor].dropna()
+        yA, yB = val["yA"], val["yB"]
+
+        def profile(year):
+            sub = s[s.index.year == year]
+            if not len(sub):
+                return None
+            m = sub.resample("1MS").mean().dropna()
+            if len(m) < 2:
+                return None
+            return {"x": [pd.Timestamp(2000, t.month, 1).isoformat() for t in m.index],
+                    "y": [round(float(v), 2) for v in m.values]}
+
+        pA, pB = profile(yA), profile(yB)
+        if pA is None or pB is None:
+            return None
+        return {"label": f"{sensor} — {yA}", "monthaxis": True, "marks": [],
+                "x": pA["x"], "y": pA["y"],
+                "series2": {"label": f"{sensor} — {yB}", "x": pB["x"], "y": pB["y"]}}
 
     def _forecast_chart(self, sensor, data, fc):
         hist = data[sensor].resample("1D").mean().dropna().iloc[-60:]

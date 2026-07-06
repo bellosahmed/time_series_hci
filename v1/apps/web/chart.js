@@ -11,14 +11,23 @@ function drawChart(c){
   let times=[...hx], ys=[...hy];
   const f=c.forecast;
   if(f){ const fx=f.x.map(Date.parse); times=times.concat(fx); ys=ys.concat(f.upper,f.lower,f.mean); }
+  const s2=c.series2;  // optional second line (used to overlay two years for a comparison)
+  let s2x=null;
+  if(s2){ s2x=s2.x.map(Date.parse); times=times.concat(s2x); ys=ys.concat(s2.y); }
   const tMin=Math.min(...times), tMax=Math.max(...times);
   const yMin=Math.min(...ys), yMax=Math.max(...ys);
   const sx=t=> P + (W-2*P)*((t-tMin)/((tMax-tMin)||1));
   const sy=v=> (H-P) - (H-2*P)*((v-yMin)/((yMax-yMin)||1));
-  const desc = 'Line chart of ' + (c.label||'sensor') + (c.forecast ? ', with 14-day forecast band' : '');
+  const desc = 'Line chart of ' + (c.label||'sensor') +
+    (s2 ? ' compared with ' + (s2.label||'another period') : '') +
+    (c.forecast ? ', with 14-day forecast band' : '');
   let svg=`<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(desc)}"><title>${esc(desc)}</title>`;
   const hpts=hx.map((t,i)=>`${sx(t).toFixed(1)},${sy(hy[i]).toFixed(1)}`).join(' ');
   svg+=`<polyline points="${hpts}" fill="none" stroke="#2563eb" stroke-width="1.6"/>`;
+  if(s2){  // amber = the second period, matching the compare legend
+    const p2=s2x.map((t,i)=>`${sx(t).toFixed(1)},${sy(s2.y[i]).toFixed(1)}`).join(' ');
+    svg+=`<polyline points="${p2}" fill="none" stroke="#e07a34" stroke-width="1.6"/>`;
+  }
   if(f){
     const fx=f.x.map(Date.parse);
     const up=fx.map((t,i)=>`${sx(t).toFixed(1)},${sy(f.upper[i]).toFixed(1)}`);
@@ -34,7 +43,10 @@ function drawChart(c){
       return; }
     const col = mk.kind==='anomaly'?'#dc2626':(mk.kind==='max'?'#ea580c':'#0ea5e9');
     svg+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4" fill="${col}"/>`; });
-  const fmt=d=>new Date(d).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'2-digit'});
+  // monthaxis: a month-of-year comparison shares a synthetic year, so label months only.
+  const fmt = c.monthaxis
+    ? d=>new Date(d).toLocaleDateString(undefined,{month:'short'})
+    : d=>new Date(d).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'2-digit'});
   svg+=`<text x="3" y="${(sy(yMax)+4).toFixed(1)}" class="ax">${yMax.toFixed(1)}</text>`;
   svg+=`<text x="3" y="${(sy(yMin)+4).toFixed(1)}" class="ax">${yMin.toFixed(1)}</text>`;
   svg+=`<text x="${P}" y="${H-7}" class="ax">${fmt(tMin)}</text>`;
@@ -53,7 +65,18 @@ function swatch(kind){
   return '';
 }
 
+// A coloured line swatch, for the two-series comparison legend.
+function lineSwatch(colour){
+  return `<svg width="20" height="10"><line x1="1" y1="5" x2="19" y2="5" stroke="${colour}" stroke-width="2"/></svg>`;
+}
+
 function legendHtml(c){
+  if(c.series2){        // comparison: name each of the two overlaid lines by colour
+    return '<div class="legend" aria-label="Chart legend">' +
+      `<span class="item">${lineSwatch('#2563eb')}<span>${esc(c.label||'')}</span></span>` +
+      `<span class="item">${lineSwatch('#e07a34')}<span>${esc(c.series2.label||'')}</span></span>` +
+      '</div>';
+  }
   const kinds = new Set((c.marks||[]).map(m=>m.kind));
   if(kinds.size===0 && !c.forecast) return '';        // plain line only — nothing to explain
   const items = [['obs', 'observed ' + (c.label||'')]];
@@ -68,5 +91,5 @@ function legendHtml(c){
 }
 
 if (typeof module !== 'undefined' && module.exports) {  // Node (tests); no-op in the browser
-  module.exports = { esc, drawChart, swatch, legendHtml };
+  module.exports = { esc, drawChart, swatch, lineSwatch, legendHtml };
 }

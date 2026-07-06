@@ -5,212 +5,192 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Weather Questions — Jena Climate</title>
 <style>
+  /* Cool, atmospheric neutrals (blue-biased, not pure grey) with one warm counterpoint —
+     temperature amber — plus distinct trust semantics: teal computed, slate context, violet inferred. */
   :root {
-    --bg:#f5f7fa; --card:#ffffff; --ink:#1b2430; --muted:#5b6877; --line:#e3e8ef;
-    --accent:#2563eb; --accent-ink:#ffffff; --chip:#eef2f8; --good:#16a34a; --warn:#b45309;
-    --num:#0f766e; --note:#6d28d9;
+    --bg:#eaeff4; --surface:#ffffff; --surface-2:#f5f8fb; --ink:#16212e; --muted:#5a6b7d;
+    --line:#dbe3ec; --accent:#2f6fed; --accent-ink:#ffffff; --accent-soft:#e7effe;
+    --warm:#e07a34; --num:#0d9488; --note:#7c3aed; --good:#16a34a; --idle:#aab6c4;
+    --chip:#eaf0f7; --err:#c02626; --shadow:20 40 70;
+    --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","Roboto Mono",Menlo,Consolas,monospace;
+    --wrap:920px;
   }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e151d; --surface:#161f2a; --surface-2:#1c2833; --ink:#e6edf5; --muted:#93a3b5;
+      --line:#26333f; --accent:#5b8dff; --accent-ink:#08122a; --accent-soft:#182741;
+      --warm:#f0954e; --num:#2dd4bf; --note:#a78bfa; --good:#34d399; --idle:#516072;
+      --chip:#1d2a37; --err:#f87171; --shadow:0 0 0;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eaeff4; --surface:#ffffff; --surface-2:#f5f8fb; --ink:#16212e; --muted:#5a6b7d;
+    --line:#dbe3ec; --accent:#2f6fed; --accent-ink:#ffffff; --accent-soft:#e7effe;
+    --warm:#e07a34; --num:#0d9488; --note:#7c3aed; --good:#16a34a; --idle:#aab6c4;
+    --chip:#eaf0f7; --err:#c02626; --shadow:20 40 70;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e151d; --surface:#161f2a; --surface-2:#1c2833; --ink:#e6edf5; --muted:#93a3b5;
+    --line:#26333f; --accent:#5b8dff; --accent-ink:#08122a; --accent-soft:#182741;
+    --warm:#f0954e; --num:#2dd4bf; --note:#a78bfa; --good:#34d399; --idle:#516072;
+    --chip:#1d2a37; --err:#f87171; --shadow:0 0 0;
+  }
+
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-         background:var(--bg); color:var(--ink); height:100vh; display:flex; flex-direction:column;
-         font-size:16px; line-height:1.55; }
+  html,body { height:100%; }
+  body { margin:0; font-family:var(--font); background:var(--bg); color:var(--ink);
+         display:flex; flex-direction:column; font-size:16px; line-height:1.55;
+         -webkit-font-smoothing:antialiased; }
+  #root { flex:1; display:flex; flex-direction:column; width:100%; min-height:0; }
+  .wrap { width:100%; max-width:var(--wrap); margin-inline:auto; }
+  b { font-weight:650; }
 
-  header { padding:16px 22px; background:var(--card); border-bottom:1px solid var(--line);
-           display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
-  header h1 { font-size:20px; margin:0; }
-  header .sub { color:var(--muted); font-size:13px; margin-top:2px; }
-  .controls { margin-left:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  .toggle { display:flex; align-items:center; gap:7px; font-size:14px; cursor:pointer;
-            background:var(--chip); padding:7px 12px; border-radius:20px; }
-  select { background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:8px;
-           padding:7px 9px; font-size:13px; }
-  .status { font-size:13px; color:var(--muted); display:flex; align-items:center; }
-  .dot { width:9px; height:9px; border-radius:50%; background:#c2c9d2; margin-right:6px; }
-  .dot.on { background:var(--good); }
+  /* ---- header ---- */
+  header { background:var(--surface); border-bottom:1px solid var(--line); }
+  header .bar { display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:14px 22px; }
+  .brand { display:flex; align-items:center; gap:13px; }
+  .badge { width:42px; height:42px; flex:0 0 auto; display:grid; place-items:center; font-size:22px;
+           border-radius:12px; background:linear-gradient(150deg,var(--warm),#c85f22); color:#fff;
+           box-shadow:0 2px 8px rgb(var(--shadow) / .18); }
+  header h1 { font-size:19px; margin:0; letter-spacing:-.01em; }
+  .sub { color:var(--muted); font-size:12.5px; margin-top:1px; font-variant-numeric:tabular-nums; }
+  .controls { margin-left:auto; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .toggle { display:inline-flex; align-items:center; gap:8px; font-size:13.5px; cursor:pointer;
+            background:var(--surface-2); border:1px solid var(--line); padding:7px 13px; border-radius:22px;
+            user-select:none; transition:border-color .15s, background .15s; }
+  .toggle:hover { border-color:var(--accent); }
+  .toggle input { accent-color:var(--accent); width:15px; height:15px; }
+  select { background:var(--surface); color:var(--ink); border:1px solid var(--line); border-radius:9px;
+           padding:7px 10px; font-size:13px; font-family:inherit; }
+  .status { display:inline-flex; align-items:center; gap:7px; font-size:13px; color:var(--muted); }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--idle);
+         box-shadow:0 0 0 3px transparent; transition:.2s; }
+  .dot.on { background:var(--good); box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 22%,transparent); }
 
-  .trustbar { background:#eef5ff; color:#1e3a8a; font-size:13.5px; padding:9px 22px;
-              border-bottom:1px solid #dbe7ff; }
-  .trustbar b { font-weight:600; }
+  /* ---- trust banner + legend ---- */
+  .trustbar { background:var(--accent-soft); border-bottom:1px solid var(--line); }
+  .trustinner { display:flex; align-items:center; gap:12px 16px; flex-wrap:wrap; padding:9px 22px;
+                font-size:13px; color:var(--ink); }
+  .tmark { color:var(--num); font-weight:800; }
+  .ttext { color:var(--muted); }
+  .ttext b { color:var(--ink); }
+  .tlegend { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; }
+  .lg { font-size:11.5px; padding:3px 9px; border-radius:20px; background:var(--surface);
+        border:1px solid var(--line); white-space:nowrap; }
+  .lg.num { color:var(--num); } .lg.bg { color:var(--muted); } .lg.note { color:var(--note); }
 
-  #chips { padding:14px 22px 4px; display:flex; gap:9px; flex-wrap:wrap; }
-  .chip { background:var(--chip); border:1px solid var(--line); color:var(--ink); border-radius:18px;
-          padding:8px 14px; font-size:14px; font-family:inherit; cursor:pointer; transition:.12s; }
-  .chip:hover { border-color:var(--accent); color:var(--accent); }
+  /* ---- example question chips ---- */
+  #chips { display:flex; gap:9px; flex-wrap:wrap; padding:16px 22px 6px; }
+  .chip { background:var(--surface); border:1px solid var(--line); color:var(--ink); border-radius:20px;
+          padding:8px 15px; font-size:13.5px; font-family:inherit; cursor:pointer;
+          transition:transform .12s, border-color .12s, color .12s, box-shadow .12s; }
+  .chip:hover { border-color:var(--accent); color:var(--accent); transform:translateY(-1px);
+                box-shadow:0 3px 10px rgb(var(--shadow) / .10); }
 
-  /* Accessibility: a clearly visible keyboard focus ring on every interactive element. */
   a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
   .chip:focus-visible, .toggle:focus-visible {
-    outline:3px solid var(--accent); outline-offset:2px;
+    outline:3px solid var(--accent); outline-offset:2px; border-radius:8px;
   }
-  /* Visually-hidden text for screen readers only. */
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
              clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 
-  #chat { flex:1; overflow-y:auto; padding:18px 22px; display:flex; flex-direction:column; gap:16px; }
-  .msg { max-width:720px; }
+  /* ---- conversation ---- */
+  #chat { flex:1; overflow-y:auto; width:100%; max-width:var(--wrap); margin-inline:auto;
+          padding:20px 22px 26px; display:flex; flex-direction:column; gap:16px; }
+  #chat:empty::before {
+    content:"Ask a question above — you'll get the exact figure from the records, an optional plain-English explanation, and a chart.";
+    display:block; margin:auto; max-width:34ch; text-align:center; color:var(--muted);
+    font-size:14.5px; line-height:1.6;
+  }
+  .msg { max-width:min(760px,100%); animation:rise .26s ease both; }
+  @keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
   .msg.user { align-self:flex-end; }
-  .user .bubble { background:var(--accent); color:var(--accent-ink); padding:11px 15px;
-                  border-radius:16px 16px 4px 16px; font-size:15.5px; }
-  .bot .bubble { background:var(--card); border:1px solid var(--line); border-radius:16px 16px 16px 4px;
-                 padding:14px 16px; box-shadow:0 1px 2px rgba(20,30,50,.04); }
-  .answer { font-size:16.5px; color:var(--ink); }
-  .err { color:#b91c1c; }
 
-  .details { margin-top:12px; border-top:1px solid var(--line); padding-top:11px;
-             display:flex; flex-direction:column; gap:9px; }
-  .fact { display:flex; gap:10px; align-items:flex-start; font-size:14px; }
-  .fact .ico { flex:0 0 auto; width:22px; text-align:center; }
-  .fact .lab { font-weight:600; }
+  .user .bubble { background:var(--accent); color:var(--accent-ink); padding:11px 15px;
+                  border-radius:16px 16px 5px 16px; font-size:15px; box-shadow:0 2px 8px rgb(var(--shadow) / .14); }
+  .bot .bubble { background:var(--surface); border:1px solid var(--line); border-radius:5px 16px 16px 16px;
+                 padding:15px 17px; box-shadow:0 2px 10px rgb(var(--shadow) / .06); }
+  .answer { font-size:16px; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .answer.exact { font-family:var(--mono); font-size:14.5px; line-height:1.5;
+                  background:var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--num);
+                  border-radius:8px; padding:11px 13px; }
+  .err { color:var(--err); font-weight:500; }
+
+  .details { margin-top:13px; border-top:1px solid var(--line); padding-top:12px;
+             display:flex; flex-direction:column; gap:10px; }
+  .fact { display:flex; gap:11px; align-items:flex-start; font-size:13.5px; }
+  .fact .ico { flex:0 0 auto; width:20px; text-align:center; font-size:14px; line-height:1.5; }
+  .fact .lab { font-weight:650; }
   .fact.num .lab { color:var(--num); }
   .fact.bg  .lab { color:var(--muted); }
   .fact.note .lab { color:var(--note); }
+  .fact.num .val { font-family:var(--mono); font-size:12.8px; font-variant-numeric:tabular-nums;
+                   color:var(--ink); }
   .fact .val { color:var(--ink); }
-  .tag { margin-top:10px; font-size:12px; color:var(--muted); }
-  .tag .pill { background:var(--chip); border-radius:10px; padding:2px 8px; }
-  .chartwrap { margin-top:12px; }
-  .chartcap { font-size:12.5px; color:var(--muted); margin-bottom:4px; }
-  svg.chart { width:100%; height:auto; background:#fbfdff; border:1px solid var(--line); border-radius:8px; }
-  svg.chart text.ax { fill:var(--muted); font-size:9px; }
-  .legend { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:6px; font-size:12px; color:var(--muted); }
+
+  .tag { margin-top:11px; font-size:12px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .tag .pill { background:var(--chip); border:1px solid var(--line); border-radius:20px; padding:2px 10px; }
+
+  /* ---- chart ---- */
+  .chartwrap { margin-top:13px; }
+  .chartcap { font-size:12.5px; color:var(--muted); margin-bottom:6px; font-weight:500;
+              display:flex; align-items:center; gap:10px; }
+  .chartcap .captext { min-width:0; }
+  /* Day / month resolution switch */
+  .granctl { margin-left:auto; display:inline-flex; gap:2px; flex:0 0 auto;
+             background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:2px; }
+  .granctl button { border:none; background:transparent; color:var(--muted); font-family:inherit;
+                    font-size:11.5px; font-weight:600; padding:4px 11px; border-radius:7px; cursor:pointer;
+                    transition:background .12s, color .12s; }
+  .granctl button:hover { color:var(--ink); }
+  .granctl button.active { background:var(--accent); color:var(--accent-ink); }
+  svg.chart { width:100%; height:auto; aspect-ratio:640 / 170; background:var(--surface-2);
+              border:1px solid var(--line); border-radius:10px; }
+  svg.chart text.ax { fill:var(--muted); font-size:9px; font-variant-numeric:tabular-nums; }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:8px; font-size:12px; color:var(--muted); }
   .legend .item { display:flex; align-items:center; gap:5px; }
   .legend svg { display:block; flex:0 0 auto; }
 
-  footer { padding:14px 22px; background:var(--card); border-top:1px solid var(--line);
-           display:flex; gap:11px; }
-  #q { flex:1; background:var(--card); border:1px solid var(--line); color:var(--ink);
-       border-radius:10px; padding:13px 15px; font-size:15.5px; }
-  #q:focus-visible { outline:3px solid var(--accent); outline-offset:2px; border-color:var(--accent); }
-  #send { background:var(--accent); color:var(--accent-ink); border:none; border-radius:10px;
-          padding:0 22px; font-size:15.5px; font-weight:600; cursor:pointer; }
+  /* ---- typing indicator ---- */
+  .typing { display:inline-flex; gap:5px; align-items:center; }
+  .typing span { width:7px; height:7px; border-radius:50%; background:var(--muted); opacity:.4;
+                 animation:blink 1.2s infinite ease-in-out; }
+  .typing span:nth-child(2){ animation-delay:.2s; } .typing span:nth-child(3){ animation-delay:.4s; }
+  @keyframes blink { 0%,80%,100% { opacity:.25; transform:translateY(0);} 40% { opacity:1; transform:translateY(-3px);} }
+
+  /* ---- composer ---- */
+  footer { background:var(--surface); border-top:1px solid var(--line); }
+  .composer { display:flex; gap:11px; padding:14px 22px; }
+  #q { flex:1; background:var(--surface-2); border:1px solid var(--line); color:var(--ink);
+       border-radius:12px; padding:13px 15px; font-size:15px; font-family:inherit; transition:.15s; }
+  #q::placeholder { color:var(--muted); }
+  #q:focus-visible { outline:3px solid var(--accent); outline-offset:2px; border-color:var(--accent);
+                     background:var(--surface); }
+  #send { background:var(--accent); color:var(--accent-ink); border:none; border-radius:12px;
+          padding:0 24px; font-size:15px; font-weight:650; cursor:pointer; font-family:inherit;
+          transition:filter .15s, transform .05s; }
+  #send:hover { filter:brightness(1.06); }
+  #send:active { transform:translateY(1px); }
   #send:disabled { opacity:.5; cursor:default; }
+
+  @media (prefers-reduced-motion:reduce){ *{ animation:none !important; } }
+  @media (max-width:560px){
+    header .bar { padding:12px 16px; } .trustinner,#chips,.composer,#chat { padding-inline:16px; }
+    .tlegend { margin-left:0; } .controls { gap:9px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <div>
-    <h1>🌡️ Weather Questions</h1>
-    <div class="sub" id="dsinfo">German weather (Jena), 2009–2016 · loading…</div>
-  </div>
-  <div class="controls">
-    <span class="status"><span class="dot" id="lamp" aria-hidden="true"></span><span id="ollamaStatus"
-          role="status" aria-live="polite">checking…</span></span>
-    <label class="toggle"><input type="checkbox" id="useLlm"/> Explain with AI</label>
-    <label class="sr-only" for="model">AI model</label>
-    <select id="model" disabled><option>plain template</option></select>
-  </div>
-</header>
+<!-- The whole UI is a React app (mounted into #root by app.js). React + htm are vendored locally
+     under vendor/ so the page stays fully offline with no build step. chart.js provides the
+     unit-tested SVG render helpers (drawChart / legendHtml) reused by the React chart component. -->
+<div id="root"></div>
 
-<div class="trustbar" role="note">
-  ✓ <b>The numbers are calculated exactly from the records.</b> The AI (when on) only puts them into
-  plain English — it never makes a number up.
-</div>
-
-<nav id="chips" aria-label="Example questions"></nav>
-<main id="chat" role="log" aria-live="polite" aria-atomic="false" aria-label="Conversation"></main>
-
-<footer>
-  <label class="sr-only" for="q">Ask a question in plain English</label>
-  <input id="q" placeholder="Ask in plain English…  e.g. “was 2013 hotter than 2014?”"
-         autocomplete="off" aria-label="Ask a question in plain English"/>
-  <button id="send" type="button">Ask</button>
-</footer>
-
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script src="vendor/htm.umd.js"></script>
 <script src="chart.js"></script>
-<script>
-const chat = document.getElementById('chat');
-const qInput = document.getElementById('q');
-const sendBtn = document.getElementById('send');
-const useLlm = document.getElementById('useLlm');
-const modelSel = document.getElementById('model');
-let convo = [];   // recent {question, computed} turns, sent so follow-ups resolve in context
-// esc / drawChart / swatch / legendHtml are provided by chart.js (unit-tested in Node).
-
-function addUser(text){
-  const m = document.createElement('div'); m.className='msg user';
-  m.innerHTML = `<div class="bubble">${esc(text)}</div>`;
-  chat.appendChild(m); chat.scrollTop = chat.scrollHeight;
-}
-
-function fact(cls, ico, lab, val){
-  return `<div class="fact ${cls}"><span class="ico">${ico}</span>`+
-         `<span><span class="lab">${lab}:</span> <span class="val">${esc(val)}</span></span></div>`;
-}
-
-function addBot(data){
-  const m = document.createElement('div'); m.className='msg bot';
-  if (data.error){
-    m.innerHTML = `<div class="bubble"><span class="err">⚠️ ${esc(data.error)}</span></div>`;
-  } else {
-    const llmOn = data.used_llm;
-    // AI on: the prose is the answer, and we list the exact figures below it.
-    // AI off: the exact figure IS the answer, so we don't repeat it below.
-    const answer = llmOn ? data.text : (data.computed || data.text);
-    // Transparency: if a follow-up was rewritten to a standalone question, show what we understood.
-    const resolvedNote = data.resolved ? `<div class="tag">↳ understood as: “${esc(data.resolved)}”</div>` : '';
-    let details = '';
-    if (llmOn && data.computed) details += fact('num','📊','The exact figures', data.computed);
-    if (data.context)  details += fact('bg','ℹ️','Background', data.context);
-    if (data.inferred) details += fact('note','🧠','What it suggests', data.inferred);
-    const how = llmOn ? 'explained by local AI' : 'exact answer from the data';
-    let chartHtml = '';
-    if (data.chart && data.chart.x && data.chart.x.length > 1){
-      const cap = '📈 ' + esc(data.chart.label) + (data.chart.forecast ? ' — history + 14-day forecast' : '');
-      chartHtml = `<div class="chartwrap"><div class="chartcap">${cap}</div>`+
-                  drawChart(data.chart) + legendHtml(data.chart) + `</div>`;
-    }
-    m.innerHTML = `<div class="bubble">`+
-                  `<div class="answer">${esc(answer)}</div>`+
-                  resolvedNote+
-                  (details?`<div class="details">${details}</div>`:'')+
-                  chartHtml+
-                  `<div class="tag"><span class="pill">${how}</span></div>`+
-                  `</div>`;
-    // Remember this turn so the next follow-up ("what about 2014?") has context.
-    convo.push({question:data.question, computed:data.computed||''});
-    if(convo.length>6) convo = convo.slice(-6);
-  }
-  chat.appendChild(m); chat.scrollTop = chat.scrollHeight;
-}
-
-async function ask(text){
-  if(!text) return;
-  addUser(text); qInput.value=''; sendBtn.disabled=true;
-  const thinking = document.createElement('div'); thinking.className='msg bot';
-  thinking.innerHTML='<div class="bubble">…thinking</div>'; chat.appendChild(thinking);
-  chat.scrollTop = chat.scrollHeight;
-  try{
-    const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({question:text, use_llm:useLlm.checked, model:modelSel.value, history:convo})});
-    const data = await r.json();
-    thinking.remove(); addBot(data);
-  }catch(e){ thinking.remove(); addBot({error:String(e)}); }
-  sendBtn.disabled=false; qInput.focus();
-}
-
-sendBtn.onclick = ()=>ask(qInput.value.trim());
-qInput.addEventListener('keydown', e=>{ if(e.key==='Enter') ask(qInput.value.trim()); });
-
-// init
-fetch('/api/suggestions').then(r=>r.json()).then(d=>{
-  document.getElementById('dsinfo').textContent =
-    `German weather (Jena), 2009–2016 · ${d.sensors.length} sensors`;
-  const chips = document.getElementById('chips');
-  d.suggestions.forEach(s=>{
-    const c=document.createElement('button'); c.type='button'; c.className='chip'; c.textContent=s;
-    c.onclick=()=>ask(s); chips.appendChild(c);   // real button => keyboard focus + Enter/Space
-  });
-});
-fetch('/api/models').then(r=>r.json()).then(d=>{
-  const lamp=document.getElementById('lamp'), st=document.getElementById('ollamaStatus');
-  if(d.available && d.models.length){
-    lamp.classList.add('on'); st.textContent='AI ready';
-    modelSel.disabled=false; modelSel.innerHTML='';
-    d.models.forEach(name=>{ const o=document.createElement('option');
-      o.value=name; o.textContent=name.length>32?name.slice(0,32)+'…':name; modelSel.appendChild(o); });
-  } else {
-    st.textContent='AI off — plain answers'; useLlm.checked=false; useLlm.disabled=true;
-  }
-});
-</script>
+<script src="app.js"></script>
 </body>
 </html>

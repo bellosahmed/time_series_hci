@@ -5,7 +5,282 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-06
+
+### v3 started: real DAD IoT-network dataset fetched + verified, plan written
+Created **`code/v3/`** as a third domain (data-center IoT/MQTT network security) and grounded it in a
+**real** dataset before planning.
+
+- **Got the real dataset.** DAD (Vigoya et al. 2020, `github.com/dad-repository/dad`) → `code/data/dad/`
+  (gitignored, 22 files, ~18 MB) via a reproducible `v3/tools/get_dad_dataset.sh`. **Verified genuine,
+  not fabricated:** the per-day labelled-attack counts reproduce the paper's schedule exactly (Mon 0,
+  Tue 0, Wed 104, Thu 56, Fri 192, Sat 192, Sun 0 = **544** attack packets / ~101.6k; attacker IP
+  `10.6.56.41`; three attack types).
+- **Key finding that shaped the plan:** unlike v1/v2's ready sensor CSVs, DAD is **`.pcap` network
+  captures** — temperature readings sit inside MQTT payloads (need `scapy` to parse) and the anomalies
+  are **network attacks** on the message flow, shipped with **real, human-annotated labels**. That last
+  point is the draw: it **fixes v1's biggest limitation** (synthetic-only anomaly labels), enabling
+  genuine precision/recall/F1 on real anomalies.
+- **Framing decision (documented, revisitable):** v3 = **sensor + network** time-series anomaly system
+  in the v1 mould, not sensor-only — because network attacks mostly don't move the temperature value,
+  so flow features (msgid duplication, insertion bursts, attacker-IP share) are essential to catch them.
+- **Plan written** — `v3/docs/PLAN.md` (v1-style: module map, pcap→labelled-window preprocessing,
+  detectors + real-label evaluation, domain-adapted NL intents, milestones, honest limitations: the
+  authors call the traffic "semi-synthetic", single data center, 7 days, 0.54% class imbalance).
+  `v3/` mirrors the v1 layout (src/tests/notebooks/apps/report/docs/tools); nothing under `src/` built
+  yet. **M0 (acquire + verify) done; M1 (preprocess) is next.**
+- **Headline experiment designed + blueprint written.** Because the three attacks are disjoint in
+  signature (modification→value, duplication/interception→flow), M3 is framed as a **two-channel +
+  fusion** comparison (flow-only / value-only / early / late fusion) graded **per attack type** on the
+  real labels — the honest expected finding is late-fusion wins overall recall (complementary
+  specialists) but trades precision (OR sums false positives), and early-fusion can dilute the sharp
+  single-channel signal. Added to `v3/docs/PLAN.md` (§6) and a full `v3/docs/ARCHITECTURE.md` (file
+  tree, data-flow diagram, message-frame schema, per-module signatures + key algorithm sketches,
+  test plan, build order).
+- **M1 started — `preprocess.py` built + green (TDD).** Installed `scapy` (2.7.0). Spike on the real
+  Monday pcap resolved the two unknowns: MQTT PUBLISH payload is a **plain ASCII float** (`b"15.54"`)
+  and **`frame.number` == the 1-based packet index** (14,431 packets == 14,431 label rows), so the
+  label join is exact. Wrote `v3/src/preprocess.py` (`parse_pcap`/`load_day`/`load_week` → the
+  datetime-indexed MESSAGES frame; `clientid`/`msgid`/`label` taken from the authoritative labels CSV;
+  targeted scapy imports to silence its optional-layer auto-load noise). 3 tests lock the real totals
+  (101,583 packets · 544 attacks · per-day `[0,0,104,56,192,192,0]` · 32,288 temperature readings ·
+  attacker IP `10.6.56.41`); ruff clean. **Discovery:** `clientid` encodes InRow-unit+probe (131 =
+  InRow 13 / probe 1), and capture timestamps are **UTC** (day boundaries tz-shifted ~2 h) — attack-day
+  grouping keyed on the filename `day`, not the UTC index, to stay correct.
+- **M1 finished — `features.py` built + green (TDD).** VALUE channel (`sensor_series`, temperature per
+  sensor) + FLOW channel (`flow_features`: `msg_rate`, `publish_rate`, `iat_mean/std`,
+  `dup_msgid_ratio`) + weak `window_labels`. 9 tests green (added a session `week` fixture in
+  `conftest.py` so the 7 pcaps parse once), ruff clean. **Trade-off (honesty):** flow features
+  **deliberately exclude the attacker IP** (`attacker_share`/`unique_src`) — since `10.6.56.41` appears
+  only during attacks, using it would be label leakage and make detection trivially perfect; behavioural
+  aggregates keep the eventual numbers honest. **Discovery:** a first-written test failed (assumed >50%
+  of 1-min windows have traffic; real = 39.3%) — not a bug but a finding: traffic is **bursty on a
+  5-minute publish cadence** (1-min windows 39.3% occupied vs 5-min 100%), so the flow window is set to
+  5 min (resolves the window-size open question from the data). Fixed the test to assert exact
+  packet-count invariants instead. Documented in `v3/report/EVALUATION.md`. **M1 done; M2 (query
+  engine) next.**
+- **M2 done — `query_engine.py` (truth layer) + `verify_results.py` gate (TDD).** Exact pandas ops
+  (`count_attacks`, `attacks_by_day`, `attack_breakdown`, `attacker_ips`, `temperature_stat`,
+  `message_rate`, `busiest_hour`). 14 tests green; **verify 12/12** (incl. an independent raw-label-CSV
+  path confirming 544, plus temperature stats == pandas); ruff clean. **Trade-off:** the engine is
+  deliberately dumb-and-exact (one pandas expression per answer) — caps expressiveness but guarantees
+  verifiability. **Discovery:** 384/544 (**71%**) of labelled attacks are only typeable as "mixed"
+  (binary labels + Fri/Sat interleave all three types), so clean per-type scoring is possible for Wed
+  (modification) and Thu (duplication) only — a constraint M3's per-type evaluation must state.
+  Documented in `v3/report/EVALUATION.md`. **M3 (detection + fusion) next.**
+- **M3 done — two-channel + fusion detector, graded on REAL labels (TDD, the headline).**
+  `channels.py` (value = temperature max|z|; flow = Isolation Forest), `fusion.py` (early/late),
+  `evaluation.py` (AP / best-F1 / per-type recall), `experiment.py`. 22 tests green, ruff clean.
+  **Result (2016 windows, 90 attack windows):** the per-type table *proves* complementarity — flow-only
+  **0.00** recall on modification vs **1.00** on duplication; value the opposite tilt. Fusion lifts
+  recall **0.44→0.53** but cuts precision **0.33→0.21** (OR sums false positives). **Honest headline
+  finding:** fusion does **not** beat `value-only` on AP (0.181) / F1 (0.376) — because the flow channel
+  is weak here (only 4 clean duplication windows), fusing it adds more false alarms than true positives.
+  *Discovery: fusion pays off only when both channels are strong; here it trades precision for recall
+  and loses on aggregate — refining the plan's hedged hypothesis into a measured result.* Numbers kept
+  honest (attacker IP deliberately excluded → no leakage; untuned detectors). Full table + reasoning in
+  `v3/report/EVALUATION.md`. **M4 (NL interface) next.**
+- **M4 done — NL interface (TDD).** `interface_parsing.py` (deterministic intent/day/attack-type/stat)
+  + `interface.py` (`Interface.ask` → trust-labelled `Answer`: 🔢 computed / 📚 context / 🧠 inferred).
+  Intents: count · attacker · breakdown · temperature · traffic · when · summary. 33 tests green, ruff
+  clean, verify 12/12. Every number comes from the query engine; unknown questions refused not faked.
+  **Bug found+fixed (TDD):** `\battack\b` missed the plural "attacks" → matcher now tolerates trailing
+  `s`. **Discovery:** the "busiest hour" answer (Fri 04:00 UTC, 824 msgs) coincides with a mixed-attack
+  window — duplication inflates traffic, so a plain traffic question already surfaces an attack (a live
+  cross-check that M3's flow signal is real). Documented in `v3/report/EVALUATION.md`. **M5 (LLM
+  explanation + faithfulness gate) next.**
+- **M5 done — LLM explanation + faithfulness gate (TDD).** Ported `llm.py` (Ollama `explain` +
+  `faithfulness` number-guard) and wired `interface._phrase`: rewords computed facts only if the gate
+  finds no invented number, else the exact template. 39 tests green, verify 12/12, ruff clean. Gate
+  verified on DAD facts (fabricated 999→rejected; 29.28→29.3 rounding allowed; IP 10.6.56.41 preserved).
+  **Trade-off:** simple number-matching guards decimals/counts/years/larger IP octets but tolerates
+  small ints ≤12 — same honest residual as v1, now noted for IPs. **Discovery:** the gate is what lets a
+  cheap 3B model be used *safely* (numbers exact upstream + checked downstream → the model only
+  re-phrases), so **Verifiable NL Analytics transfers to a third domain (network security)**, now
+  guarding IP addresses too. Ollama not installed here → live prose deferred (gate+fallback fully tested
+  via monkeypatch), as in v1. **Core pipeline M0–M5 complete; M6 (apps/notebooks/report) remains.**
+- **M6 (apps + report) done — v3 is runnable and written up.** CLI `apps/chat.py`, Flask web app
+  `apps/web/` (create_app factory + plain HTML+JS page, no build), `reproduce.sh`, `report/REPORT.md`
+  (draft with the real M3 table), README run section. TDD app layer (5 tests). **44 tests green, verify
+  12/12, ruff clean.** Smoke-tested the live server (not just test_client): `GET /` 200 and `/api/ask`
+  returns real answers ("104 attacks on Wednesday", "attacker 10.6.56.41") end-to-end on the full
+  dataset. **Trade-off:** plain HTML+JS web UI vs v1's vendored React — zero build, easy to run/test,
+  proportionate for a prototype. **Discovery:** driving the real server confirmed the whole pcap→
+  frame→query→interface→JSON chain works behind Flask. **Remaining M6:** notebooks, `MODELS.md`, and
+  the M3 detector refinements. Documented in `v3/report/EVALUATION.md`.
+- **M6 finished — rigor pass + notebook + models doc.** Added `evaluation.point_adjust`,
+  `best_f1_point_adjusted`, `bootstrap_ci` (TDD, 3 tests) and wired them into the experiment; wrote
+  `report/MODELS.md`, an **executed** `notebooks/00_walkthrough.ipynb` (nbconvert, exit 0), and
+  `requirements.txt`. **47 tests green, verify 12/12, ruff clean.** **Discovery (the rigor pass changed
+  the story, honestly):** the AP bootstrap CIs **overlap** (value [0.135,0.243] vs late-fusion
+  [0.121,0.242]) → the earlier "value-only beats fusion on AP" is **not statistically significant**;
+  and at the event level both fusions reach **1.00 point-adjusted recall**. So the verdict is now
+  goal-dependent (fusion for catching every episode; the simpler value channel for window precision),
+  with no config significantly best on AP — a stronger, more defensible result than the first pass, and
+  a textbook case for why CIs + event-level metrics matter. **Trade-off:** point-adjusted scoring is
+  optimistic, so both window-level and event-level are always reported. Documented in
+  `v3/report/EVALUATION.md` + `MODELS.md`. **v3 M0–M6 complete.**
+- **Future work + comprehensive notebook + web-UI docs.** (1) **Supervised score-combiner**
+  (`fusion.supervised_scores` — logistic regression over the two channel scores, **day-blocked** LOGO CV;
+  TDD, added as a 5th config). **Honest negative result:** it is the *worst* config (AP 0.101) — attack
+  *type* is confounded with *day*, so under day-blocked CV the learned channel-weighting doesn't transfer
+  and it overfits; a random split would have leaked and looked great. Lesson: with scarce,
+  episode-clustered labels a simple unsupervised OR generalises better than a learned fusion. Window
+  (5 min, from cadence) and contamination tuning judged low-value given the weak flow signal. 48 tests
+  green, ruff clean. (2) **Comprehensive EDA notebook** `notebooks/01_exploratory_analysis.ipynb` (34
+  cells, executed, 10 plots): data dictionary, quality, temperature distributions, time series, **STL
+  trend/seasonality**, **autocorrelation**, sensor-correlation heatmap, traffic, attack timeline, the
+  two channels, detection results with CIs, NL demo. (3) **Web-UI run+what-it-does** documented in
+  `v3/README.md`. Documented in `v3/report/EVALUATION.md` + `MODELS.md`.
+- **Richer web chat (charts + AI toggle) + build-along tutorial notebook (TDD).** (1) Interface now
+  attaches a presentation-only `chart` payload (bar of attacks/day or /type; hourly line for
+  temperature/traffic); `index.html` renders it as inline SVG and gained an **"Explain with AI" toggle**
+  + status lamp fed by a new `/api/models` route — matching v1. **Correction (honesty):** a local
+  Ollama **is** running here (`llama3.2:3b`); my earlier "not installed" note was wrong — verified live
+  the model rewords ("...104 attack packets on Wednesday", `used_llm=True`, 104 preserved by the gate),
+  so the AI-explain experience now works, it was just the toggle defaulting off. (2) New **tutorial
+  notebook** `notebooks/02_building_the_system.ipynb` (executed, 22 cells) that builds the system from
+  scratch and explains each step (packets→table→truth layer→detectors→English interface+gate) for
+  others to learn. **53 tests green, verify 12/12, ruff clean.** **Trade-off:** charts are
+  presentation-only — the query engine still owns every number, so a chart can't introduce an
+  uncomputed figure. Documented in `v3/report/EVALUATION.md`.
+- **More chat intents + expanded course-style tutorial.** The user hit "couldn't map that" for
+  *"show all sensors"* and *"show me the anomalies"* — added **`sensors`** (lists the 16 client ids +
+  per-sensor readings chart) and **`anomalies`** (544 labelled attacks by day/type + chart) intents
+  (TDD), and as example chips. **Discovery:** the fallback was just missing intents — the router refuses
+  rather than guesses (by design), so adding intents fixes it while keeping answers exact. Rewrote
+  `notebooks/02_building_the_system.ipynb` into a full course-style tutorial (44 cells, executed, 6
+  plots): objectives, TOC, background (LLM hallucination, MQTT/pcap/attacks), data dictionary, parsing
+  deep-dive, exploration, truth layer from scratch, both detectors with plots, a metrics primer, honest
+  results, interface + gate + live LLM, apps, and 3 exercises. **55 tests green, verify 12/12, ruff
+  clean.**
+- **Data quality (missing data + imbalance) + on-prem Open WebUI spec notebook.** (A) Audited DAD:
+  **0** missing temperatures on PUBLISH packets; only **0.6%** value-grid gaps → added
+  `sensor_series(fill=True)` to **time-interpolate the value channel** (TDD), while **deliberately
+  keeping flow-channel gaps** (missing messages = the interception signal — filling there would erase an
+  attack). Effect on detection is within the bootstrap CIs (value AP 0.181→0.183) — refreshed
+  `MODELS.md` + re-executed the 3 notebooks. Class **imbalance is real** (packet 186:1, window 21:1;
+  duplication only 4 windows) — documented in new `report/DATA_QUALITY.md`; handled by imbalance-aware
+  metrics (AP, point-adjusted, per-type, bootstrap CIs), **not** resampling (which would falsify a
+  security dataset). (B) Wrote `tools/build_webui_spec_notebook.py` → generates
+  `v3/local_webui_dataset_spec.ipynb` (valid v4, **35 cells**): a fully **offline/on-prem** spec for
+  local Open WebUI + Ollama + Docker + **RTX 5070 GPU pass-through** — host health checks (py3.12/SSL,
+  nvidia-smi, docker nvidia runtime, Ollama), ASCII architecture + data-flow, annotated `docker run`
+  (`--gpus all`, `3000:8080`, read-only dataset mount), generated `docker-compose.yaml` + `.env`,
+  offline/telemetry-off env, local-dataset RAG wiring, in-container GPU verification, privacy boundaries,
+  troubleshooting. Grounded in this host's real values; **no external image assets** (offline). **56
+  tests green, verify 12/12, ruff clean.**
+- **Notebooks restructured to the v1/v2 in-depth style (5 notebooks, all executed, 0 errors).** Replaced
+  the uneven set with: `00_code_walkthrough` (module-by-module tour, 21 cells), `01_data_exploration_
+  and_visualization` (full EDA, 34 cells, 10 plots), `02_methods_and_evaluation` (parsing correctness +
+  missingness/imbalance + the two detectors + fusion + metrics-explained + honest findings + trust gate,
+  21 cells), `03_interface_and_explanation` (intents, trust labels, charts, LLM + faithfulness gate, 17
+  cells), `04_build_along_tutorial` (from-scratch teaching walkthrough, 44 cells). 137 cells total,
+  matching v1's depth; each re-executed after the value-channel gap-fill so embedded numbers are current.
+- **Cross-version final report** in **`code/final_report/`** (5 docs, ~4,200 words): `README.md`
+  (executive summary + **master v1/v2/v3 comparison table** + 3 cross-cutting findings),
+  `01_systems_and_data.md` (the three domains + shared 5-layer architecture),
+  `02_techniques_and_rationale.md` (**why-this-not-that** tables per layer — truth layer vs LLM-computes,
+  IsolationForest vs deep, point-adjusted/bootstrap/day-blocked-CV vs naïve, real vs synthetic labels,
+  don't-resample-imbalance, scapy vs tshark, etc.), `03_results_and_findings.md` (consolidated real
+  numbers per version + the cross-cutting findings), `04_limitations_and_future_work.md` (per-version +
+  shared limitations, prioritised roadmap). **Headline thesis:** one domain-agnostic architecture across
+  weather/trade/network-security; **honest evaluation (real labels, event-level metrics, CIs, blocked CV)
+  matters more than model complexity** — deep/learned methods lost or tied simpler ones in all three
+  (v1 no single best; v2 AE 0.21 < IF 0.36; v3 supervised combiner worst). Grounded in each version's own
+  `report/` + `verify_results` numbers.
+
+## 2026-07-06
+
+### Instructor-review fixes: report references + counts, and offline conversational memory
+Acted on an examiner-style review of v1. **Tests 175 → 182 passing (1 skipped); verify 29/29; ruff +
+mypy clean.** Scope note: the user de-scoped the **HCI user study** and all **GitHub** work (CI/tags/
+credibility) — both dropped from the priorities/memory; credibility goes in the report, not the repo.
+
+- **Report references were a placeholder — the single most damaging fixable defect.** `report/REPORT.md`
+  had `## References` as a literal `[ADD]` stub (and a truncated word) with **zero in-text citations**.
+  An MSc report with no reference list risks an automatic cap regardless of the engineering. Fixed:
+  rewrote the Literature Review with proper in-text author–date citations grounded in the methods the
+  system actually implements (LOF, One-Class SVM, Isolation Forest, Matrix Profile, STL, ARIMA, LSTM/TCN
+  detectors, RAG, TF-IDF/BM25/LSA/SBERT, plus a hallucination-survey citation that motivates the whole
+  faithfulness design), and added a complete alphabetised Harvard reference list. **Why it happened:**
+  the draft was auto-generated from the code and left citations for the author to fill; they never were.
+  **Trade-off/honesty:** the canonical method papers are cited confidently; the note to confirm exact
+  formatting against the department style guide is kept (legitimate, not a placeholder), and I did *not*
+  fabricate precise page numbers I was unsure of.
+- **Stale numbers in the report contradicted the artefact.** The report cited **"87 tests / 21/21"** in
+  five places (Results, Testing, Appendix A) while the suite is now **179 / 29/29** — a submission whose
+  own numbers disagree with the code invites "which is true?". Synced every count. **Why:** the report
+  was written at an earlier commit and never re-synced when the suite grew; the verification harness is
+  exactly the tripwire for this, so the report must track it. Also refreshed the same stale counts
+  across `docs/` (the historical "state after this work" snapshots kept, each annotated with current
+  gates) and `CLAUDE.md`.
+- **Fix #4 — conversational memory now works with the LLM OFF (the real functional bug).** Previously an
+  elliptical follow-up (*"what about 2014?"*) was only resolved via `llm.rewrite_followup`, gated on the
+  LLM being on; in the default offline mode the chat silently forgot context and returned "couldn't map
+  that". Implemented **`interface_parsing.resolve_followup()`** (TDD: 4 tests written first, watched fail
+  — the end-to-end one reproduced the exact `intent=None` bug — then implemented): it carries the prior
+  turn's intent + sensor and swaps in the new year/period/day/sensor, composing a canonical standalone
+  question the deterministic parser routes ("hottest in 2013" + "what about 2014?" → "max T (degC) in
+  2014"). **Design choice/trade-off:** the LLM rewrite stays the *first* choice when available (richer,
+  and it preserves the existing tested contract), with the deterministic resolver as the offline path
+  **and** as a backup when an LLM rewrite is unroutable — so this is a strict improvement with no
+  regression, rather than the plan's "deterministic-first" ordering which would have broken the
+  LLM-rewrite test. Fully deterministic: it only rewrites wording; every number is still computed by the
+  query engine. See `docs/CHAT_MEMORY_PLAN.md` (Phase 1 marked done; Phases 2–4 still open).
+- **Discovery:** the existing `resolve_sensors` substring behaviour means "hottest" already yields the
+  temperature sensor (via the "hot" alias), so a bare-year follow-up correctly carries `T (degC)` even
+  when the previous question named no sensor explicitly — the deterministic carry-forward needed no
+  special-casing for the most common phrasing.
+- **Follow-on: scope carried across an intent swap.** Running the 5-turn demo surfaced an edge case —
+  *"and the coldest?"* answered the coldest reading **ever** (−22.65 °C, 2009) instead of within the
+  year under discussion. Cause: "cold**est**" supplies both an intent (`min`) and, via the "cold"
+  alias, a sensor, so the question looked self-contained and the "needs context" gate never attempted
+  carry-forward. **Why the fix is a *cue*, not a looser gate:** a fresh question like *"what was the
+  coldest?"* also has intent+sensor+no-period and must **not** inherit a stale year, so the
+  discriminator is an explicit continuation cue. Added `is_followup_cue` ("and…", "what about…") and
+  let the resolver run for cue questions too; now *"and the coldest?"* → *"min T (degC) in 2015"*
+  (−6.18 °C) while *"what was the coldest?"* stays whole-record. TDD: 3 tests (cue detector, cue
+  carries scope end-to-end, non-cue stays fresh). **Trade-off:** genuinely ambiguous phrasing is
+  resolved by leaning on the cue words rather than guessing — a fresh non-cue question is never
+  silently scoped to a prior year.
+
 ## 2026-07-05
+
+### Web UI rebuilt in React (vendored, no build) + chart fixes: compare chart + day/month toggle
+Rewrote the browser chat (`apps/web/`) from vanilla JS to a **React app**, and fixed two chart gaps the
+user hit. **Tests 173 → 175 passing (1 skipped); verify 29/29; ruff + mypy clean; JS unit suite green.**
+
+- **React, but vendored + build-free.** React + ReactDOM (production UMD) and `htm` (JSX-like tagged
+  templates, ~1 KB, no Babel) live in `apps/web/vendor/` and are served by Flask alongside `app.js`.
+  A thin `h()` shim lets templates use plain HTML `class`/`for` (mapped to `className`/`htmlFor`).
+  **Trade-off:** a full Vite/webpack build would give HMR + tree-shaking, but it drags a `node_modules`
+  toolchain and a `npm run build` step into a single local page and breaks the "run `app.py`, done"
+  story. Vendoring keeps the app **fully offline, zero-build, one-command** — matching the project's
+  local, self-contained ethos — at the cost of no bundler niceties (irrelevant at this size).
+  **Discovery:** the unit-tested render core (`chart.js` `drawChart`/`legendHtml`) ported over untouched
+  — React just calls it via `dangerouslySetInnerHTML`, so the migration cost was UI plumbing only, and
+  the Node behavioural tests still guard the SVG output.
+- **"Graph doesn't show" — root cause & fix.** The backend only attached a chart for
+  max/min/mean/trend/threshold/anomaly and returned **none for `compare`** — and "Was 2013 hotter than
+  2014?" (an example chip) is a `compare`, so it showed no graph. Added `_compare_chart`: it overlays
+  the two years' **month-of-year profiles** (both mapped to a synthetic shared year, Jan–Dec axis,
+  `monthaxis` month-only labels) as two lines (blue vs amber) with a naming legend. `chart.js` extended
+  additively with an optional `series2` + compare legend (existing tests untouched, new ones added).
+  **Discovery:** a year-on-year overlay is a *better* comparison visual than the single line the other
+  intents get — the previously-missing chart is now the most informative one.
+- **Day-by-day / month-by-month toggle.** `interface._chart_for` now aggregates the scoped series into
+  aligned **daily** and **monthly** means (`views`), and the React chart shows a Day/Month segmented
+  switch. Verified in-browser: "Average temperature in 2013" → 365-pt daily line ↔ 12-pt monthly line.
+  **Trade-off:** the old fixed ~220-pt raw down-sample was jagged and unaligned to calendar units;
+  resampling to whole days/months is cleaner and calendar-honest but hides sub-daily detail — so a
+  sub-2-day scope (e.g. a single day report) keeps the **raw hourly** series and hides the toggle.
+- **Verified end-to-end** in a real browser (headless Chromium via Playwright): React mounts (5 sections,
+  no `class`/`for` warnings), no console/page errors bar the harmless `favicon.ico` 404, the toggle
+  swaps resolutions, and the compare chart draws both lines. Light + dark screenshots both clean.
+- A11y unchanged in substance but moved into `app.js` (React renders the markup); `test_apps.py` updated
+  to assert `role="log"`/`aria-live`/input `aria-label` in `app.js`, that `index.html` loads
+  `app.js`+`chart.js`+vendored React, and that every vendored asset is served locally (no CDN).
 
 ### Held-out retrieval test + k-justification (pre-empting examiner feedback)
 Closed the two cheap evaluation gaps a supervisor would raise. **Tests 169 → 173; verify 29/29; ruff +

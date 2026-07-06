@@ -15,6 +15,21 @@ _Last updated: 22 June 2026._
 | --- | --- | --- | --- |
 | **v1** | **Temperature / weather** | Jena Climate 2009–2016 | 14 sensors, hourly (70k rows) |
 | **v2** | **Global trade (supply chain)** | EU monthly international trade | 54 country-flows, monthly (292 rows) |
+| **v3** | **Data-center IoT network (security)** | DAD (Vigoya et al. 2020, MQTT pcaps) | 7 days, ~101k packets, **real** attack labels |
+
+**Cross-version synthesis:** `code/final_report/` — executive summary + **master v1/v2/v3 comparison
+table**, techniques + why-this-not-that, consolidated results/findings, limitations + future work.
+
+**v3 status: core pipeline built (M0–M6).** Real DAD dataset (`code/data/dad/`, gitignored; 544 labelled
+attacks matching the paper). Implemented: `preprocess` (scapy pcap→labelled MESSAGES frame) · `features`
+(value + flow channels) · `channels`/`fusion`/`evaluation`/`experiment` (two-channel + fusion detector,
+**real-label** eval with point-adjusted metrics + bootstrap CIs) · `query_engine` (truth layer) ·
+`interface`/`interface_parsing` (NL, trust-labelled) · `llm` (Ollama + faithfulness gate). Apps:
+`chat.py` + Flask `web/`. **47 tests · verify 12/12 · ruff clean.** Its draw: **real anomaly labels**
+(fixes v1's synthetic-label limitation). Headline finding (honest): channels are complementary; fusion
+trades precision for recall and reaches 1.00 event-level recall, but AP CIs overlap so no config is
+significantly best. Running record: `v3/report/EVALUATION.md`. **Optional future:** detector tuning,
+supervised score-combiner.
 
 The sections below marked **(v1)** describe the temperature system. The **(v2)** section describes the
 trade system. They share the *architecture* (preprocess → analyse → detect → reason → query → explain)
@@ -52,7 +67,7 @@ but **not the data** — v1 is temperature, v2 is trade.
 | Deep models: CNN-AE, LSTM-AE, LSTM-Forecaster | ✅ done |
 | Forecasting: ARIMA | ✅ done |
 | Evaluation: vs pandas ground truth + labeled (synthetic) precision/recall | ✅ done |
-| Tests | ✅ 173 passing (1 skipped); ruff + mypy clean; coverage 92% |
+| Tests | ✅ 182 passing (1 skipped); ruff + mypy clean; coverage 92% |
 | Agentic multi-step tool-use (`agent.py`), embedding-RAG option, larger-model auto-pick | ✅ done |
 | Retrieval eval (P@k/R@k/MRR/MAP/NDCG) + TF-IDF/BM25/LSA/dense retrievers; Matrix Profile detector (COP509 IR) | ✅ done |
 | Local LLM (Ollama) explanation layer | ⏳ deferred to write-up stage |
@@ -103,7 +118,7 @@ Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 | `reasoning.py` | multi-sensor anomaly explanation (per-sensor z-scores, co-movement) — wired into the interface's anomaly answers (a cross-sensor explanation feature, not the headline) |
 | `rag_system.py` | local retrieval over sensor KB — TF-IDF, **BM25**, **LSA** (TF-IDF→SVD), **dense sentence-transformer** (all-MiniLM-L6-v2) — + trust-aware explainer |
 | `retrieval_eval.py` | IR metrics (Precision@k/Recall@k/MRR/MAP/NDCG) + labelled query set to evaluate/compare retrievers (COP509 IR material) |
-| `interface.py` | NL question → query engine → trust-aware answer. Intents: max/min/mean/spread/correlation/missing/summary + **trend · compare · weather(day report) · threshold · anomaly(+reasoning) · day-type(K-means)** + **forecast** (14-day). Scopes to any year/month/**season**/**day**/range. Attaches a downsampled **chart** for the web UI. With `use_llm`, `llm.plan` parses free phrasing into a structured plan (fills gaps only; never computes numbers) |
+| `interface.py` | NL question → query engine → trust-aware answer. Intents: max/min/mean/spread/correlation/missing/summary + **trend · compare · weather(day report) · threshold · anomaly(+reasoning) · day-type(K-means)** + **forecast** (14-day). Scopes to any year/month/**season**/**day**/range. Attaches a **chart** for the web UI with **day/month granularity views** (a resolution toggle) and a two-year **comparison overlay** for `compare`. **Conversational follow-ups** work **offline**: `resolve_followup` deterministically carries the prior turn's intent/sensor and swaps the new year/period/day/sensor ("what about 2014?"), with the `llm.rewrite_followup` path as the richer option when the LLM is on. With `use_llm`, `llm.plan` parses free phrasing into a structured plan (fills gaps only; never computes numbers) |
 | `agent.py` | **agentic multi-step tool-use** (still numberless): LLM plans query-engine tool calls (extremum/average/correlation/threshold/anomaly_count) for multi-step questions; executor runs each == pandas; synthesis is faithfulness-gated; falls back to single-step `interface`. `chat.py --agent` |
 | `main.py` | end-to-end pipeline entry point |
 
@@ -125,7 +140,7 @@ Statistical (z-score) · Forecasting (ARIMA) · Classical ML (Isolation Forest, 
 Shape/discords (Matrix Profile) · Deep (CNN-AE, LSTM-AE, LSTM-Forecaster).
 Full table: **`v1/report/MODELS.md`**.
 
-## Tests (`v1/tests/`) — 173 passing, 1 skipped (coverage 92%)
+## Tests (`v1/tests/`) — 182 passing, 1 skipped (coverage 92%)
 
 `test_query_engine` · `test_interface` (interface + evaluation) · `test_reasoning` ·
 `test_deep` · `test_forecasting` · `test_llm` · `test_agent` (agentic tool-use) ·
@@ -138,7 +153,7 @@ Full table: **`v1/report/MODELS.md`**.
 `report/` (REPORT, EVALUATION, MODELS, DATA_QUALITY, HCI_USER_STUDY, FINETUNING; working notes in
 `report/notes/`) · `docs/` (UNDERSTANDING_V1, ASSESSMENT_AND_RECOMMENDATIONS, AGENTIC_AND_POLISH,
 RETRIEVAL_EVALUATION, CHAT_MEMORY_PLAN) · `pyproject.toml` (package + pytest/ruff/mypy config) · `verify_results.py`
-(29/29 independent checks). Quality gates: pytest 173, verify 29/29, ruff clean, mypy clean, coverage 92%.
+(29/29 independent checks). Quality gates: pytest 182, verify 29/29, ruff clean, mypy clean, coverage 92%.
 See `v1/README.md`.
 
 ## How to run

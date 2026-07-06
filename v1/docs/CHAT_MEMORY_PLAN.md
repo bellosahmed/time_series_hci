@@ -1,7 +1,18 @@
 # Chat interface — conversational memory: fix plan (to implement later)
 
-Drafted **2026-07-05**. A plan to fix the chat interface's conversational memory. **Not yet
-implemented** — this is the design record to pick up later. No code changed when this was written.
+Drafted **2026-07-05**. A plan to fix the chat interface's conversational memory.
+
+> **Update 2026-07-06 — Phase 1 DONE.** The headline bug (issue #1: memory only worked with the LLM
+> on) is fixed. `interface_parsing.resolve_followup()` now resolves an elliptical follow-up
+> deterministically — carrying the previous turn's intent/sensor and swapping in the new
+> year/period/day/sensor — and `Interface.ask` calls it so *"what about 2014?"* works with **Ollama
+> off**. The LLM rewrite is kept as the richer first choice when available, with the deterministic
+> resolver as the offline path and as a backup when an LLM rewrite is unroutable. A follow-up **cue**
+> detector (`is_followup_cue`: "and…", "what about…") also lets a continuation that restates an
+> intent/sensor but names no new period inherit the prior scope ("and the coldest?" → coldest *in the
+> year under discussion*), while a fresh non-cue question stays whole-record. Covered by 7 tests in
+> `tests/test_interface.py` (`resolve_followup` + cue unit cases, and end-to-end LLM-off cases).
+> **Phases 2–4 (chaining via `resolved`, per-request caching, hygiene) remain open.**
 
 ---
 

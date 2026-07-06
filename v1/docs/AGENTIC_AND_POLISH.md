@@ -4,8 +4,9 @@ What was built on **2026-07-05** for the two remaining engineering items in
 `ASSESSMENT_AND_RECOMMENDATIONS.md`: **(6)** agentic, still-numberless tool-use, and **(7)** the
 polish tier (larger-model option, embedding-RAG option, threshold edge-case fix, mypy).
 
-**State after this work:** 140 tests pass (1 skipped) · `verify_results.py` 25/25 · `ruff` clean ·
-`mypy` clean (16 source files).
+**State after this work (2026-07-05):** 140 tests pass (1 skipped) · `verify_results.py` 25/25 ·
+`ruff` clean · `mypy` clean (16 source files). *(Current gates as of 2026-07-06: **182 tests** /
+**29/29** verify — grown by later work.)*
 
 ---
 
@@ -124,8 +125,8 @@ python3.12 -m mypy        # Success: no issues found in 16 source files
 ## Reproduce the checks
 ```bash
 cd code/v1
-python3.12 -m pytest tests/      # 140 passed, 1 skipped
-python3.12 verify_results.py     # 25/25
+python3.12 -m pytest tests/      # 182 passed, 1 skipped
+python3.12 verify_results.py     # 29/29
 python3.12 -m ruff check src tests apps
 python3.12 -m mypy               # clean
 ```

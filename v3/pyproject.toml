@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "time-series-hci-v3"
+version = "0.1.0"
+description = "Verifiable NL analytics for a data-center IoT/MQTT network (DAD dataset) — code computes exact numbers, a local LLM only explains them."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "scipy>=1.13",
+    "scikit-learn>=1.5",
+    "statsmodels>=0.14",
+    "scapy>=2.6",          # pcap parsing (MQTT dissector in scapy.contrib.mqtt)
+    "flask>=3.0",
+    "matplotlib>=3.8",     # walkthrough notebook plots
+]
+
+[project.optional-dependencies]
+deep = ["torch>=2.4"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["notebooks", "report"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]

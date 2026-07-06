@@ -70,14 +70,16 @@ def test_history_accumulates_across_turns(df):
     assert iface.history[-1]["question"] == "min temperature"
 
 
-def test_no_rewrite_when_llm_off(df, monkeypatch):
+def test_llm_rewriter_not_called_when_off_but_memory_still_works(df, monkeypatch):
     from src import llm
     calls = {"n": 0}
     monkeypatch.setattr(llm, "rewrite_followup", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), "x")[1])
     iface = interface.Interface(df, use_llm=False)
-    iface.history = [{"question": "max temperature", "computed": "..."}]
-    iface.ask("what about the min?")
-    assert calls["n"] == 0        # single-shot when the model is off (the accepted limitation)
+    iface.history = [{"question": "max temperature", "resolved": "max temperature", "computed": "..."}]
+    ans = iface.ask("what about the min?")
+    assert calls["n"] == 0          # the LLM rewriter is never called when the model is off
+    assert ans.intent == "min"      # ...but deterministic memory now resolves the follow-up offline
+    assert ans.resolved is not None
 
 
 def test_legend_question_skips_rewrite(df, monkeypatch):
@@ -92,6 +94,81 @@ def test_legend_question_skips_rewrite(df, monkeypatch):
     iface = interface.Interface(df, use_llm=True)
     iface.history = [{"question": "show anomalies", "computed": "..."}]
     assert iface.ask("what is the red dot?").intent == "legend"
+
+
+def test_resolve_followup_carries_intent_and_swaps_year():
+    # an elliptical follow-up naming a new year -> carry the prior intent/sensor, swap the scope
+    hist = [{"question": "hottest in 2013", "resolved": "hottest in 2013", "computed": "max ..."}]
+    out = interface.resolve_followup("what about 2014?", hist, ["T (degC)", "rh (%)"])
+    assert out is not None
+    assert interface.detect_intent(out) == "max"          # intent carried from the previous turn
+    start, _end, _lbl = interface.resolve_period(out)
+    assert start.startswith("2014")                       # scope swapped to the new year
+
+
+def test_resolve_followup_swaps_sensor_keeping_intent():
+    hist = [{"question": "average temperature", "resolved": "average temperature", "computed": "mean ..."}]
+    out = interface.resolve_followup("what about humidity?", hist, ["T (degC)", "rh (%)"])
+    assert out is not None
+    assert interface.detect_intent(out) == "mean"                              # intent kept
+    assert "rh (%)" in interface.resolve_sensors(out, ["T (degC)", "rh (%)"])   # sensor swapped
+
+
+def test_resolve_followup_returns_none_when_nothing_new():
+    # nothing to carry a new scope onto -> no deterministic rewrite (leave it to the LLM/fallback)
+    hist = [{"question": "max temperature", "resolved": "max temperature", "computed": "max ..."}]
+    assert interface.resolve_followup("and?", hist, ["T (degC)", "rh (%)"]) is None
+
+
+def test_followup_resolved_without_llm(monkeypatch):
+    # THE bug fix: conversational memory must work with the LLM OFF (the default offline mode).
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    idx = pd.date_range("2013-01-01", periods=2 * 365 * 24, freq="h")
+    rng = np.random.default_rng(0)
+    two_year = pd.DataFrame({"T (degC)": rng.normal(10, 8, len(idx))}, index=idx)
+    iface = interface.Interface(two_year, use_llm=False)
+    iface.ask("what was the hottest in 2013?")
+    ans = iface.ask("what about 2014?")
+    assert ans.intent == "max"                       # intent carried across the turn, no LLM
+    assert ans.resolved and "2014" in ans.resolved   # scope swapped to the new year
+    assert ans.value.value == two_year[two_year.index.year == 2014]["T (degC)"].max()
+
+
+def test_is_followup_cue_detects_continuations():
+    assert interface.is_followup_cue("and the coldest?")
+    assert interface.is_followup_cue("what about 2014?")
+    assert not interface.is_followup_cue("what was the hottest in 2013?")
+
+
+def _three_year_df(seed):
+    idx = pd.date_range("2013-01-01", periods=3 * 365 * 24, freq="h")   # 2013–2015
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({"T (degC)": rng.normal(10, 8, len(idx))}, index=idx)
+
+
+def test_followup_carries_scope_across_intent_swap_without_llm(monkeypatch):
+    # a cue follow-up that swaps intent but names no new year should inherit the prior scope
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    df3 = _three_year_df(1)
+    iface = interface.Interface(df3, use_llm=False)
+    iface.ask("what was the hottest in 2015?")
+    ans = iface.ask("and the coldest?")                  # cue, no new period -> inherit 2015
+    assert ans.intent == "min"
+    assert ans.resolved and "2015" in ans.resolved
+    assert ans.value.value == df3[df3.index.year == 2015]["T (degC)"].min()   # 2015, not whole record
+
+
+def test_fresh_noncue_question_ignores_prior_scope_without_llm(monkeypatch):
+    # no follow-up cue -> a fresh whole-record question; the prior 2015 scope must NOT bleed in
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    df3 = _three_year_df(2)
+    iface = interface.Interface(df3, use_llm=False)
+    iface.ask("what was the hottest in 2015?")
+    ans = iface.ask("what was the coldest?")             # no cue -> whole record
+    assert ans.value.value == df3["T (degC)"].min()
 
 
 def test_resolve_legend_query_maps_markers():

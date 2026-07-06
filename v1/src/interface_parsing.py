@@ -351,3 +351,76 @@ def resolve_threshold(question: str):
         if q[op_end:pos].strip() == "":
             return (op, v)
     return None
+
+
+def _canonical_scope(question: str, columns):
+    """Describe the time-scope a question names as (kind, text), or None.
+
+    ``kind`` is ``"day"`` or ``"period"`` and ``text`` re-parses back to the same scope. A
+    specific day is preferred over a period, because a day label ("26 January 2015") also
+    contains a month/year that ``resolve_period`` would otherwise read as a whole month.
+    """
+    day = resolve_day(question)
+    if day is not None:
+        return ("day", day[3])                       # the human day label, e.g. "26 January 2015"
+    start, end, label = resolve_period(question)
+    if start or end:
+        return ("period", label)
+    return None
+
+
+_FOLLOWUP_PREFIXES = ("and ", "and,", "also ", "then ", "what about", "how about", "what of")
+_FOLLOWUP_CONTAINS = ("what about", "how about", "what of")
+
+
+def is_followup_cue(question: str) -> bool:
+    """True if the wording signals a continuation of the previous turn ("and…", "what about…").
+
+    This cue is what lets an otherwise self-contained-looking follow-up ("and the coldest?", which
+    names an intent *and*, via "cold", a sensor) still inherit the previous turn's scope instead of
+    silently re-reading the whole record.
+    """
+    q = question.strip().lower()
+    return q.startswith(_FOLLOWUP_PREFIXES) or any(c in q for c in _FOLLOWUP_CONTAINS)
+
+
+def resolve_followup(question: str, history, columns) -> str | None:
+    """Resolve an elliptical follow-up into a standalone question deterministically, else None.
+
+    When the new message is elliptical — it lacks an intent and/or a scope of its own but
+    introduces at least one *new* piece (a year/period/day, or a different sensor) — the missing
+    pieces are carried forward from the most recent turn and a canonical standalone question is
+    composed (e.g. history "hottest in 2013" + "what about 2014?" -> "max T (degC) in 2014").
+
+    This gives the interface conversational memory **without an LLM**, so follow-ups work in the
+    default offline mode (the previous behaviour only remembered context with Ollama running). It
+    is fully deterministic and only rewrites the wording — every number is still computed by the
+    query engine. Returns ``None`` when there is nothing new to carry context onto, or when the
+    pieces are insufficient to route a standalone question (left to the LLM/fallback).
+    """
+    if not history:
+        return None
+    prev = history[-1].get("resolved") or history[-1].get("question")
+    if not prev:
+        return None
+
+    cur_intent = detect_intent(question)
+    cur_sensors = resolve_sensors(question, columns)
+    cur_scope = _canonical_scope(question, columns)
+    if not (cur_intent or cur_sensors or cur_scope):
+        return None                                  # nothing new -> not a resolvable follow-up
+
+    intent = cur_intent or detect_intent(prev)
+    prev_sensors = resolve_sensors(prev, columns)
+    sensor = cur_sensors[0] if cur_sensors else (prev_sensors[0] if prev_sensors else None)
+    scope = cur_scope or _canonical_scope(prev, columns)
+    if intent is None or (sensor is None and scope is None):
+        return None                                  # not enough to route a standalone question
+
+    parts = [INTENTS[intent][0]]                      # a canonical keyword the parser routes back
+    if sensor is not None:
+        parts.append(sensor)
+    if scope is not None:
+        kind, text = scope
+        parts.append(text if kind == "day" else f"in {text}")
+    return " ".join(parts)

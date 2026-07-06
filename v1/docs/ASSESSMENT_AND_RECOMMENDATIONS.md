@@ -3,13 +3,16 @@
 A review-later snapshot: what to add/improve, how a supervisor is likely to grade/criticize/praise
 the work, and notes to keep. Dated **2026-07-04**. Companion to `UNDERSTANDING_V1.md`.
 
-**Current state at time of writing:** 120 tests pass (1 skipped), `verify_results.py` 25/25, ruff
+**State when first written (2026-07-04):** 120 tests pass (1 skipped), `verify_results.py` 25/25, ruff
 clean, pushed to the private repo `bellosahmed/time_series_hci` (`main`).
 
 > **Update 2026-07-05:** items **4 (agentic tool-use)** and **7 (all polish: larger-model option,
 > embedding-RAG option, `resolve_threshold` fix, mypy)** below are now **done** — see
-> `AGENTIC_AND_POLISH.md`. Quality gates are now **140 tests** pass (1 skipped), verify 25/25, ruff
-> clean, mypy clean. Remaining critical path is unchanged: **HCI user study → ethics → CI/tag.**
+> `AGENTIC_AND_POLISH.md`.
+>
+> **Current gates (2026-07-06):** **182 tests** pass (1 skipped), `verify_results.py` **29/29**, ruff
+> clean, mypy clean, coverage 92%. Remaining critical path is unchanged: **HCI user study → ethics →
+> CI/tag.**
 
 ---
 
@@ -22,7 +25,7 @@ clean, pushed to the private repo `bellosahmed/time_series_hci` (`main`).
    biggest gap. Everything else is polish by comparison.
 2. **Start ethics approval now** — usually the bottleneck for the study above, not the study itself.
 3. **Add CI (GitHub Actions)** running `pytest + ruff + verify_results.py` on every push. Cheap, and
-   it visibly proves the "25/25" claim holds continuously. Works fine on a private repo.
+   it visibly proves the "29/29" claim holds continuously. Works fine on a private repo.
 
 ### Strengthens the contribution
 4. **Agentic, still-numberless tool-use** — let the LLM orchestrate multiple query-engine calls for
@@ -51,7 +54,7 @@ supervisor-style feedback said "close three things → comfortable Distinction";
 - The **core idea is genuinely novel and timely** — deterministic truth layer + LLM explanation +
   *automated faithfulness verification* directly tackles LLM hallucination in analytics.
   Distinction-level thinking.
-- **Serious engineering:** clean layered architecture, 120 tests, an *independent* 25/25 harness
+- **Serious engineering:** clean layered architecture, 182 tests, an *independent* 29/29 harness
   proving numbers == pandas, reproducibility (seeds, pinned deps, `reproduce.sh`), `pyproject` +
   ruff-clean.
 - **Unusually honest evaluation:** bootstrap CIs, McNemar significance, point-adjusted metrics,

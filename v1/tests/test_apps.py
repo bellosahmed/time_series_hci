@@ -75,15 +75,30 @@ def test_chart_js_is_served():
     assert "function legendHtml" in r.get_data(as_text=True)
 
 
-def test_index_page_serves_accessible_markup():
+def test_index_page_loads_react_app_and_render_module():
     r = _client().get("/")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
     assert 'src="chart.js"' in html          # the page loads the extracted render module
-    # Screen-reader + keyboard affordances must be present (this is an HCI project).
-    assert 'role="log"' in html and 'aria-live="polite"' in html   # live conversation region
-    assert 'aria-label="Ask a question in plain English"' in html  # labelled input
-    assert 'focus-visible' in html                                 # visible keyboard focus ring
+    assert 'src="app.js"' in html            # ...and the React app that drives the UI
+    assert 'vendor/react.production.min.js' in html   # React is vendored locally (offline, no build)
+    assert 'focus-visible' in html                    # visible keyboard focus ring (CSS)
+
+
+def test_react_app_has_accessible_markup():
+    # The UI is rendered by React (app.js), so the screen-reader + keyboard affordances live there.
+    r = _client().get("/app.js")
+    assert r.status_code == 200
+    js = r.get_data(as_text=True)
+    assert 'role="log"' in js and 'aria-live="polite"' in js        # live conversation region
+    assert 'aria-label="Ask a question in plain English"' in js     # labelled input
+
+
+def test_react_and_htm_vendored_and_served():
+    client = _client()
+    for asset in ("/app.js", "/vendor/react.production.min.js",
+                  "/vendor/react-dom.production.min.js", "/vendor/htm.umd.js"):
+        assert client.get(asset).status_code == 200, asset   # all served locally, no CDN
 
 
 def test_cli_pick_model_prefers_larger_pulled_model(monkeypatch):
