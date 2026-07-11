@@ -36,3 +36,6 @@ chroma/
 .DS_Store
 .idea/
 .vscode/
+
+# Regenerable model artifacts from notebook 05
+v1/notebooks/saved_models_05/

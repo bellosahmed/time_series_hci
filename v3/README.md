@@ -7,6 +7,8 @@ with **real, labelled anomalies**.
 > **Core principle (shared with v1/v2):** computation = code (the truth); the LLM only explains, and a
 > faithfulness check verifies it invents no numbers.
 
+**New here? Start with [GETTING_STARTED.md](GETTING_STARTED.md).**
+
 ## Status
 **Core pipeline built (M0–M5) + apps (M6 in progress).** Preprocess → features → detection+fusion →
 query engine → NL interface → LLM+faithfulness are implemented and tested: **44 tests · verify 12/12 ·

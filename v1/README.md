@@ -5,6 +5,8 @@ ask questions in plain English — *"what was the hottest day in 2015?"*, *"were
 — and it answers with **exact numbers computed by code**. A local LLM is optional and only *rewords*
 those numbers into friendly sentences; it never calculates anything.
 
+> **New here? Start with [GETTING_STARTED.md](GETTING_STARTED.md).** This README is the developer's map.
+
 > **The one idea to remember:** **computation = code (the source of truth); the LLM only explains.**
 > This is the deliberate defence against language models making up figures.
 

@@ -10,6 +10,8 @@ why over the alternatives), the limitations, and the future work.*
 > pattern is *domain-agnostic* and that *honest evaluation* — not model complexity — is what carries it.
 
 ## Contents
+0. **[SUMMARY.md](SUMMARY.md)** — **one-file synthesis** of everything below (datasets explained, 15 figures, strengths, limitations, future work, techniques, results + *why*, and *how the approach evolved* v1→v2→v3). Start here if you want a single read.
+0b. **[ASSESSMENT.md](ASSESSMENT.md)** — an **examiner's-eye grading** of v1/v2/v3 and the project overall (indicative UK-MSc marks, per-criterion, with what would raise each).
 1. **[01_systems_and_data.md](01_systems_and_data.md)** — the three systems, their domains/data, and the shared architecture.
 2. **[02_techniques_and_rationale.md](02_techniques_and_rationale.md)** — every major technique and *why we chose it over the alternative*.
 3. **[03_results_and_findings.md](03_results_and_findings.md)** — consolidated results and the cross-cutting findings.

@@ -5,6 +5,346 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-11
+
+### Reworked notebook 05 → **multivariate IoT sensor-network** version (all 14 sensors, no LLM)
+On request ("not just temperature but all the sensors + explain IoT better"), reworked `05` from the
+temperature-only univariate comparison into a full **14-sensor IoT** study. Kept the trust framing (no LLM;
+every number code-computed) and the five architectures, but everything is now **multivariate**. Executed
+end-to-end on the RTX 5070: **35 cells, 0 errors, 7 plots**. Now 6 notebooks; README + this log updated.
+
+New IoT content: a documented **sensor array** (table of all 14 — unit/quantity/family), **data-quality**
+section surfacing the raw **`-9999` anemometer sensor faults** (18 on `wv`, 20 on `max. wv`) that
+preprocessing repairs, and a **cross-sensor correlation** heatmap motivating joint modelling. New harness:
+per-sensor standardisation, `[B,window,14]` reconstruction, **per-sensor error matrix** → network score +
+**arg-max attribution**. New IoT-realistic eval: **single-sensor fault injection** (bump one of 14 by
+`m·σ`) — ~14× harder than the univariate spike, so it rewards cross-sensor reasoning.
+
+**Findings (all code-computed, honest) — the multivariate result *reverses* the univariate one.**
+- **Transformer now WINS** single-sensor-fault detection at 4σ: **AP 0.48 (F1 0.61) ≫ CNN 0.14 ≫ GRU 0.05
+  ≈ LSTM 0.04 ≈ RNN 0.03** — opposite of the univariate case (where the bottleneck CNN won and the
+  Transformer trailed). *Why:* self-attention relates each sensor to the other 13 and flags a channel
+  **inconsistent with its correlated neighbours**, even when not locally extreme; univariately there are no
+  neighbours and the same capacity just copies the input. Transformer also reconstructs best (loss 0.027 vs
+  0.17–0.28). *Discovery: the best architecture is task-dependent — multivariate structure is what
+  attention is for.*
+- **AUC hides it:** all models 0.98–0.998 AUC (looks identical); **AP** spreads them ~15× — pick the metric
+  that matches the 100-in-70k imbalance.
+- **Attribution is easier than detection & nearly free:** arg-max per-sensor error names the culprit sensor
+  0.87–0.93 @2σ → 1.0 @4σ for *every* architecture (chance 0.07), incl. the RNN that barely detects. The
+  bottleneck is *noticing* the fault, not localising it.
+- **Sec C — training beats architecture again:** GRU window 24h→**12h lifted AP 0.05→0.52** (past CNN, near
+  Transformer); 48h collapsed to 0.02. Epochs 3→24: AP 0.02→0.09.
+- **Sec D — not all sensors equal, correlation predicted it:** coupled thermodynamic channels easy
+  (dew-point AP 0.999; sh/VPact/H2OC/p 0.89–0.91), near-independent **wind** channels near-unmodelable
+  (wind direction AP 0.009, wv 0.022, gust 0.031; highest losses). Modelability tracks the corr heatmap.
+
+Also added **model persistence** (`saved_models_05/`: five `state_dict` `.pt` files + `standardiser.npz`
+scaler + `manifest.json`) with a **reload-and-verify** cell (reloaded Transformer reproduces in-memory
+scores exactly → True), and a **"Try it yourself" appendix cell**: after Run All, edit two knobs (model,
+period) to score any slice unsupervised (names the guilty sensor) + self-test on an injected fault.
+
+**Added early stopping to Section A (train up to 50 epochs, stop on overfit).** Chronological 80/20 split
+(train earlier years, validate most recent), monitor **validation reconstruction loss**, `patience=5`,
+restore best-val weights; per-model train-vs-val convergence panels with the stop epoch marked. Section C
+kept at fixed epochs (isolates the window/epoch knob). **Key honest finding: the stopper never fired —
+every model's best-val epoch was 50** (val loss still falling at the cap; for the Transformer/CNN val ≤
+train), so these small autoencoders are **underfitting-limited, not overfitting-limited** in this range.
+Training longer accordingly *strengthened* every result vs the earlier 12-epoch run: at 4σ single-sensor
+faults **Transformer AP 0.84 (F1 0.80) ≫ CNN 0.51 ≫ GRU 0.15 ≫ LSTM 0.09 ≈ RNN 0.05**; GRU window-12 AP
+0.08→0.77; epochs monotone 0.02→0.09→0.15 (no turn-down). Findings rewritten to these numbers.
+
+**Added a "Watching the stopper fire" demonstration + independent verification.** Because the full-data
+models never overfit, added a cell that *forces* the overfitting regime the way it happens in practice —
+scarce data: a wider GRU (hidden 64) trained on **only 100 windows** (sampled across seasons), up to 300
+epochs. Train loss falls to 0.09 while validation bottoms at epoch 120 and turns up, so the stopper
+**fires at epoch 140/300** and restores the best-val weights — a clean textbook U-curve plot. Also
+**independently re-derived the headline number** (trained a fresh Transformer on the same 80% split, 50
+epochs, injected 4σ faults) → **AP 0.835 / AUC 1.000, exact match** to the notebook: result verified
+reproducible. Notebook now **44 cells, 0 errors, 8 plots**; re-validated with nbformat.
+Note: the generator script lived in the session scratchpad, which has been cleared — the executed notebook
+is the source of truth now; further edits are applied to the `.ipynb` directly.
+
+### Section E — best classical/ML techniques vs the deep nets + full per-cell documentation
+Added a **Section E** pitting the 5 deep nets against 5 classical detectors on the *same* single-sensor-fault
+eval: **PCA reconstruction, Mahalanobis distance, Isolation Forest, LOF, One-Class SVM** — all reading the
+**instantaneous 14-sensor vector** (cross-sectional) rather than a temporal window. Merged into one ranked
+table + a combined sensitivity plot (classical solid, deep dashed; bar coloured red=classical/blue=deep).
+Independently re-derived Mahalanobis @4σ = 0.931 outside the notebook → exact match.
+
+**DISCOVERY (headline, honest, reframes the notebook): a classical covariance model beats every neural net
+on this task.** Ranked by AP@4σ: **Mahalanobis 0.93 (F1 0.91) > LOF 0.89 > Transformer 0.835 > PCA 0.54 ≈
+OC-SVM 0.51 ≈ CNN 0.51 ≫ GRU 0.15 … RNN 0.05 ≫ Isolation Forest 0.003.** Mahalanobis dominates *subtle*
+faults too — **AP 0.77 at 1σ where every deep net ≈ 0.**
+- *Why:* a single-sensor fault is a **cross-sectional** anomaly (one channel inconsistent with its 13
+  correlated neighbours at one instant); Mahalanobis models exactly that (joint covariance), no training,
+  no window. Deep AEs spend capacity on *temporal* window structure the fault doesn't live in.
+- *Two instructive failures:* **Isolation Forest collapses (0.003)** — random axis-aligned splits average a
+  1-D anomaly across 13 normal dims (known weakness for single-feature outliers); **PCA only middling
+  (0.54)** — 5 comps (98% var) partly absorb the spike, diluting the residual vs full-covariance Mahalanobis.
+- *Lesson:* **match the method to the anomaly's geometry, not to fashion** — deep temporal nets (and the
+  Transformer's cross-sensor attention) would win instead on *temporal* anomalies (drift/phase/collective),
+  not point cross-sectional ones. AUC (0.99–1.0 for most) flatters everyone; AP exposes the gaps.
+
+Also did a **full documentation pass**: a plain-language `> **This cell:** …` note before **every** code cell
+(what it does + how to read its output), so the notebook reads top-to-bottom as a teaching document.
+
+### Section F — temporal fault types (drift / stuck / global-freeze): hypothesis REFUTED
+Tested whether deep temporal nets reclaim the lead on *temporal* faults (the natural follow-up to Section E).
+Added `inject_drift` (ramp one sensor 0→4σ over 24 h) and `inject_stuck` (freeze one sensor, or all with
+`glob=True`), evaluated all 10 detectors, built a **method × fault-type AP heatmap**. Independently
+re-derived stuck-fault Mahalanobis 0.642 / CNN 0.048 → exact match.
+
+**DISCOVERY (honest, refutes my own earlier speculation): deep nets do NOT reclaim the lead.** AP by type:
+Mahalanobis wins **every** type — spike 0.93, **drift 0.88, stuck 0.64** — except **global freeze, where
+nobody wins (~0.03–0.05)**. Reasons: (1) a drifting/frozen single sensor on a correlated array is *still*
+cross-sectionally inconsistent, so the covariance model keeps catching it; (2) **reconstruction autoencoders
+(CNN/GRU/LSTM) are structurally BLIND to stuck sensors** — a constant segment is trivially reconstructed
+(AP ≈ base rate) — a fundamental limit, not tuning; (3) a **global freeze fools everyone** (cross-sectionally
+plausible *and* reconstructible) → needs a forecasting/variance detector. The **Transformer** is the best
+deep model throughout and the only one that partly catches stuck (0.35), via cross-sensor attention; drift
+does give the recurrent nets a little more signal (RNN 0.05→0.33). *Corrected the Section E note that had
+speculated deep nets would win on temporal faults — Section F shows they don't.*
+
+**Overall write-up takeaway:** no single detector is best for every fault. Covariance/Mahalanobis dominates
+whenever the fault breaks cross-sensor consistency (most single-sensor faults on a correlated array);
+reconstruction deep nets need a temporal/forecasting formulation to catch frozen sensors; global freeze
+needs a purpose-built variance/forecast check. Recommend Mahalanobis always-on + a forecasting/variance
+check for flat-lines + deep temporal models reserved for genuinely temporal, cross-sectionally-consistent
+anomalies. Rank by AP, not AUC (AUC ~0.99–1.0 flatters everyone).
+
+Notebook now had 61 cells (updated again below).
+
+### Section G — the forecasting rematch (+ persistence + flat-line/variance detector)
+Added the requested **forecasting-based detector** (a learned GRU next-step forecaster: predict reading `t`
+from the prior 24 h; a fault should diverge from the forecast), a **persistence** baseline, and a purpose-built
+**flat-line/variance** detector (flag a sensor whose short 4 h-window variance collapses). Evaluated all five
+representative detectors (+ Mahalanobis, Transformer) across the four fault types → `rematch` table + heatmap.
+Numbers verified against independent probes.
+
+**DISCOVERY (honest, and it upends the expectation): the forecasting detector — the one expected to be the
+hero — disappoints; a trivial variance detector is the real fix.** AP by fault type:
+- **Forecast (GRU):** spike 0.53, drift 0.27, **stuck 0.05, global-freeze 0.02** — beaten by Mahalanobis
+  everywhere. *Why:* a one-step forecaster **re-anchors on recent (faulted) history**, so a developing freeze/
+  drift looks unsurprising step-to-step; freezing at the current value is especially invisible (the true next
+  value would've been close anyway).
+- **Persistence:** worse, and *by construction blind to stuck* (frozen value = previous value → zero error).
+- **Flat-line/variance (4 h window): the right tool for freezes — stuck 0.79 (beats Mahalanobis 0.64) and
+  global-freeze 0.86** (the fault that fooled *everyone* in Section F). Blind to spike/drift (they don't
+  reduce variance).
+
+**Overall thesis (now the notebook's conclusion): no single detector wins — a small portfolio matched to
+fault geometry does.** Mahalanobis (cross-sectional) covers spike/drift/stuck; flat-line (temporal variance)
+covers stuck/global-freeze; **together they handle every fault type here cheaply, without a deep net.** The
+deep temporal/forecasting models never dominate a category — the faults here are either cross-sectional
+(covariance's turf) or flat-lines (variance's); deep temporal nets would only shine on faults that are
+*temporally* wrong yet *cross-sectionally consistent and non-constant* (phase/frequency/shape changes), which
+we deliberately did not inject.
+
+### Section H — genuinely temporal faults (phase shift / reversal / oscillation): deep nets finally win ONE
+Added the faults *designed* to favour sequence models, reusing the trained Transformer/GRU-AE/forecaster +
+Mahalanobis + flat-line. **DISCOVERY (honest):**
+- **Phase shift (whole array replayed 12 h earlier): nobody catches it (~0.03)** — the models have **no
+  absolute time-of-day feature**, so a coherently shifted daily curve looks normal. Needs explicit clock inputs.
+- **Phase shift of one sensor: Mahalanobis wins (0.67)**, Transformer 0.37 — shifting one sensor is
+  cross-sectionally inconsistent again.
+- **Time reversal: nobody catches it (~0.03)** — reversal preserves smoothness, marginals, and cross-sensor
+  structure.
+- **Oscillation (common-mode high-freq tremor): the deep temporal models FINALLY lead — Forecast 0.80,
+  Transformer 0.67 — edging Mahalanobis (0.70), Flat-line blind (0.02).** An out-of-distribution *shape* that
+  only a forecaster/sequence model flags. Verified against an independent probe (0.802/0.669/0.696 match).
+
+**Complete detector arc (A–H):** reconstruction nets (A–D) → classical bake-off (E: Mahalanobis beats all) →
+temporal faults (F: deep nets don't reclaim) → forecasting+variance rematch (G: variance detector fixes freeze)
+→ genuinely temporal (H: deep nets win exactly one, oscillation). **Final thesis baked into the notebook: no
+single detector wins — a portfolio matched to fault geometry does** (Mahalanobis for cross-sectional +
+variance for flat-lines + forecaster for high-freq/shape; phase/clock drift needs time-of-day features).
+
+**Recovery note:** during Section G/H work a stale background `nbconvert` write raced the file and reverted it
+(lost Section G + several findings + the A–D docs). Root cause: overlapping background executions + a
+working-directory mix-up. Fixed by killing the leftover kernel, switching to a **single foreground execution**,
+and rebuilding the lost cells; every section, finding, and per-cell doc re-verified present.
+
+Notebook now **77 cells, 0 errors, 12 plots**; all 33 code cells carry outputs and a per-cell `> **This cell:**`
+note; ids normalised, clean nbformat validation (no warnings).
+
+### Fixed a `NameError` from the background-write race + full results & dataset verification
+On reopening, notebook 5 had **`NameError: forecast_score is not defined` at the Section-H `tempF` cell** — a
+lingering background `nbconvert` from the earlier race had, after my clean run finished, overwritten the file
+with a stale G-less version (Section G dropped → Section H referenced an undefined symbol). **Fix:** killed the
+stray process, re-inserted Section G *before* H, refilled the E/F/G/H findings + A–D per-cell docs + main-
+findings/overview (all lost in the revert), and did a **single foreground execution** (no background) so it is
+the definitive last write. Result: **0 errors, 77 cells, 12 plots, clean validate**.
+
+**Results cross-checked against the findings — all match:** Sec B `summary` (Transformer AP 0.835 / CNN 0.509 /
+GRU 0.151 / LSTM 0.093 / RNN 0.054; early stop @50, Transformer val 0.0023 ≤ train 0.0038); attribution
+0.85–0.99 @2σ → ~1.0 @4σ; Sec D per-sensor (Tdew 0.999 … wind wd 0.009); Sec G `rematch` (Mahalanobis
+0.93/0.88/0.64/0.05, Forecast 0.53/0.27/0.05/0.02, Flatline …/…/0.79/0.86); Sec H `tempF` (oscillation:
+Forecast 0.80 > Mahalanobis 0.70 > Transformer 0.67; phase-global & reversal ≈0.03).
+
+**Dataset verified independently (no mistake):** raw **420,551 × 15**, hourly **70,129 × 14**, **-9999
+sentinels wv:18 / max. wv:20**, **327 duplicate timestamps** (src dedups keep-first), value ranges match the
+notebook's `doc` table, **0 NaN** after cleaning. A parallel hand-written preprocessing matches `src.preprocess`
+to <0.6 on every column **except `wv (m/s)`**, where they differ only at sentinel-hours (e.g. 2015-07-13 11:00,
+a real storm: src 23.20 vs the drop-and-average 7.33) — a legitimate difference in *when* the sentinel is
+interpolated (src interpolates at 10-min resolution before hourly averaging), **not a bug**. `wv`/`wd` are the
+"unmodelable" sensors anyway (Sec D), so this doesn't affect any conclusion. Sanity check: on real 2015
+data the Transformer flags 3–4 Jul 2015 (the dataset's heat peak) via `VPdef`, and scores AP 0.42 / 0.95
+attribution on injected 4σ faults. Now 37 cells, 0 errors.
+
+Prior univariate version (below) superseded but kept in this log as the process record. Builder in scratchpad.
+
+### New notebook `v1/notebooks/05_deep_training_techniques.ipynb` — deep architectures compared (no LLM)
+Built a self-contained (models defined inline, nothing added to `src/` or tests) notebook that trains five
+deep models on the **same** Jena `T (degC)` hourly series through **one unified harness** (same window,
+loop, seed) and compares them purely from computed numbers — **no LLM anywhere**, in keeping with the
+trust principle. Architectures: **vanilla RNN · GRU · LSTM · 1D-CNN · Transformer**, all reconstruction
+autoencoders; scored by per-point reconstruction error. Two axes (user asked for "both"): architecture
+(Sec A/B) and training technique (Sec C: window size, epochs). Executed end-to-end on the RTX 5070
+(nbconvert, `py312-tshci`): 26 cells, 0 errors, 6 plots.
+
+**Problem discovered → fix.** First run: at 6σ synthetic spikes *every* model scored AUC=AP=F1=1.0 — the
+task was too easy to differentiate anything. Replaced the single-magnitude eval with a **magnitude sweep
+(0.25σ→3σ)** plus a hard **1σ operating point**, which discriminates cleanly. Also warmed up CUDA before
+the timing loop (the RNN's first-model 2.0s was GPU-context init, not compute → now 0.9s, fair).
+
+**Findings (all code-computed, honest).**
+- **Best reconstructor = worst detector.** Detection at 1σ: **CNN AP 0.60 ≫ GRU 0.12 ≈ LSTM 0.10 ≈ RNN
+  0.08 ≫ Transformer 0.03** — yet reconstruction loss ranks *reverse* (Transformer 0.0037 best, CNN 0.013,
+  recurrent 0.07–0.09). *Trade-off:* a detector needs to rebuild normal well **but anomalies badly**; the
+  Transformer's bottleneck-free attention copies the input (identity mapping) so spikes don't stand out,
+  while the CNN's conv receptive field + 16-d bottleneck forces the smooth daily shape. *Discovery:*
+  inductive bias beats capacity — CNN (8.4k params) beats Transformer (17k, lowest loss) ~18× on AP.
+- **Sensitivity is the story:** curves only fan out below ~2σ; reporting the easy 6σ case hid every diff.
+- **Training technique can outweigh architecture:** shrinking GRU's window 24h→**12h lifted AP 0.12→0.96**
+  (beats the best architecture), 48h collapsed it to 0.04; and epochs 3→24 lifted GRU AP **0.05→0.40**
+  (under-training silently caps detection). *Discovery:* the axes interact — a good training setup made a
+  middling recurrent model competitive with the best architecture at its default.
+- Fair timing: vanilla RNN slowest (0.9s) despite fewest params — cuDNN fuses GRU/LSTM, not plain RNN.
+
+Builder script kept in scratchpad; notebook is the artefact. Complements the existing `04_deep_models_*`
+(which trains CNN-AE/LSTM-AE/LSTM-forecaster) by adding the RNN/GRU/Transformer contrast + the why.
+
+## 2026-07-07
+
+### Examiner's-eye grading of v1/v2/v3 → `final_report/ASSESSMENT.md`
+Wrote an honest, criteria-based assessment grading each version and the project overall against a UK-MSc
+scale (Distinction ≥70). Indicative marks: v1 ~72, v2 ~74, v3 ~76, overall ~76 (Distinction). Graded on 8
+criteria (framing, data rigour, methods, evaluation honesty, engineering/reproducibility, HCI/explainability,
+docs, contribution). Grounded in real evidence (verify gates 29/29·13/13·12/12; real test counts 183/79/56).
+Key honest calls: v1 capped by *synthetic labels*; v2 lifted by real events + honest AE-loss but coarse
+labels/small data; v3 the most rigorous evaluation (CIs, per-type, blocked CV) but modest absolute scores.
+The one grade-capping risk flagged for the whole project: no human evaluation despite the "HCI Interface"
+title — highest-leverage fix is a small user study or a write-up that reframes the contribution as
+verifiable NL analytics + honest evaluation. Also flagged the stale test-count docs (v1 README "173" vs real
+183) as a cheap fix. Linked from `final_report/README.md`.
+
+### Added plain-language dataset explanations + real computed-answer examples to `SUMMARY.md`
+Deepened the synthesis with a user-facing "The three datasets, explained (plain language)" section — for
+each of v1/v2/v3: what it is, where it's from, what a row means, what an anomaly is, and the quirks the code
+handles. **All numbers measured from the actual files** (not quoted): v1 Jena 420,551 raw 10-min readings →
+70,129 hourly, T −22.65..37.04 °C, 38 `-9999` sentinels, hottest 4 Jul 2015; v2 292 months (2002–2026), 27
+countries × exp/imp, EU total €382 bn → peak €1,281 bn (Sep 2022), 2008 −35 %, COVID −27 % (Feb→Apr 2020);
+v3 101,583 packets / 7 days / 5 IPs / 16 sensors @ 5-min, 32,288 temp reads 8.7–29.4 °C, 544 attacks
+(mod 104 / dup 56 / mixed 384), imbalance 185:1 packet & 21:1 window, attacker `10.6.56.41`. Mined via three
+throwaway `python3.12` probes against each version's own `preprocess`/`features`.
+Also added a "What each system can already answer from its data (real, computed)" block showing genuine
+NL questions and their exact query-engine answers per dataset — making the truth-layer payoff concrete.
+
+### Expanded `SUMMARY.md` to 15 per-version plots (5 each) + 1 cross-cutting, all explained
+On request, grew the figure set from 5 to **15 (five from each of v1/v2/v3)** plus the cross-version
+simple-vs-complex chart, restructured into per-version galleries where **every figure gets its own
+explanation paragraph**.
+
+- **Rendered from the REAL data, not mocked.** Three new scripts load each actual dataset through that
+  version's own `src` and compute the plots:
+  - `tools/make_v1_figures.py` (run from `code/v1`, loads Jena 70k rows): seasonality, monthly climatology,
+    temperature distribution, 14-sensor correlation heatmap, injected-anomaly recovery demo.
+  - `tools/make_v2_figures.py` (run from `code/v2`, loads EU trade): total trade + real crisis windows,
+    seasonality, deseasonalised anomaly score flagging 2008/COVID, shared-shock bar (all 27 countries drop
+    Apr-2020), seasonal-forecast band breached during COVID.
+  - `tools/make_v3_figures.py` (run from `code/v3`, parses 101,583 pcap packets via scapy in ~9s):
+    attacks-per-day (matches paper 104/56/192/192), Wednesday temperatures with modification attacks,
+    flow-channel weakness distribution, per-type recall, AP with bootstrap CIs.
+  - `tools/make_figures.py` trimmed to just the cross-version chart (`cross_1_simple_vs_complex.png`).
+  - Shared style in `tools/_figstyle.py` (the validated CVD-safe palette). Figures land in
+    `figures/v1|v2|v3/` + `figures/`.
+- **Two honesty corrections made while eyeballing the renders (correctness-over-speed):**
+  1. v1 anomaly demo first recovered 0/4 then 1/4 (a centred rolling-mean/std lets a spike mask itself);
+     switched to a residual-vs-median (MAD) detector and clearly out-of-envelope injections → 4/4, and
+     reframed honestly as "detection measured on *injected* anomalies (Jena has no real labels)".
+  2. v3 traffic plot originally claimed "attacks inflate the flow" — but checking the real flow features
+     showed attack vs normal windows are **nearly identical** (msg-rate median 50 vs 50; dup-ratio ~0).
+     That's the documented "weak flow channel" finding, so I replaced the plot with an honest
+     distribution-overlap figure titled "why the flow channel is weak", which now *supports* the
+     fusion-trades-precision-for-recall narrative instead of contradicting it.
+- Verified all 16 embedded paths resolve; eyeballed every render and fixed label/legend collisions.
+
+### Expanded `SUMMARY.md` into a figured narrative (5 charts, no comparison tables)
+Reworked the single-file synthesis on request: longer, prose-driven, **comparison tables removed**, and
+**five figures added** to support the data.
+
+- **Figures generated from real numbers only.** New `final_report/tools/make_figures.py` (matplotlib)
+  renders 5 PNGs into `final_report/figures/`, each captioned with the finding it supports. Numbers are
+  copied verbatim from `v3/report/EVALUATION.md` (M3 table) and `final_report/03_results_and_findings.md`
+  (the bootstrap-CI table) — the script *visualises* verified results, it computes nothing new (documented
+  in the script header). Re-runnable: `python3.12 tools/make_figures.py`.
+  - fig1 — v3 average precision with 95% bootstrap CIs → the intervals all overlap (no config sig. best;
+    supervised worst).
+  - fig2 — v3 per-attack-type recall, value vs flow → channel complementarity (flow 0.00 mod / 1.00 dup).
+  - fig3 — simple vs deep/learned across v1/v2/v3 (3 panels) → the learned method never wins.
+  - fig4 — v2 SARIMA MAPE normal (4.0%) vs COVID (14.4%) → detects, doesn't predict, shocks.
+  - fig5 — v3 value-only vs late-fusion precision/recall → fusion trades precision for recall.
+- **Colour choices validated, not eyeballed.** Used the dataviz skill's CVD-safe blue/orange pair
+  (`#2a78d6`/`#eb6834`), confirmed with the palette validator (worst adjacent ΔE 96.7, all checks pass);
+  consistent encoding across figures (blue = classical/value/precision, orange = deep-learned/flow/recall).
+  Figures given a solid light surface so they read in both light- and dark-theme markdown viewers. Eyeballed
+  every rendered PNG and fixed two label collisions (fig1 title/annotation, fig5 legend/bar).
+- **Prose over tables (as requested).** The old snapshot + evolution tables are now narrative sections;
+  the "results" section pairs each figure with a *why-this-happened* explanation. Linked as item 0 from
+  `final_report/README.md`.
+
+### Single-file cross-version synthesis: `final_report/SUMMARY.md`
+Wrote one standalone doc that reads across v1/v2/v3 and covers, in one place: strengths, limitations,
+future work, techniques used (each vs the alternative it beat), results gotten, **why** each result came
+out that way, and **how the approach changed/evolved** across the three versions.
+
+- **Why a new single file when `final_report/` already splits this across 5 docs:** the split files are
+  thorough but require reading four documents to get the whole picture. This is the "one read" entry point;
+  it links out to the detail files for depth. Linked from `final_report/README.md` as item 0 ("start here").
+- **The one angle it centralises that the split files didn't:** the **evolution ladder** — v1 (synthetic
+  labels, reference pipeline) → v2 (real-but-coarse labels, external validity) → v3 (real fine-grained
+  labels, rigorous evaluation), framed as *each version fixing the previous one's main weakness*. The
+  through-line made explicit: the project climbed a ladder of **evaluation honesty**, not model complexity;
+  the same trust architecture rode on top unchanged (evidence it's a reusable method, not a demo).
+- Numbers kept consistent with the existing `final_report/` files and each `report/EVALUATION.md`
+  (nothing new computed — this is synthesis, not fresh results).
+
+### Newcomer "Getting started" guides for v1, v2, v3
+Added a beginner-facing on-ramp to each version so someone who has never seen the project can run it
+without reverse-engineering the developer README.
+
+- **New file per version:** `v1/GETTING_STARTED.md`, `v2/GETTING_STARTED.md`, `v3/GETTING_STARTED.md`,
+  each with the same shape — *What is this? → Prerequisites → Install → Get the data → Run it (fastest
+  path) → Try these questions → What you're looking at → Troubleshooting → Verify → Where next.* Each
+  README now links to its guide from the top ("**New here? Start with GETTING_STARTED.md.**").
+- **Why a separate doc, not a bigger README:** the READMEs are developer *maps* (module layers, folder
+  tables). A newcomer needs the opposite — fewer assumptions, an explicit prerequisites checklist, and a
+  real troubleshooting section (missing data file, port already in use, Ollama off, wrong Python). Mixing
+  the two audiences in one file serves neither; splitting keeps each focused.
+- **Grounded, not guessed.** Built by three parallel agents (one per version), each instructed to verify
+  every command/path against the actual code before writing. Confirmed against source: web ports
+  **v1→3030, v2→3000, v3→3040** (all auto-fall-back to the next free port; override via CLI arg or
+  `PORT`); **v2 is web-only** (no `apps/chat.py`, unlike v1/v3); example questions map to real
+  `interface_parsing` intents in each version; data-fetch paths and the LLM-optional/faithfulness-gate
+  behaviour all match.
+- **Doc discrepancies surfaced (not yet reconciled):** v1 test count differs across docs (README "173
+  passed, 1 skipped" vs CLAUDE.md "182"); v3 count differs (README 47 / task 56 / CLAUDE.md 44) — the v3
+  guide deliberately pins only the stable `verify_results.py` **12/12** and no pytest number. v2's README
+  shows an illustrative `3040` URL though the real default port is `3000`. Worth a later cleanup pass.
+
+---
+
 ## 2026-07-06
 
 ### v3 started: real DAD IoT-network dataset fetched + verified, plan written

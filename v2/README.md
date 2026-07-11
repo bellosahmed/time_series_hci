@@ -8,6 +8,8 @@ The point of v2 is that this dataset has **real, datable anomalies** — the 200
 COVID-19, the 2022 energy crisis — so the detectors can be tested against events that actually
 happened, not synthetic spikes.
 
+**New here? Start with [GETTING_STARTED.md](GETTING_STARTED.md).**
+
 > **The one idea to remember:** **computation = code (the source of truth); the LLM only explains.**
 > It never calculates or invents a number.
 
