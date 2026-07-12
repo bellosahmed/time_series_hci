@@ -111,6 +111,19 @@ joins to the parsed packets by **`frame.number`**, giving each message its attac
 | | `agent.py` | optional multi-step tool-use (reuse v1 pattern) |
 | | `main.py` | end-to-end pipeline entry point |
 
+> **Status update (checked against the real `src/` directory, not against this table):** `anomaly.py`
+> was superseded by `channels.py`+`fusion.py` (the two-channel design that became the headline
+> experiment, §6) — a deliberate, documented change. But **`analysis.py`, `reasoning.py`,
+> `rag_system.py`, `clustering.py`, `forecasting.py`, `agent.py` and `main.py` were never built** —
+> README.md's status line narrows scope to "M0–M5 core + M6 apps" without ever crossing them off this
+> table, so it silently read as if they were still coming. `notebooks/standalone_full_pipeline.ipynb`
+> §13.1 confirms this gap programmatically (by listing the real directory) and closes three of the six
+> — a forecasting section (SARIMA, mirroring the paper's own ARIMA use), a minimal reasoning layer
+> (`explain_window`), and a day-type clustering attempt (an honest negative result) — as notebook-only
+> demonstrations, not as permanent `src/` modules. `rag_system.py` and `agent.py` remain undone,
+> honestly, for a stated reason: v3's question set is narrow enough that a full retrieval/agent layer
+> would mostly retrieve the same handful of facts already inlined in `interface.py`'s `ATTACK_KB`.
+
 Much of v1's code (`llm.py`, `rag_system.py`, `evaluation.py` metrics, the trust-labelling, the
 query-engine/interface scaffolding, the deep `get_device`) **ports over**; the domain-specific work is
 `preprocess.py`, `features.py`, and the domain intents/KB.

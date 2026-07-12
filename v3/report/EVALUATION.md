@@ -275,6 +275,21 @@ flattering one.
    precision — and no config is significantly best on AP. This is a stronger, more defensible result
    than the first pass, and a textbook case of why CIs + event-level metrics matter.
 
+**Formal significance test (ported from v1: `evaluation.mcnemar_test`) ✅.** v1 pairs its bootstrap CIs
+with a McNemar test; v3 only had the CI. Ported it (TDD, +2 tests → 60 tests), applied to `value-only`
+vs `late-fusion` **each thresholded at its own best-F1 operating point** (not the AP ranking): only
+value-only-correct = 95, only late-fusion-correct = 8, **p ≈ 5×10⁻²⁰** — highly significant.
+
+**This does not contradict point 1 above — it answers a different question.** AP is threshold-free: it
+asks whether the two configs *rank* windows similarly well across every possible cutoff, and there the
+CIs overlap, so no — you cannot say one out-ranks the other overall. McNemar asks a narrower, sharper
+question: *at each config's own best single cutoff*, do they make significantly different point-level
+calls? There, yes, decisively — value-only's classification decisions are right far more often than
+late-fusion's at their respective best-F1 thresholds. Together: the two configs are indistinguishable as
+*rankers* (AP), but value-only is the significantly better *classifier at its optimal threshold*
+(McNemar) — a real nuance a single metric would have hidden either way, and the reason this project
+reports point estimate + CI + paired test rather than any one of them alone.
+
 **Next:** walkthrough notebook (`notebooks/00_walkthrough`).
 
 ---
@@ -370,3 +385,253 @@ reusable), but the **defaults stay global-z + Isolation Forest** — swapping in
 within noise would be wrong. This is the same pattern the whole project keeps finding: on these small,
 label-scarce datasets, *simple robust methods hold up and the honest negative result is the contribution.*
 (+2 channel tests → **58 tests** green, ruff clean.)
+
+## Deep models — first attempt, both channels ✅ (tried, honest negative result)
+
+v3 had never tried a deep detector (unlike v1 and, now, v2). Two candidates ported from v1's `deep.py`
+pattern, both TDD, both new (`src/deep.py`, +5 tests → 65 tests):
+
+- **`deep.flow_lstm_ae_score`** — a multivariate LSTM autoencoder over 6-window (30-minute) sequences
+  of flow features, replacing the flow channel's Isolation Forest with a sequence-aware reconstruction
+  model — testing whether a *temporal* duplication pattern is visible to a sequence model where
+  hand-aggregated window features wash it out. **Result: it loses — AP 0.086 vs 0.136 for Isolation
+  Forest, best-F1 0.158 vs 0.226.** Per-type recall: 0.0 on modification (expected — this is the flow
+  channel), 0.5 on duplication (same as the baseline), 0.2 on mixed (down from the baseline's typical
+  level). 2,016 windows is enough data that this isn't purely a scale story the way v2's was; the more
+  likely explanation is that duplication's signal (a replayed msgid, a rate spike) is already exactly
+  what the hand-crafted `dup_msgid_ratio`/`msg_rate` features capture directly — there's no extra
+  *temporal shape* for a sequence model to find beyond what the aggregates already see.
+- **`deep.value_lstm_forecast_score`** — v1's `LSTMForecaster`, applied independently per sensor (16
+  small models) and combined via max-|forecast-error z| across sensors, the same reduction the z-score
+  value channel already uses. **Result: it loses, but narrowly — AP 0.166 vs 0.183 for the z-score,
+  best-F1 0.318 vs 0.379.** This is the more interesting negative result of the two: it is a direct,
+  cross-domain test of notebook 05's finding (from v1) that a *single-channel value fault* is a
+  threshold/covariance problem, not a sequence problem, so a learned temporal model has no structural
+  advantage over a marginal z-score for this specific fault geometry — and that is exactly what happened
+  here, on a third, unrelated dataset. The gap is narrow (not a rout) because the forecaster still learns
+  *some* useful structure (per-type recall 0.42/0.50/0.43 — close to the z-score's 0.46/0.50/0.43), just
+  not enough to beat the simpler, purpose-fit baseline.
+
+**Decision:** kept both as tested, permanent modules — not deleted — for the same reason as the M3
+follow-ups above: the comparison itself, and the fact that the value-channel result specifically
+corroborates a finding from a different dataset (v1), is the reportable contribution, independent of
+either architecture "winning." Neither is wired into `experiment.py`'s default configs; both are
+reproducible via `deep.flow_lstm_ae_score` / `deep.value_lstm_forecast_score` directly.
+
+### How each model works, and why each result happened (methodology + mechanism)
+
+*Written for direct use in the Methods/Discussion sections of the write-up.*
+
+**`flow_lstm_ae_score` — architecture and training.** Six consecutive 5-minute flow-feature rows
+(30 minutes of `msg_rate`/`iat_mean`/`iat_std`/`dup_msgid_ratio` context) are windowed into a sequence;
+an LSTM encoder compresses it to an 8-dimensional latent vector, an LSTM decoder reconstructs the full
+30-minute sequence, and the mean squared reconstruction error is the anomaly score. Training uses
+non-overlapping 6-window blocks; scoring uses overlapping windows with per-timestep error averaging
+(the same localisation approach used throughout the project), seeded and run for 100 epochs.
+
+**Why it lost — the mechanism, not just the number.** A duplication attack manifests as an
+**instantaneous** spike within a single 5-minute window (a burst in `msg_rate`, a jump in
+`dup_msgid_ratio`), not as a shape that unfolds gradually across several windows. Isolation Forest
+scores each window independently and fully credits an outlier window the moment it sees one. The
+LSTM-AE, by construction, reconstructs a *sequence*: the overlapping-window averaging step that
+localises the score also means a single spiky window's error gets blended with the errors of five
+neighbouring, normal windows before it reaches its final per-window score — diluting precisely the
+signal that made that window anomalous. The model is well-suited to finding a *slow drift* across
+30 minutes; the attack it needed to find is not that kind of anomaly, so its structural advantage
+(temporal context) is not just unused here, it is actively counter-productive to a scoring step
+(averaging) that was designed for a different, gradual-anomaly use case.
+
+**`value_lstm_forecast_score` — architecture and training.** Sixteen independent, small LSTM
+forecasters, one per sensor, each conditioned on the previous 24 five-minute readings (2 hours of
+history) to predict the next reading. Forecast error is standardised per sensor (so a naturally noisier
+sensor cannot dominate the comparison), then the window-level score is the **maximum** standardised
+error across all 16 sensors — the same "largest single-sensor deviation wins" reduction the existing
+z-score `value_score` channel already uses, so the two are directly comparable.
+
+**Why it lost, narrowly, and why the narrowness itself is the finding.** A modification attack is a
+single reading that is simply implausible for that sensor's usual distribution — detecting it only
+requires the question "is this value far from normal?", which a marginal z-score answers in one
+comparison against the sensor's mean/std. The forecaster instead answers a strictly harder question —
+"is this value far from what recent history would predict?" — which is the correct tool for *gradual
+drift* or *context-dependent* deviations, neither of which describes this attack. The forecaster is not
+a worse model in general; it is solving a more general problem than the specific fault requires, and
+pays a complexity cost (more parameters, more can go wrong in training 16 separate small models on
+short per-sensor series) without a matching benefit. Because the forecaster still learns *some*
+genuinely useful per-sensor structure (its per-type recall — 0.42/0.50/0.43 — sits close to, not far
+below, the z-score's 0.46/0.50/0.43), the result is a narrow loss rather than a rout, which is itself
+evidence the mechanism above is the right explanation: the model isn't failing outright, it's solving
+the wrong-shaped problem competently. **This is the same conclusion v1's notebook 05 reached on a
+completely different dataset (Jena weather sensors) for the same reason (single-channel value faults
+favour threshold/covariance methods over learned sequence models) — the fact that it reproduces on DAD,
+a third and structurally unrelated domain, is stronger evidence for the general claim than either
+result alone would be.**
+
+---
+
+## Standalone notebook — a real, previously undocumented faithfulness-gate gap ✅ (found, honest negative result)
+
+Built `notebooks/standalone_full_pipeline.ipynb` — a single, self-contained notebook (no `from src
+import` anywhere; every function ported line-by-line from `src/*.py` and checked against it) that
+reproduces the whole v3 pipeline end to end on the real DAD data, then adds a further-experiments
+section (§12: ADF stationarity, CUSUM change-point detection, PCA separability of the flow-feature
+space, LOF/One-Class SVM as two more flow-channel candidates, a window-size sensitivity sweep,
+ROC/confusion-matrix views, and a wider interface question battery — see below). Every number
+reproduced there matches this document's and `MODELS.md`'s figures exactly, confirming the port is
+faithful.
+
+**While building the faithfulness-gate demo (§11), a real bug was found, not assumed.** The M5 note
+above already flags that small integers ≤ 12 are deliberately exempted (clock hours, small octets).
+Testing the gate directly against a *spoofed attacker IP* surfaced a second, more consequential gap
+that was not previously documented:
+
+- `faithfulness()` has no concept of "IP address" — it just finds every token matching
+  `-?\d+(?:\.\d+)?` in the text. Applied to a dotted-quad, that regex greedily consumes `10.6.56.41`
+  as **two** tokens, `10.6` and `56.41` (each match stops at the digit-run boundary, so the four octets
+  collapse into two decimal-looking numbers), and then applies the **measurement-rounding tolerance**
+  (2% relative + 0.1 absolute) that was tuned for temperatures like `29.28 → "29.3 °C"`.
+- **Result, tested directly:** a last-octet swap (`10.6.56.41 → 10.6.56.99`) is **missed** — `56.99` is
+  only 3.5% away from `56.41`, inside the tolerance band, so the gate reports `ok: True` for a
+  genuinely different attacker IP. A near-value second-octet swap (`10.6 → 10.9`) is **also missed** for
+  the same reason (a 0.3 gap against a ~0.31 tolerance). A third-octet swap or a wholesale unrelated IP
+  (`192.168.1.1`) **is** caught, because the resulting decimal token lands far enough outside the
+  tolerance band.
+- **Why this matters more here than a wrong count would:** in a security domain, a wrong attacker IP
+  does not just misreport a number — it misdirects an investigation toward the wrong host. This is the
+  more operationally serious failure mode the M5 gate was never explicitly tested against.
+
+**Decision:** left as a **documented limitation**, not silently patched, consistent with how this
+project treats every other discovered gap (the small-integer exemption noted in M5, the "biggest
+exporter" routing limitation found in v2's standalone notebook). A correct fix is straightforward to
+scope for future work — match full dotted-quads as atomic tokens and compare them for exact string
+equality, rather than reusing the numeric-rounding tolerance for text that only *looks* numeric — but
+implementing it was out of scope for this pass; the honest finding is the contribution here. Reproduced
+directly in `notebooks/standalone_full_pipeline.ipynb` §11, including a passing regression-style
+assertion that documents the current (gap-having) behaviour rather than hiding it.
+
+### §12 further experiments — headline results (all freshly computed, not copied from §M3/§deep-models)
+
+- **ADF stationarity:** the hourly temperature series is **non-stationary** (p=0.53, cannot reject the
+  unit-root null) despite STL showing only a mild (~0.5 °C) seasonal amplitude — relevant to any future
+  forecasting attempt on this channel (v3 does not currently forecast temperature, unlike v2's SARIMA).
+- **CUSUM change-point detection** on the hourly message rate (threshold=3, drift=0.5): every one of
+  the 4 real attack-day boundaries has a detected change point within 2 hours of it — a cheap, coarse,
+  **day-level** triage signal that broadly tracks the real schedule, but cannot localise to the
+  5-minute windows the value/flow channels operate on, and several detected points are not
+  attack-related (ordinary end-of-day traffic shifts also trigger it).
+- **PCA of the flow-feature space** (2 components, 84% of variance): attack and normal window centroids
+  are clearly offset but the point clouds overlap heavily — a visual explanation for why the flow
+  channel's AP is modest (0.136) rather than near-1.0.
+- **LOF and One-Class SVM** as two more flow-channel candidates (same features, same evaluation as
+  Isolation Forest): LOF loses clearly (lower AP and F1 — a local-density method doesn't suit a
+  global distributional shift). One-Class SVM is a near-tie on AP (within 0.001) with a **higher**
+  best-F1 than Isolation Forest — a legitimate alternative, not adopted as the new default only because
+  Isolation Forest is simpler (no kernel/nu tuning) and the F1 gap was not re-verified against a
+  bootstrap CI in this pass.
+- **Window-size sweep** (1/5/15 min): AP rises sharply with window size (value 0.10→0.18→0.42; flow
+  0.03→0.14→0.17), but this is **not** simply "bigger windows detect better" — a longer window is more
+  likely to contain at least one attack packet by construction (`window_labels` uses any-packet-in-window),
+  so part of the AP gain is a labelling-coarseness artefact, not a detection improvement. The 5-minute
+  default trades some of that apparent AP for finer localisation, matching the real publish cadence — a
+  deliberate choice, not the AP-maximising one.
+- **ROC-AUC vs AP:** ROC-AUC ranks the configs differently from AP (flow-only 0.594, barely above
+  chance, vs its non-trivial AP of 0.136) because ROC-AUC integrates over the full false-positive-rate
+  range, most of which is free true-negative credit under 21:1 imbalance — the textbook reason AP
+  stayed the primary metric throughout this project rather than ROC-AUC or accuracy.
+
+---
+
+## Standalone notebook §13 — checked v3 against its own plan and against the source paper
+
+Prompted by "v3 is inspired from the paper — is there anything that can be added, and what did it
+miss": rather than guess, `notebooks/standalone_full_pipeline.ipynb` §13 checked two concrete things —
+(a) whether `docs/PLAN.md`'s own architecture table was actually built, and (b) whether the source
+paper's own descriptive analyses (protocol/TCP-flag/packet-size stats, distribution goodness-of-fit)
+are used anywhere in v3 — and added two multivariate techniques requested explicitly as "beyond STL"
+(Granger causality, DTW). Every result below is freshly computed against the real data, not asserted.
+
+**§13.1 — the module gap (a real, verifiable finding).** Listing `src/*.py` programmatically against
+`docs/PLAN.md`'s own architecture table: **10 of 17 planned modules were built** (`preprocess`,
+`features`, `channels`, `fusion`, `evaluation`, `query_engine`, `interface`, `interface_parsing`,
+`llm`, `deep` — `anomaly.py` was deliberately superseded by `channels.py`+`fusion.py`, a documented
+design change, not a gap). **7 were never built:** `analysis`, `reasoning`, `rag_system`, `clustering`,
+`forecasting`, `agent`, `main`. README.md's status line narrows scope to "M0–M5 core + M6 apps" without
+ever crossing these off PLAN.md's table, so the plan document silently reads as if they are still
+coming. `docs/PLAN.md` now carries a status note recording this. Three of the seven are partially
+closed as notebook-only demonstrations (§13.6–13.8 below); `rag_system.py` and `agent.py` are left as
+honestly-stated, un-closed gaps — v3's question set is narrow enough that a full retrieval/agent layer
+would mostly retrieve the same handful of facts already inlined in `interface.py`'s `ATTACK_KB`, so
+building one would be scope for its own sake.
+
+**§13.2 — what the paper analysed that v3's channels don't use.** The paper reports a protocol split
+(96.9% TCP / 3.4% UDP / 63.3% MQTT), TCP-flag-based detection of "atypical closures" during
+interception, and flow-level byte counts — none of which `preprocess.py`/`channels.py` currently keep
+(only `src_ip`, `src_port`, `topic`, `temperature` are extracted). Re-parsing with protocol, TCP flags
+and packet size added:
+- **Protocol split replicates the paper almost exactly:** 96.6% TCP / 3.4% UDP here vs the paper's
+  96.9% / 3.4% — an independent validation of the pcap re-parse itself.
+- **The TCP-flag "atypical closure" signal does NOT reproduce at packet level (honest negative):**
+  every single labelled attack packet carries a plain `PA` (push-ack) flag — 100% of them — because a
+  modification/duplication attack *is* a data packet, just a manipulated one, so its flags look
+  identical to a normal PUBLISH. The reset-flag rate by day does not single out Tuesday (interception)
+  or any attack day either — Sunday (clean) has a similar rate to Wed/Thu/Fri/Sat. Read as: the paper's
+  claim most likely operates at flow/connection-level state transitions across a whole session, a
+  coarser aggregation than a per-packet flag-frequency check reproduces — not a claim the paper is
+  wrong.
+
+**§13.3 — distribution goodness-of-fit (mirrors the paper's KS/Anderson-Darling analysis).** Fitting
+normal/lognormal/gamma/Weibull to each of the 16 sensors' temperatures: **every sensor's best-fitting
+distribution is still formally rejected by the KS test** (p < 0.05, all 16). Not a data-quality issue —
+with n≈2000 per sensor the test has power to flag even small deviations, and temperature has a real
+~24h diurnal cycle, so no time-invariant distribution can fit a series whose mean genuinely shifts by
+time of day. This is precisely the reasoning that leads to STL/ARIMA (not a static distribution) as the
+right model for the series — the paper's own conclusion, now independently re-derived rather than just
+cited.
+
+**§13.4 — Granger causality (requested, beyond-STL).** Tested a same-InRow sensor pair (131→132) and a
+cross-InRow pair (131→231): **both show significant Granger causality at every lag (p ≪ 0.05), even
+across different cooling units.** Read with the standard caveat applied at full force: this almost
+certainly reflects a **shared external driver** (the data centre's ambient diurnal cycle moving every
+sensor's baseline together — consistent with §2's 0.43 mean off-diagonal sensor correlation), not true
+causal influence between units.
+
+**§13.5 — Dynamic Time Warping (requested, beyond-STL), two experiments.** (a) *Sensor-pair shape
+distance:* DTW agrees with Euclidean/Pearson on ranking (same-InRow far more alike than cross-InRow)
+but narrows the gap between the two pairs (DTW ratio ~3× vs Euclidean's ~14×) — some of what Euclidean
+reports as "difference" between cross-unit sensors is a small phase offset DTW's flexible alignment
+absorbs, not a genuinely different shape. (b) *Daily-profile shape distance (baseline = Monday):*
+**does NOT separate attack days from clean ones** — Sunday (0 attacks) is about as shape-different from
+Monday as Friday/Saturday (192 attacks each). Extends the project's established "point fault, not shape
+fault" finding (v1 notebook 05, replayed in v3 §9) down to a coarse, smoothed 24-point daily profile —
+even relaxing "shape" this far still doesn't surface the attacks.
+
+**§13.6 — forecasting (closes the `forecasting.py` gap, mirrors the paper's own ARIMA use).** A SARIMA
+backtest (order (1,1,1)×(1,0,1,24), rolled forward 24h at a time) on the hourly-mean temperature: MAPE
+0.61%. The **top forecast-error anomalies (z=4.11, 3.15, 2.76, 2.66) fall almost exactly on the paper's
+documented Friday/Saturday "mixed" windows (6h and 14–16h)** — a genuine recovery of those windows from
+forecasting alone. But it does **not** clearly flag the Wednesday modification window (all z-scores
+under 2.2 in 03:00–07:00) — the same point-fault-vs-aggregate story as §13.5: averaging 16 sensors into
+one hourly mean dilutes a single-sensor, single-reading fault below the forecast's noise floor. The
+per-sensor z-score value channel (§5), which never aggregates across sensors, remains the right tool
+for that attack type.
+
+**§13.7 — a minimal reasoning layer (closes the `reasoning.py` gap).** `explain_window(ts)` reports
+which single sensor (value channel) or flow feature (flow channel) moved furthest from its own mean at
+a flagged window. Sharp and correct for a modification window (sensor 134, z=−4.28 — an obvious single
+culprit); appropriately weak for "mixed" windows (top z-scores under 0.5, no single dominant feature) —
+matching §5.2's per-type recall table exactly: the explanation is only as sharp as the underlying
+attack is single-cause, which is the honest behaviour a reasoning layer should have, not a bug.
+
+**§13.8 — day-type clustering (closes the `clustering.py` gap — an honest negative result).** K-means
+(k=2) on day-level summary features (temperature mean/std, message-rate std — `n_attacks` deliberately
+excluded to avoid leaking the label into its own evaluation) **does not recover the attack/clean
+split**: it groups {Mon, Tue, Wed, Thu} together and {Fri, Sat, Sun} together, putting Sunday (0
+attacks) with the two heaviest attack days and separating the real Wed/Thu attack days into the
+"clean-looking" cluster. Cause: `msg_rate_std` trends upward across the week (22.8→65.8, roughly
+Mon–Sat) for reasons unrelated to the attacks and dominates the standardised feature space. A clean
+demonstration that generic day-level summary statistics do not substitute for the window-level,
+attack-sensitive features (§4) the real detectors use.
+
+**Overall:** one genuine replication (protocol split), five honest negative-or-partial results
+(TCP-flag signal, distribution fitting, Granger's causation caveat, DTW's day-level result, SARIMA's
+Wednesday miss, clustering's failure) — none silently dropped for not confirming a hypothesis, which is
+the same standard applied throughout this document.

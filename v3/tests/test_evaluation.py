@@ -45,3 +45,23 @@ def test_bootstrap_ci_returns_ordered_bounds():
     labels = (rng.random(200) < 0.1).astype(int)
     lo, hi = ev.bootstrap_ci(scores, labels, n=200)
     assert 0.0 <= lo <= hi <= 1.0
+
+
+def test_mcnemar_flags_clear_difference():
+    # 20 discordant points needed for an exact-binomial 20/0 split to clear p<0.05
+    # (5/0 only reaches p=0.0625 — too little power, not a bug in the test being wrong).
+    labels = np.array([1] * 20 + [0] * 20)
+    good = labels.copy()                        # correct everywhere
+    bad = np.zeros_like(labels)                 # flags nothing -> wrong on every positive
+    res = ev.mcnemar_test(good, bad, labels)
+    assert res["only_a_correct"] == int(labels.sum())
+    assert res["only_b_correct"] == 0
+    assert 0.0 <= res["p_value"] <= 1.0
+    assert res["p_value"] < 0.05
+
+
+def test_mcnemar_identical_predictions_not_significant():
+    labels = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
+    res = ev.mcnemar_test(labels.copy(), labels.copy(), labels)
+    assert res["n_discordant"] == 0
+    assert res["p_value"] == 1.0

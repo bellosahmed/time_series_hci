@@ -80,6 +80,34 @@ def bootstrap_ci(scores, labels, metric: str = "ap", n: int = 1000, seed: int = 
     return (float(lo), float(hi))
 
 
+def mcnemar_test(pred_a, pred_b, labels) -> dict:
+    """Exact McNemar test comparing two binary predictions on the same labelled windows (ported
+    from v1, where it distinguishes IsolationForest from z-score).
+
+    Per window, each prediction is 'correct' if it equals the label. McNemar looks only at the
+    *discordant* windows (one prediction right, the other wrong) and tests whether that split
+    departs from 50/50 via an exact binomial test — a formal alternative to eyeballing whether two
+    configs' bootstrap AP confidence intervals overlap. Returns the discordant counts and a
+    two-sided p-value (1.0 when the two never disagree).
+    """
+    from scipy.stats import binomtest
+
+    a = np.asarray(pred_a).astype(bool)
+    b = np.asarray(pred_b).astype(bool)
+    t = np.asarray(labels).astype(bool)
+    correct_a = a == t
+    correct_b = b == t
+    only_a = int(np.sum(correct_a & ~correct_b))
+    only_b = int(np.sum(~correct_a & correct_b))
+    n = only_a + only_b
+    if n == 0:
+        p_value = 1.0
+    else:
+        p_value = float(binomtest(min(only_a, only_b), n, 0.5, alternative="two-sided").pvalue)
+    return {"only_a_correct": only_a, "only_b_correct": only_b,
+            "n_discordant": n, "p_value": p_value}
+
+
 def per_type_recall(scores, labels, attack_type, threshold) -> dict:
     """Recall within each attack type at a fixed threshold — shows each channel's blind spots."""
     scores = np.asarray(scores, dtype=float)
