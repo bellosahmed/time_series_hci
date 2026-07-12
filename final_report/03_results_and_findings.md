@@ -24,7 +24,7 @@ R 0.67, F1 0.71** (mean ± std reported, not a single run).
 **Retrieval.** Dense MiniLM beats keyword methods on **paraphrases** (MRR **0.267 → 0.500**); the three
 keyword methods tie on in-vocabulary queries — *document quality dominates retriever choice on a small KB.*
 
-**Gates:** 182 tests (1 skipped) · verify **29/29** · ruff + mypy clean · coverage 92 %.
+**Gates:** 193 tests (1 skipped) · verify **29/29** · ruff + mypy clean · coverage 92 %.
 
 ## v2 — Trade
 
@@ -44,7 +44,7 @@ loses to Isolation Forest (0.36)** — reported openly.
 **Forecasting (SARIMA backtest).** MAPE **4.0 %** in normal periods; **14.4 %** across COVID, where 6
 months breach the prediction band → *shocks are detected, not predicted* (the honest read).
 
-**Gates:** 74 tests · verify **13/13**.
+**Gates:** 79 tests · verify **13/13**.
 
 ## v3 — IoT network security
 
@@ -69,7 +69,7 @@ episode caught); but the **AP CIs overlap** → *no config is significantly best
 **Data quality:** 0 missing temperatures on publishes; 0.6 % value-grid gaps (interpolated, value channel
 only); imbalance **186:1** (packet) / **21:1** (window) — respected, not resampled.
 
-**Gates:** 56 tests · verify **12/12** · ruff clean.
+**Gates:** 58 tests · verify **12/12** · ruff clean.
 
 ---
 

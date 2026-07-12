@@ -35,6 +35,38 @@ then a prioritised roadmap.
 - **Retrospective, batch** analysis — not real-time / operational.
 - **RAG is text-oriented** — raw sensor/pcap data must be summarised to markdown/CSV before indexing.
 
+## Threats to validity
+
+The limitations above, restated as the standard validity threats — *what could make the reported
+conclusions wrong*, and why we judge the headline claims to survive.
+
+- **v1 — Weather.** The chief threat is **construct validity**: detection is scored on *injected* faults,
+  so "F1/AP on Jena" measures response to a synthetic proxy, not to real weather anomalies. We mitigate by
+  (a) reporting on multiple fault *geometries* (spike, drift, stuck, phase, oscillation) rather than one, so
+  the ranking reflects a method's inductive bias not a single label choice, and (b) separating the *truth
+  layer* (query engine, verified `== pandas`) from the detection claim, so the exact-analytics contribution
+  does not depend on the labels at all. **External validity** (one dataset) is partly answered by v2/v3
+  being other domains. The **conclusion** that *no single detector wins and Isolation Forest is a poor
+  multivariate default* is robust: it is a mechanistic result (axis-aligned splits dilute a single-channel
+  fault), independently re-derived, and now encoded in the shipped `sensor_network_anomalies` portfolio.
+- **v2 — Trade.** The chief threat is **conclusion validity** from small n and coarse labels: 292 monthly
+  points with ~14 crisis *months* make strict per-point precision unstable and starve the deep models. We
+  mitigate with point-adjusted metrics and an out-of-sample SARIMA backtest, and we do **not** over-claim —
+  the openly-reported negative result (autoencoder 0.21 < Isolation Forest 0.36) is exactly the conclusion
+  small data supports. **Construct validity** is comparatively strong here: the anomalies (2008, COVID,
+  2022) are real, datable events, not injected.
+- **v3 — Network security.** The chief threats are **construct and external validity**: the traffic is
+  "semi-synthetic" (STL-modelled normal), from one data centre, 7 days, one attacker, and 71% of attacks are
+  only typeable as "mixed." We mitigate by using the **real per-packet labels** (the best in the project),
+  excluding the attacker-IP feature to avoid **label leakage** (an internal-validity safeguard), and
+  reporting **bootstrap confidence intervals** and per-type recall so the modest absolute AP (0.10–0.18) is
+  presented with its uncertainty rather than as a point estimate. The honest conclusion — *no fusion config
+  is significantly best on AP* — is a direct consequence of taking those CIs seriously.
+- **Shared.** A residual **construct-validity** threat to the trust claim is the faithfulness gate's
+  tolerance of small integers (≤ 12), so a fabricated *small* count could in principle slip past the numeric
+  check; qualifiers (adjectives, framing) are prompt-controlled, not gated. All three systems are
+  **retrospective/batch**, so conclusions about operational, streaming use are extrapolations, not measured.
+
 ## Future work (prioritised)
 
 ### High-value, cross-cutting
@@ -49,17 +81,32 @@ then a prioritised roadmap.
 ### Detection / evaluation
 4. **Real-time / streaming detection** — move from retrospective batch to an operational monitor (all three
    domains have a live analogue).
-5. **v3: better detectors** — a seasonal value model, tuned Isolation-Forest contamination, and a stronger
-   flow channel; more attack types and more captures to lift the tiny per-type strata.
-6. **Causal, not just correlational** reasoning — e.g. does a pressure drop *cause* the humidity spike
+5. **v3: lift the absolute detection scores — but the real lever is data, not tuning.** The obvious tuning
+   knobs were *tried and did not help* (recorded honestly): a seasonal, time-of-day value model **hurt**
+   (AP 0.183 → 0.099 — the data-centre temperature has no exploitable diurnal cycle for the attack to
+   violate, and the per-hour baseline is sample-starved), and a Mahalanobis/covariance flow channel was
+   **within the confidence interval** (AP 0.136 → 0.125). Both are kept as tested optional methods, but the
+   defaults stay global-z + Isolation Forest. The genuine remaining lever is therefore **more real captures**
+   (more attack types, more days, more than one attacker) to enlarge the tiny per-type strata — which the
+   **fixed DAD dataset (one attacker, 7 days) cannot provide**. This is a *dataset ceiling*, not a modelling
+   gap: closing it means a new capture campaign or a second labelled network-security corpus, not more tuning.
+6. **v2: a higher-resolution companion series so the deep models and point metrics can breathe.** With only
+   292 *monthly* points and ~14 crisis months, per-point precision is unstable and the autoencoder is
+   starved. Official trade statistics are, however, **published monthly at source** — so daily/weekly *trade*
+   values do not exist to fetch. The honest route is a **higher-frequency economic *proxy*** for the same
+   shocks — e.g. a daily/weekly shipping or freight-rate index, port-call / container-throughput data, or an
+   equity/commodity series that co-moves with trade — run through the *same* pipeline as a companion. This is
+   a deliberate **dataset decision, not a silent swap**: the proxy measures the shock at higher resolution but
+   is a different variable, so it must be framed as corroboration of the monthly finding, not a replacement.
+7. **Causal, not just correlational** reasoning — e.g. does a pressure drop *cause* the humidity spike
    (v1), or does one country's shock *cause* another's (v2)? Causal discovery done responsibly.
-7. **Cross-domain transfer studies** — can a detector/retriever trained on one domain inform another?
+8. **Cross-domain transfer studies** — can a detector/retriever trained on one domain inform another?
 
 ### HCI / deployment
-8. **A human evaluation** of the interface (task accuracy vs a spreadsheet, trust, SUS) to substantiate the
+9. **A human evaluation** of the interface (task accuracy vs a spreadsheet, trust, SUS) to substantiate the
    "usable, trustworthy" claim beyond design argument.
-9. **On-prem hardening** — the offline Open WebUI + Ollama + GPU stack (documented in
-   `v3/local_webui_dataset_spec.ipynb`) taken to a real air-gapped deployment with a domain user.
+10. **On-prem hardening** — the offline Open WebUI + Ollama + GPU stack (documented in
+    `v3/local_webui_dataset_spec.ipynb`) taken to a real air-gapped deployment with a domain user.
 
 ## The one-line conclusion
 Across weather, economics, and network security, a **deterministic truth layer + an explanation-only LLM +

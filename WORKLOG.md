@@ -5,6 +5,114 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-12
+
+### Detector-selection option in the app (network-level anomaly answer, brainstormed → TDD)
+Brainstormed with the user: the app's anomaly answer should be **network-level** and let the user **switch
+detectors**. Made the `anomaly` intent read the whole in-scope sensor frame via a selectable network
+detector (registry `interface.NETWORK_DETECTORS` = **portfolio** (default) · mahalanobis · isolation_forest
+· lof · ocsvm — all already in `src/anomaly.py`, all deterministic; the LLM still only phrases). The answer
+reports N cross-sensor windows + names the culprit sensor (`network_culprit`) + attaches multi-sensor
+reasoning; `Answer.detector` records the choice; an unknown name degrades gracefully (lists valid ones).
+- **Surfaces:** `Interface(df, detector=…)` + `chat.py --detector {choices}` + web `/api/detectors` route
+  and `detector` field on `/api/ask` (echoed back) + a **dropdown in the web Header** (always enabled).
+- **Behaviour change (intended):** this supersedes the old single-sensor-z-score-primary anomaly answer;
+  it is now network-first (the previous always-on portfolio note becomes the main answer). Deep models are
+  deliberately **not** offered — nb05 shows they lose to the classical portfolio here (demonstration-only).
+- **Verified live on real data:** CLI `--detector mahalanobis` → "88 cross-sensor windows … driven by
+  wv (m/s)" + reasoning; web route portfolio (318) vs isolation_forest (88) differ and echo back; `bogus`
+  → graceful "Unknown detector" message. **+5 tests (3 interface, 2 app) → v1 193 passing, 1 skipped**;
+  ruff + mypy clean. (Followed the brainstorming skill: design agreed with the user before implementing.)
+
+### Productised notebook-05's finding into `src/` — Mahalanobis + flat-line detectors + portfolio
+Notebook 05 concluded *no single detector wins; match the method to the anomaly geometry* (Mahalanobis
+dominates cross-sectional single-sensor faults; a variance detector is the right tool for stuck sensors;
+Isolation Forest — the shipped app's multi-sensor default — **collapses** on single-sensor faults, AP 0.003).
+Until now that lived only inside the notebook (models defined inline, nothing in `src/`). Promoted the two
+winners into the product, **test-first (TDD)**:
+- `anomaly.mahalanobis_anomalies(df, contamination)` — Ledoit-Wolf shrunk covariance → per-row Mahalanobis
+  distance on the standardised sensor vector; flags the top `contamination` fraction. Catches a channel
+  inconsistent with its correlated neighbours even when not locally extreme.
+- `anomaly.flatline_anomalies(df, window=4, min_ratio)` — per-sensor rolling-std vs that sensor's median
+  rolling-std; flags a row when any sensor's variance collapses below `min_ratio`. Catches frozen/stuck
+  sensors that reconstruction/covariance models are structurally blind to.
+- `anomaly.sensor_network_anomalies(df)` — the recommended **portfolio** (Mahalanobis ∪ flat-line); wired
+  into `main.py` as `n_network_anomalies` (Isolation Forest kept alongside for comparison).
+- **+5 tests** (cross-sensor catch, contamination monotonicity, frozen-sensor catch, clean-data restraint,
+  portfolio-catches-both); ruff + mypy clean. (Test total after the interface wiring below: **189 passing,
+  1 skipped**.)
+
+**Discovery from driving it on real data (not just tests):** the notebook ranked flat-line by AP on *injected*
+freezes, so it never committed to a threshold. With a loose `min_ratio=0.1` the detector flagged **~15% of
+the real Jena rows** — naturally-quiet 4 h windows (VPdef/VPmax/rh) look "frozen." A genuinely stuck sensor
+drops to ~0 variance, so I tightened the default to **0.02** ("collapsed below 2% of normal wobble"): real-data
+flag rate **14.8% → 1.9%**, exact injected freezes still caught (ratio 0 < 0.02). *Trade-off:* stricter
+`min_ratio` trades sensitivity to slow/partial fades for far fewer false alarms on real quiet periods — the
+right call for a default. End-to-end pipeline on the full 70,129-row set now flags residual 526 / iforest 702
+/ **network 1,988 (2.8%)**.
+
+### Re-graded v1 with the notebook-05 rework (+ full v1/v2/v3 total and improvement levers)
+Indicative re-grade: **v1 72 → 73–74** (nb05 strengthens *methods appropriateness* + *evaluation honesty* +
+the multivariate-IoT framing, but does **not** lift the synthetic-label ceiling that keeps v1 below v2/v3).
+Totals unchanged holistically: **v2 74, v3 76, project overall ~76 (Distinction)** — the overall exceeds the
+per-version average because the three-domain, label-quality-ladder argument is worth more than the parts.
+Top improvement lever remains the *no human evaluation vs the "HCI interface" title* gap (user study **or**
+reframe to "verifiable NL analytics + honest evaluation"); second-order: this productisation, the stale
+test-count reconciliation, v3 absolute-score lift, v2 higher-resolution series.
+
+### Wired the portfolio into the NL interface + attribution (item 2b), TDD
+The anomaly *answer* was still single-sensor (z-score on one sensor's STL residual), so the portfolio only
+ran in `main.py`, not in the user-facing path. Extended the `anomaly` intent: when ≥2 sensors are in scope it
+also runs `sensor_network_anomalies` over the whole frame and appends a note naming the culprit sensor via a
+new **`anomaly.network_culprit(features, timestamp)`** (arg-max standardised deviation — the notebook's
+attribution). Added `Answer.network` (windows list). Wrapped in try/except so the portfolio can never break
+the core answer. **+2 tests** → **189 passing, 1 skipped**; ruff + mypy clean. Verified live on real 2014
+data: *"Across all 14 sensors, the multi-sensor portfolio (Mahalanobis + flat-line) flags 95 cross-sensor
+window(s); the first (14 Jan 2014 03:00) is driven by rh (%)."* The nb05 finding is now a system property in
+the UI, not just a notebook result.
+
+### Reconciled stale test counts across the docs (item 3)
+Current-state counts were inconsistent (v1 README "173", CLAUDE.md "182", ASSESSMENT "183"; final_report
+table said v2 "74" — really 79). Established the true numbers (v1 **189 passed / 1 skipped / 190 collected**,
+v2 **79**, v3 **56**) and updated every *current-state* claim: `v1/README.md`, `v1/GETTING_STARTED.md`,
+`CLAUDE.md`, `final_report/README.md` + `ASSESSMENT.md` + `03_results_and_findings.md`, `v1/report/REPORT.md`.
+Left the *dated historical* counts in `report/notes/*`, `docs/AGENTIC_AND_POLISH.md`, `RETRIEVAL_EVALUATION.md`
+untouched — they are point-in-time process records, not current-state claims.
+
+### Added per-version "threats to validity" section (item 6)
+Distilled the existing limitations bullets in `final_report/04_limitations_and_future_work.md` into a focused
+**Threats to validity** section framed in the standard categories (construct / internal / external /
+conclusion) — one paragraph per version + shared — stating *what could make each headline conclusion wrong*
+and why we judge it to survive (e.g. v1's injected-label construct threat mitigated by testing multiple fault
+geometries + the label-independent truth layer; v3's leakage guard via attacker-IP exclusion + reported CIs).
+
+### v3 detector tuning attempt — seasonal value + robust flow (item 4): honest negative result
+Implemented the two M3 follow-ups **TDD** and measured on the full real week (101,583 packets, 5-min windows):
+- `channels.seasonal_value_score` (time-of-day z instead of global z) — **hurts: AP 0.183 → 0.099.** No
+  exploitable diurnal cycle for the modification attack to violate, and the per-hour baseline is
+  sample-starved → dilutes the signal. "Adding structure the data doesn't have makes it worse."
+- `channels.flow_score(method="mahalanobis"|"combined")` (Ledoit-Wolf covariance over standardised flow
+  features — the nb05 cross-sectional lesson) — **a wash: AP 0.136 → 0.125, CIs overlap**; best-F1 nudges
+  0.226 → 0.252. Not significant.
+- **Decision:** keep both as *tested, optional* functions (document the attempt, reusable), **defaults stay
+  global-z + Isolation Forest** — swapping in a worse/within-noise detector would be wrong. Same finding the
+  whole project keeps hitting: simple robust methods hold up; the honest negative result is the contribution.
+- **+2 v3 channel tests → v3 58 tests** green, ruff clean. Documented in `v3/report/EVALUATION.md` (new
+  "M3 follow-ups" section). Reconciled the stale v3 count (CLAUDE.md 47 → 58; final_report 56 → 58).
+
+### Updated `final_report/ASSESSMENT.md` v1 grade + folded the two data-capped levers into future work
+- **v1 grade 72 → 73–74** (low–mid Distinction): rewrote the v1 section to credit nb05's *methods
+  appropriateness* (the A–H "match method to geometry" arc), *evaluation honesty* (negative results, AP-vs-AUC
+  literacy, independent re-derivation), and the **productisation** (portfolio in `src/` + interface), while
+  keeping the honest caveat that the **synthetic-label ceiling is unchanged** (nb05 sharpens the argument, not
+  the label validity). Overall project stays **~76**; updated "~318 tests" → **326** (189+79+58); marked the
+  stale-count and threats-to-validity levers **done**, and the v3-tuning lever as **attempted → negative**.
+- **04_limitations_and_future_work.md future work reframed honestly:** (5) v3 — the tuning knobs were tried
+  and didn't help, so the real lever is *more real captures*, which the fixed DAD dataset can't provide (a
+  dataset ceiling, not a modelling gap); (6, new) v2 — daily/weekly *trade* doesn't exist at source (monthly
+  only), so the honest route is a higher-frequency *proxy* (freight/shipping/throughput index) run through the
+  same pipeline **as corroboration, framed as a dataset decision, not a silent swap**. Renumbered the list.
+
 ## 2026-07-11
 
 ### Reworked notebook 05 → **multivariate IoT sensor-network** version (all 14 sensors, no LLM)

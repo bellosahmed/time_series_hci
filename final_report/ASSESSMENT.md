@@ -20,34 +20,47 @@ Data-Science / Computer-Science examiner would weigh for a systems-plus-evaluati
 8. Contribution / originality
 
 **Headline grades (indicative):**
-- **v1 — Weather:** ~**72** (low Distinction)
+- **v1 — Weather:** ~**73–74** (low–mid Distinction)
 - **v2 — Trade:** ~**74** (mid Distinction)
 - **v3 — Network security:** ~**76** (mid–high Distinction)
 - **Project as a whole:** ~**76** (Distinction) — with one scope risk that caps the very top band (below).
 
 ---
 
-## v1 — Weather (Jena) · ~72 / Distinction (low)
+## v1 — Weather (Jena) · ~73–74 / Distinction (low–mid)
 
 The **reference implementation** and the broadest system. It is where the architecture, the widest method
 set, and the supporting machinery were built and proven.
 
 **Where it earns marks.**
-- **Methods breadth (excellent):** six anomaly families (z-score/STL, Isolation Forest, LOF, One-Class SVM,
-  Matrix Profile, ARIMA-residual) *plus* three deep detectors, *plus* a four-retriever RAG comparison with
-  real IR metrics (P@k/MRR/MAP/NDCG), *plus* agentic multi-step tool-use. Very strong for an MSc.
-- **Engineering & reproducibility (excellent):** **183 tests**, `verify_results.py` **29/29**, ruff + mypy
+- **Methods breadth *and appropriateness* (excellent):** six anomaly families (z-score/STL, Isolation
+  Forest, LOF, One-Class SVM, Matrix Profile, ARIMA-residual) *plus* three deep detectors, *plus* a
+  four-retriever RAG comparison with real IR metrics (P@k/MRR/MAP/NDCG), *plus* agentic multi-step tool-use.
+  Notebook 05 upgrades this from *breadth* to *appropriateness*: an eight-part (A–H) study across fault
+  geometries showing **no single detector wins — match the method to the anomaly's geometry** (a covariance
+  model beats every deep net on cross-sectional single-sensor faults; Isolation Forest *collapses* on them;
+  a variance detector is the right tool for frozen sensors). Very strong for an MSc.
+- **Evaluation honesty (strengthened):** the nb05 arc reports honest negative results (deep nets lose to
+  Mahalanobis), demonstrates AP-vs-AUC metric literacy (AUC ~0.99 hides ~15× AP gaps), and independently
+  re-derives its headline numbers — the same discipline that carries v2/v3.
+- **Finding landed in the system, not just the notebook:** the winning detectors were productised into
+  `src/anomaly.py` (`mahalanobis_anomalies`, `flatline_anomalies`, the `sensor_network_anomalies` portfolio)
+  and wired into both the pipeline and the NL interface's anomaly answer (with culprit attribution) — so
+  "methods appropriateness" is *running code*, not a paper claim.
+- **Engineering & reproducibility (excellent):** **193 tests**, `verify_results.py` **29/29**, ruff + mypy
   clean, ~92% coverage, one-command reproduce. This is above typical MSc standard.
 - **Explainability:** multi-sensor co-movement reasoning + trust labels + faithfulness-gated LLM.
 
 **Where it loses marks.**
-- **Evaluation validity (the ceiling):** Jena has **no real labels**, so detection is measured on
-  *injected* anomalies. Honest, but it structurally caps the strength of the detection claim — the single
-  biggest reason this sits below v2/v3.
+- **Evaluation validity (the ceiling — unchanged by nb05):** Jena has **no real labels**, so detection —
+  including the nb05 study — is measured on *injected* anomalies. Honest, but it structurally caps the
+  strength of the detection claim and is the single biggest reason this still sits below v2/v3. nb05
+  sharpens the *argument*; it does not lift the *label* ceiling.
 - **No human evaluation** of the "interface" (a descoped item, but an examiner still notices).
 
 **What would raise it:** it can't easily fix the label problem (that's *why v2/v3 exist*), so its remaining
-lever is the write-up — framing v1 explicitly as the *architecture-and-breadth* contribution.
+lever is the write-up — framing v1 explicitly as the *architecture-and-breadth-and-appropriateness*
+contribution, with the nb05 "match method to geometry" finding as its methodological centrepiece.
 
 ## v2 — Trade (EU) · ~74 / Distinction (mid)
 
@@ -112,7 +125,7 @@ because they turn a single claim into a tested, three-domain argument.
   per-type breakdowns, blocked CV, and negative results reported openly. This is the single most
   distinction-defining quality of the work.
 - **Reproducibility & verification** — independent `verify_results.py` trust gates (29/29, 13/13, 12/12) on
-  top of ~318 tests total, one-command reproduce scripts, and newcomer guides.
+  top of **330 tests total** (v1 193 · v2 79 · v3 58), one-command reproduce scripts, and newcomer guides.
 
 **The one risk that caps the very top band.** The dissertation title is *"…Through a Natural HCI
 Interface,"* yet there is **no human evaluation** of the interface (usability, task accuracy vs a
@@ -124,11 +137,15 @@ re-frames the contribution precisely as *verifiable NL analytics + honest evalua
 delivered evidence line up.
 
 **Second-order levers (smaller, cheaper):**
-- Reconcile the stale counts across docs (v1 README says "173" vs the real **183** tests; CLAUDE.md "182").
-  Trivial to fix, but inconsistencies read badly to an examiner.
-- Lift v3's absolute detection scores (tuned/seasonal value model, stronger flow channel).
-- A short "threats to validity" paragraph per version in the final write-up (much of it already exists in
-  `04_limitations_and_future_work.md`).
+- ~~Reconcile the stale counts across docs~~ **(done)** — current-state counts now consistent at v1 **193**,
+  v2 **79**, v3 **58** across README / GETTING_STARTED / CLAUDE.md / final_report / REPORT.
+- Lift v3's absolute detection scores — **attempted, honest negative result:** a seasonal (time-of-day)
+  value model *hurt* (AP 0.183 → 0.099; no exploitable diurnal cycle) and a Mahalanobis/covariance flow
+  channel was within the CI (AP 0.136 → 0.125). Both kept as tested optional methods; defaults unchanged.
+  The genuine remaining lever is **more real captures** to enlarge the tiny per-type strata — which the
+  fixed DAD dataset (one attacker, 7 days) cannot provide, so it is a dataset limit, not a tuning gap.
+- ~~A short "threats to validity" paragraph per version~~ **(done)** — added to
+  `04_limitations_and_future_work.md` (construct / internal / external / conclusion framing per version).
 
 ## Bottom line
 

@@ -55,7 +55,7 @@ bootstrap CIs, `verify_results == pandas`, LLM faithfulness), and a repeated, de
 | **Retrieval (RAG)** | TF-IDF · BM25 · LSA · **dense MiniLM**; IR metrics (P@k/MRR/MAP/NDCG) | BM25 + LSA + **BERT** + chunking | KB over attack types + sensors (TF-IDF) |
 | **Interface extras** | agentic multi-step tool-use; **offline conversational memory** | Flask chat | web charts + AI toggle; sensors/anomalies intents |
 | **Deep learning outcome** | *no single best* detector | **AE (0.21) loses to IsolationForest (0.36)** | **supervised combiner is worst** (day-blocked CV) |
-| **Quality gates** | **182 tests**, verify **29/29**, ruff+mypy, cov 92 % | **74 tests**, verify **13/13** | **56 tests**, verify **12/12**, ruff |
+| **Quality gates** | **193 tests**, verify **29/29**, ruff+mypy, cov 92 % | **79 tests**, verify **13/13** | **58 tests**, verify **12/12**, ruff |
 | **Headline finding** | the pattern works; deep ≠ better; synthetic labels cap the claim | real labels confirm detection; honest AE loss; forecast is honest about shocks | real labels prove channel complementarity; fusion trades precision for recall; learned fusion overfits |
 
 *(Full numbers and their sources in [03_results_and_findings.md](03_results_and_findings.md).)*
