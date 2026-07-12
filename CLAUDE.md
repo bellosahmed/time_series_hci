@@ -25,7 +25,7 @@ attacks matching the paper). Implemented: `preprocess` (scapy pcap→labelled ME
 (value + flow channels) · `channels`/`fusion`/`evaluation`/`experiment` (two-channel + fusion detector,
 **real-label** eval with point-adjusted metrics + bootstrap CIs) · `query_engine` (truth layer) ·
 `interface`/`interface_parsing` (NL, trust-labelled) · `llm` (Ollama + faithfulness gate). Apps:
-`chat.py` + Flask `web/`. **58 tests · verify 12/12 · ruff clean.** Its draw: **real anomaly labels**
+`chat.py` + Flask `web/`. **65 tests · verify 12/12 · ruff clean.** Its draw: **real anomaly labels**
 (fixes v1's synthetic-label limitation). Headline finding (honest): channels are complementary; fusion
 trades precision for recall and reaches 1.00 event-level recall, but AP CIs overlap so no config is
 significantly best. Running record: `v3/report/EVALUATION.md`. **Optional future:** detector tuning,
@@ -46,9 +46,9 @@ but **not the data** — v1 is temperature, v2 is trade.
   forecasting (SARIMA + backtest) · query_engine (truth layer) · interface · llm · rag_system
   (BM25 + LSA + BERT + chunking) · clustering (countries) · deep_anomaly (autoencoder).
 - **Notebooks (`v2/notebooks/`):** 01_eda … 13_chunking_bert (documented, executed).
-- **Apps:** `v2/apps/web/` (Flask browser chat). **Tests:** 79 passing. **Verify:** `v2/verify_results.py`
-  (13/13). **Docs:** `v2/README.md`, `v2/report/` (REPORT, EVALUATION, VERIFICATION), `v2/GLOSSARY.md`,
-  `v2/DEEP_MODELS.md`.
+- **Apps:** `v2/apps/web/` (Flask browser chat). **Tests:** 111 passing; ruff + mypy clean; coverage
+  92%. **Verify:** `v2/verify_results.py` (13/13). **Docs:** `v2/README.md`, `v2/report/` (REPORT,
+  EVALUATION, VERIFICATION), `v2/GLOSSARY.md`, `v2/DEEP_MODELS.md`.
 - **Key results:** detectors catch real 2008 & COVID; forecast backtest MAPE 4.0%; deep AE (0.21)
   honestly loses to Isolation Forest (0.36); query engine == pandas; LLM keeps numbers exact.
 

@@ -7,6 +7,64 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-12
 
+### v3: paper-comparison gap analysis (§13) — Granger causality, DTW, and three closed module gaps
+Asked "what did v3 miss relative to the paper it's inspired from" — fetched the real DAD paper
+(Vigoya et al. 2020) instead of guessing, and checked two things directly: `docs/PLAN.md`'s own module
+table against the real `src/` directory, and the paper's own descriptive analyses against v3's channels.
+**Found a real gap:** 7 of 17 planned modules (`analysis`, `reasoning`, `rag_system`, `clustering`,
+`forecasting`, `agent`, `main`) were never built, and README's status line had silently narrowed scope
+without ever flagging it in PLAN.md. Closed three as notebook-only demonstrations, all on real data:
+- **Forecasting** (SARIMA backtest, MAPE 0.61%) — top forecast-error anomalies land almost exactly on
+  the paper's Fri/Sat "mixed" windows, but miss the Wed modification window (averaging 16 sensors into
+  one hourly mean dilutes a single-sensor point fault — same story as the deep-model section).
+- **Reasoning** (`explain_window`) — sharp attribution for modification (single sensor), appropriately
+  weak for mixed attacks (no single dominant feature).
+- **Clustering** (day-level K-means, label excluded) — an honest negative: does not recover the
+  attack/clean split at all (dominated by an unrelated weekly traffic-rate trend).
+Also added the two requested "beyond STL" techniques: **Granger causality** (significant everywhere,
+but almost certainly a shared ambient driver, not causation) and **DTW** (agrees with Euclidean/Pearson
+on sensor-pair ranking; a daily-shape version shows attacks aren't visible even at coarse aggregation).
+Re-parsing pcaps with protocol/TCP-flag/packet-size fields replicated the paper's protocol split
+(96.6% vs 96.9% TCP) but found its claimed TCP-flag "atypical closure" signal does **not** reproduce at
+packet level — an honest negative, not a failed replication (likely a flow-level, not per-packet,
+signal). Distribution goodness-of-fit testing (mirroring the paper's KS/Anderson-Darling analysis)
+found every sensor's best-fitting static distribution still formally rejected — independently
+re-deriving why STL/ARIMA, not a fixed distribution, is the right model. Updated `docs/PLAN.md`,
+`report/REPORT.md`, `report/EVALUATION.md` with all of the above.
+
+### v3: standalone notebook — a real, previously undocumented faithfulness-gate gap, then §12 expansion
+Built `notebooks/standalone_full_pipeline.ipynb` (no `from src import` anywhere — every function ported
+line-by-line and checked against `src/*.py`; confirmed at runtime via `sys.modules`, not a fragile text
+search after an earlier version of that check false-positived on its own provenance comments). While
+demoing the faithfulness gate against a spoofed attacker IP, found the check actually **misses** a
+last-octet swap (`10.6.56.41` → `...56.99`) — the number regex tokenises a dotted-quad into two decimal
+numbers and applies the measurement-rounding tolerance to them, so a genuinely different IP can pass as
+an acceptable "rounding" of the real one. A third-octet swap or a wholesale different IP is still caught.
+More consequential than a missed count (wrong attacker IP misdirects an investigation), documented
+honestly in the notebook, `REPORT.md` and `EVALUATION.md` rather than silently patched. Expanded further
+(§12) with ADF stationarity (non-stationary, p=0.53), CUSUM change-point detection (from scratch, no
+`ruptures` — tracks the real attack-day schedule within 2h but only at day granularity), a PCA view of
+the flow-feature space, two more flow-channel candidates (LOF loses; One-Class SVM ties Isolation Forest
+on AP with a higher F1), a window-size sweep, and ROC/confusion-matrix views. Final: 100 cells, 12
+figures, 0 errors.
+
+### v1 + v2: standalone full-pipeline notebooks (self-contained, no `from src import`)
+Built `v1/notebooks/standalone_full_pipeline.ipynb` and `v2/notebooks/standalone_full_pipeline.ipynb` —
+single notebooks covering preprocessing through deep models with zero dependency on `src/`, per an
+explicit ask that v1/v2 "cover what happens in each folder" without depending on it. Auditing against
+the real source code (not memory) caught several real gaps before they shipped: v1's notebook was
+missing the rolling z-score detector and a parameter-sensitivity sweep, its approximated event windows
+were too wide (falsely showing 5/5 real events caught instead of the real 4/5), and its deep-model
+inference wasn't batched (a real CUDA OOM under GPU contention, fixed to match the batching already
+required by `CLAUDE.md`). v2's notebook uncovered a real comma-parsing bug in the ported faithfulness
+check (`"151,793"` tokenised as two numbers, `151` and `793`, causing a **genuinely correct** phrasing to
+fail its own faithfulness check — the most consequential bug found, since a false-reject on a true
+statement undermines the whole trust-check's credibility) and a demo that silently defaulted to Spain
+regardless of the question text. v2 also gained a "further deep-model exploration" section (GRU-AE, a
+4-architecture ensemble, a window-size sweep, a supervised leave-one-crisis-out classifier). Also fixed,
+during the same audit pass, v2's stale interface.py type bug, missing `pyproject.toml`, a real
+`ruff` B008 bug in `clustering.best_k`, and low coverage in two modules (+17 tests, 79→111 passing).
+
 ### Detector-selection option in the app (network-level anomaly answer, brainstormed → TDD)
 Brainstormed with the user: the app's anomaly answer should be **network-level** and let the user **switch
 detectors**. Made the `anomaly` intent read the whole in-scope sensor frame via a selectable network
