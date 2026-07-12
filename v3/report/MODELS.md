@@ -38,12 +38,12 @@ Per-attack-type recall (window-level, at the best-F1 threshold):
    an OR-style union of two detectors sums their false positives.
 
 3. **Window-level vs event-level tells different stories — report both.**
-   - On *window-level* aggregate (AP, best-F1), **value-only leads** (AP 0.181, F1 0.376).
-   - But the **AP confidence intervals overlap heavily** (value [0.135, 0.243] vs late-fusion
-     [0.121, 0.242]), so value-only's edge is **not statistically significant** — we should not claim
+   - On *window-level* aggregate (AP, best-F1), **value-only leads** (AP 0.183, F1 0.379).
+   - But the **AP confidence intervals overlap heavily** (value [0.136, 0.245] vs late-fusion
+     [0.123, 0.246]), so value-only's edge is **not statistically significant** — we should not claim
      one is better on AP.
    - On *event-level* (point-adjusted), **both fusions reach 1.00 recall** (every attack episode is
-     caught) and late-fusion's F1 (0.786) is within **0.014** of value-only (0.800).
+     caught) and late-fusion's F1 (0.789) is within **0.015** of value-only (0.804).
 
 4. **The *supervised* combiner is the worst — an important negative result.** A logistic regression
    over the two channel scores, evaluated with **day-blocked** leave-one-day-out CV, scores the *lowest*

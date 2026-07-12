@@ -91,7 +91,7 @@ path (raw label CSVs) — 12/12 checks.
 ## 4. Implementation
 
 Python 3.12; `scapy` for parsing, scikit-learn for detectors, Flask + a small vanilla-JS page for the
-web UI, a CLI (`apps/chat.py`). 44 automated tests, `verify_results.py` 12/12, ruff-clean, seeded and
+web UI, a CLI (`apps/chat.py`). 58 automated tests, `verify_results.py` 12/12, ruff-clean, seeded and
 reproducible (`reproduce.sh`). Layout mirrors v1 (`src/ tests/ apps/ report/ docs/`).
 
 ---
@@ -107,9 +107,9 @@ attacker IP, 101,583 messages and 32,288 temperature readings.
 | config | AP | best-F1 | precision | recall | rec·modification | rec·duplication | rec·mixed |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | flow-only   | 0.136 | 0.226 | 0.412 | 0.156 | 0.00 | 1.00 | 0.17 |
-| value-only  | **0.181** | **0.376** | 0.325 | 0.444 | 0.46 | 0.50 | 0.43 |
-| early-fusion| 0.151 | 0.304 | 0.212 | 0.533 | 0.50 | 1.00 | 0.52 |
-| late-fusion | 0.168 | 0.306 | 0.214 | 0.533 | 0.46 | 1.00 | 0.53 |
+| value-only  | **0.183** | **0.379** | 0.331 | 0.444 | 0.46 | 0.50 | 0.43 |
+| early-fusion| 0.147 | 0.289 | 0.202 | 0.511 | 0.42 | 1.00 | 0.52 |
+| late-fusion | 0.171 | 0.306 | 0.214 | 0.533 | 0.46 | 1.00 | 0.53 |
 
 **Findings.** (i) **Complementarity is real:** flow-only gets **0.00** recall on modification but
 **1.00** on duplication; value has the opposite tilt — each channel is blind to the other's attack.
@@ -155,7 +155,7 @@ does not.
 ```bash
 cd code/v3
 bash tools/get_dad_dataset.sh        # fetch the real dataset (~18 MB, gitignored)
-python3.12 -m pytest tests/          # 44 pass
+python3.12 -m pytest tests/          # 58 pass
 python3.12 verify_results.py         # 12/12 independent checks
 python3.12 apps/chat.py "how many attacks on wednesday?"
 python3.12 apps/web/app.py           # browser UI (prints the URL)

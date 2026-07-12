@@ -129,15 +129,15 @@ Forest), `evaluation.py` (average precision, best-F1 operating point, per-type r
 | config | AP | best-F1 | precision | recall | rec·modification | rec·duplication | rec·mixed |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | flow-only   | 0.136 | 0.226 | 0.412 | 0.156 | **0.00** | **1.00** | 0.17 |
-| value-only  | **0.181** | **0.376** | 0.325 | 0.444 | 0.46 | 0.50 | 0.43 |
-| early-fusion| 0.151 | 0.304 | 0.212 | 0.533 | 0.50 | 1.00 | 0.52 |
-| late-fusion | 0.168 | 0.306 | 0.214 | **0.533** | 0.46 | 1.00 | **0.53** |
+| value-only  | **0.183** | **0.379** | 0.331 | 0.444 | 0.46 | 0.50 | 0.43 |
+| early-fusion| 0.147 | 0.289 | 0.202 | 0.511 | 0.42 | 1.00 | 0.52 |
+| late-fusion | 0.171 | 0.306 | 0.214 | **0.533** | 0.46 | 1.00 | **0.53** |
 
 **Trade-off (confirmed, exactly as hypothesised):** fusion **lifts recall** (0.44 → 0.53 — the union of
 two specialists) but **cuts precision** (0.33 → 0.21 — an OR-rule sums both channels' false positives).
 
 **Discovery — the honest, non-obvious finding: fusion is *not* a free win here.** On the aggregate,
-threshold-free metric, **`value-only` is best (AP 0.181, F1 0.376)** — *neither* fusion beats it. The
+threshold-free metric, **`value-only` is best (AP 0.183, F1 0.379)** — *neither* fusion beats it. The
 reason is visible in the per-type columns, which is exactly why we report them:
 - The **complementarity is real and provable:** flow-only gets **0.00 recall on modification** (a bad
   temperature keeps timing normal, so the flow features never move) yet **1.00 on duplication**; the
@@ -256,9 +256,9 @@ wired them into the experiment (columns `AP_lo/AP_hi`, `f1_pa`, `recall_pa`), re
 | config | AP [95% CI] | F1 | F1·point-adj | recall·point-adj |
 | --- | :---: | ---: | ---: | ---: |
 | flow-only   | 0.136 [0.077, 0.222] | 0.226 | 0.294 | 0.178 |
-| value-only  | 0.181 [0.135, 0.243] | 0.376 | 0.800 | 0.889 |
-| early-fusion| 0.151 [0.111, 0.213] | 0.304 | 0.732 | **1.000** |
-| late-fusion | 0.168 [0.121, 0.242] | 0.306 | 0.786 | **1.000** |
+| value-only  | 0.183 [0.136, 0.245] | 0.379 | 0.804 | 0.889 |
+| early-fusion| 0.147 [0.108, 0.206] | 0.289 | 0.732 | **1.000** |
+| late-fusion | 0.171 [0.123, 0.246] | 0.306 | 0.789 | **1.000** |
 
 **Trade-off:** point-adjusted scoring is the standard event-level protocol but is **optimistic** (one
 hit credits a whole segment) — so we report **both** window-level and point-adjusted, never just the
@@ -266,7 +266,7 @@ flattering one.
 
 **Discovery — this pass overturned the earlier headline in two honest ways:**
 1. **The value-only "win" is not significant.** The AP bootstrap CIs **overlap heavily** (value
-   [0.135, 0.243] vs late-fusion [0.121, 0.242]), so we **cannot** claim value-only beats fusion on AP —
+   [0.136, 0.245] vs late-fusion [0.123, 0.246]), so we **cannot** claim value-only beats fusion on AP —
    the M3 first-pass conclusion was within noise. (Only bootstrap CIs revealed this; the point estimate
    alone was misleading.)
 2. **At the event level, fusion is best where it matters:** both fusions reach **1.00 point-adjusted
@@ -285,8 +285,8 @@ flattering one.
 scores, evaluated with **day-blocked** leave-one-day-out CV (an attack episode never spans train and
 test). TDD (1 test), added as a fifth config. 48 tests green, ruff clean.
 
-**Result:** the supervised combiner is the **worst** config — AP **0.101** [0.076, 0.141], below every
-unsupervised one (flow 0.136, late-fusion 0.168, value 0.181).
+**Result:** the supervised combiner is the **worst** config — AP **0.101** [0.075, 0.141], below every
+unsupervised one (flow 0.136, late-fusion 0.171, value 0.183).
 
 **Trade-off:** a learned combiner *can* weight the channels optimally, but it needs enough i.i.d.
 labelled data to generalise. Here it has neither.
@@ -347,3 +347,26 @@ green, verify 12/12, ruff clean.
 **Discovery:** the "couldn't map that" fallback the user saw was simply missing intents — the router is
 deterministic, so unmapped phrasings are *refused rather than guessed* (by design), which is why adding
 the two intents fixed it cleanly and the answers stay exact.
+
+## M3 follow-ups — seasonal value model + robust flow channel ✅ (tried, honest negative result)
+
+The M3 note (§ above) flagged a *seasonal value model* and a *stronger flow channel* as tuning follow-ups
+to lift the modest absolute AP (value-only 0.183, flow-only 0.136). Both were implemented **TDD** and
+measured on the full real week — and both **fail to help**, which is the honest, reportable outcome.
+
+- **`channels.seasonal_value_score`** — z-scores each sensor against a **time-of-day** baseline (mean/std
+  within each hour-of-day) instead of a global one, to catch a reading that is normal for the day but wrong
+  for its hour. **Result: it *hurts* — AP 0.183 → 0.099.** The data-centre temperature has no exploitable
+  diurnal cycle for the attacks to violate, and the per-hour baseline is starved of samples (noisier std),
+  so it *dilutes* the modification signal the global z-score catches cleanly. A clean case of *adding
+  structure the data doesn't have makes things worse.*
+- **`channels.flow_score(method="mahalanobis" | "combined")`** — a Ledoit-Wolf covariance (Mahalanobis)
+  distance over the standardised flow features (the notebook-05 lesson: covariance beats axis-aligned
+  Isolation-Forest splits for *cross-sectional* anomalies). **Result: a wash on AP — 0.136 → 0.125, CIs
+  overlapping heavily** — though best-F1 nudges up (0.226 → 0.252). Not a significant improvement.
+
+**Decision:** the new methods are kept as **tested, optional** functions (they document the attempt and are
+reusable), but the **defaults stay global-z + Isolation Forest** — swapping in a detector that is worse or
+within noise would be wrong. This is the same pattern the whole project keeps finding: on these small,
+label-scarce datasets, *simple robust methods hold up and the honest negative result is the contribution.*
+(+2 channel tests → **58 tests** green, ruff clean.)
