@@ -80,7 +80,7 @@ Isolation Forest stays the default.
 8/8 checks confirm `query_engine` outputs equal pandas exactly (max, min, mean, std, correlation,
 balance, growth, biggest surplus). **79 automated tests pass.**
 
-## 6. Interpretation (caveats)
+## 7. Interpretation (caveats)
 
 - **Recall is suppressed by the wide labelling window** (14 months) vs detectors firing on the
   sharpest months → use event-level detection for rare events (100 %).

@@ -19,7 +19,7 @@ evaluation. The pipeline covers preprocessing, behaviour analysis, anomaly detec
 forecasting, and machine-learning families), multi-country reasoning, forecasting with out-of-sample
 validation, an exact query engine, hybrid retrieval (lexical + semantic), and a local-LLM
 explanation layer. All numbers are computed by code and verified against pandas; the LLM only
-phrases them. The full system runs offline and is covered by 60 automated tests.
+phrases them. The full system runs offline and is covered by 79 automated tests.
 
 ---
 
@@ -157,7 +157,7 @@ system detects the real crises strongly.
 
 ### 4.3 Truth layer
 8/8 verification checks confirm the query engine equals pandas exactly (max, min, mean, std,
-correlation, balance, growth, surplus). 70 automated tests pass overall.
+correlation, balance, growth, surplus). 79 automated tests pass overall.
 
 ### 4.5 Deep model vs classical baseline (honest negative result)
 The autoencoder, early-stopped at 60 epochs, scores **F1 ≈ 0.21** (catches COVID, misses 2008) — it
@@ -214,7 +214,7 @@ single-month export drops were Spain −35 % and Germany −31 %, both April 202
 | Deep model | CNN-AE/LSTM (won) | autoencoder (honestly **loses** to baseline on 292 pts) |
 | Interface | CLI + web | CLI logic + **web app** (trust-labelled) |
 | Truth layer | query engine | query engine (8/8 vs pandas) |
-| Tests | ~24 | **70** |
+| Tests | 197 | **79** |
 
 ---
 
