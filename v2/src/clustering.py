@@ -13,8 +13,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
+from .analysis import decompose, seasonal_strength, trend_slope
 from .preprocess import countries, log_transform
-from .analysis import trend_slope, decompose, seasonal_strength
 
 FEATURES = ["size_log", "balance_ratio", "growth", "seasonality", "volatility"]
 
@@ -45,8 +45,9 @@ def cluster_countries(features: pd.DataFrame, k: int = 4, random_state: int = 0)
     return pd.Series(km.labels_, index=features.index, name="cluster")
 
 
-def best_k(features: pd.DataFrame, ks=range(2, 7), random_state: int = 0) -> pd.Series:
+def best_k(features: pd.DataFrame, ks=None, random_state: int = 0) -> pd.Series:
     """Silhouette score for each k (higher = better-separated clusters)."""
+    ks = ks if ks is not None else range(2, 7)
     X = StandardScaler().fit_transform(features)
     out = {}
     for k in ks:

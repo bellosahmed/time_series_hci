@@ -9,6 +9,7 @@ Design follows the EDA findings (notebook 01):
 Everything here is deterministic and importable (the notebooks + tests use it). No plotting.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 

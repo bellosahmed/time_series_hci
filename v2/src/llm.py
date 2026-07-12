@@ -6,6 +6,7 @@ If Ollama isn't running, every function degrades gracefully (the interface falls
 so the system works fully offline with or without the LLM.
 """
 from __future__ import annotations
+
 import json
 import urllib.error
 import urllib.request

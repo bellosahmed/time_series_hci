@@ -11,9 +11,9 @@ Plus light evaluation helpers (label windows + precision/recall/F1/confusion) so
 be scored against the real 2008 / COVID events. Importable + deterministic; no plotting.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 
@@ -96,8 +96,10 @@ def score(pred: pd.Series, truth: pd.Series) -> Scores:
     """Precision / recall / F1 / confusion of a boolean prediction vs boolean truth."""
     idx = pred.index.intersection(truth.index)
     p, t = pred.loc[idx].fillna(False).astype(bool), truth.loc[idx].astype(bool)
-    tp = int((p & t).sum()); fp = int((p & ~t).sum())
-    fn = int((~p & t).sum()); tn = int((~p & ~t).sum())
+    tp = int((p & t).sum())
+    fp = int((p & ~t).sum())
+    fn = int((~p & t).sum())
+    tn = int((~p & ~t).sum())
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0

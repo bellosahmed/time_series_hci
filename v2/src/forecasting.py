@@ -10,6 +10,7 @@ seasonal difference D=1 at period 12. Two jobs:
 Deterministic + importable; no plotting.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np

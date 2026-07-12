@@ -14,6 +14,7 @@ RAG retrieves CONTEXT only (descriptions, known events). It NEVER provides numbe
 come from the query engine. Answers stay trust-aware: 🔢 computed · 📚 retrieved · 🧠 inferred.
 """
 from __future__ import annotations
+
 import math
 import re
 from collections import Counter

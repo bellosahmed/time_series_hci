@@ -16,8 +16,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from .anomaly import systemic_features
-
 
 def get_device(device: str | None = None) -> str:
     if device:

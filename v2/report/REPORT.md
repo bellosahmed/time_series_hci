@@ -19,7 +19,7 @@ evaluation. The pipeline covers preprocessing, behaviour analysis, anomaly detec
 forecasting, and machine-learning families), multi-country reasoning, forecasting with out-of-sample
 validation, an exact query engine, hybrid retrieval (lexical + semantic), and a local-LLM
 explanation layer. All numbers are computed by code and verified against pandas; the LLM only
-phrases them. The full system runs offline and is covered by 79 automated tests.
+phrases them. The full system runs offline and is covered by 111 automated tests.
 
 ---
 
@@ -149,6 +149,16 @@ point is flagged, F1 rises to **0.52 / 0.90 / 0.76** (STL / seasonal-naive / Iso
 false negatives. The strict numbers above are honest but pessimistic; under the standard metric the
 system detects the real crises strongly.
 
+**Statistical rigor (bootstrap CI + McNemar, ported from v1 during this project's own code audit).**
+On Germany's series, seasonal-naive's precision/recall carry wide 95% bootstrap CIs — precision
+0.62 [0.25, 1.00], recall 0.36 [0.11, 0.62] — markedly wider than v1's or v3's equivalent intervals,
+because only 14 labelled crisis months exist here versus v1's 100+ synthetic-injection labels or
+v3's 90 labelled attack windows; this is now stated with a number rather than only asserted. A
+paired **McNemar test** (Isolation Forest vs seasonal-naive, Germany) returns **p = 0.031**:
+Isolation Forest has the better *aggregate* F1 across all 27 countries, but is *significantly worse*
+than seasonal-naive on Germany specifically — no detector is uniformly best, a formally tested claim
+rather than an eyeballed one, and the same lesson v1 and v3 independently reach.
+
 ### 4.2 Forecasting (out-of-sample)
 - Normal 24-month backtest (France trade): **MAPE 4.0 %**, 95 % band coverage 100 % → genuine
   prediction, not memorisation.
@@ -157,7 +167,8 @@ system detects the real crises strongly.
 
 ### 4.3 Truth layer
 8/8 verification checks confirm the query engine equals pandas exactly (max, min, mean, std,
-correlation, balance, growth, surplus). 79 automated tests pass overall.
+correlation, balance, growth, surplus). 111 automated tests pass overall, at **92% coverage**
+(`pytest --cov=src`) — matching v1's own 92% figure exactly.
 
 ### 4.5 Deep model vs classical baseline (honest negative result)
 The autoencoder, early-stopped at 60 epochs, scores **F1 ≈ 0.21** (catches COVID, misses 2008) — it
@@ -167,6 +178,25 @@ autoencoder reconstructs well, so they don't always register as high error; a tr
 suits this better. **Conclusion:** on 292 points the deep model underperforms the classical baseline —
 the expected, defensible outcome; deep learning needs more data to pay off. The classical Isolation
 Forest remains the v2 default.
+
+**Does giving the deep model temporal context change this?** Three sequence-aware variants
+(multivariate LSTM-AE, CNN-AE, TCN-AE — `src/deep_temporal.py`) were also built and evaluated over
+5 seeds each: TCN-AE 0.13, CNN-AE 0.29, LSTM-AE 0.43 (mean F1). LSTM-AE's mean is numerically above
+Isolation Forest's 0.36, but a paired McNemar test on its best seed returns **p = 0.29** — not
+significant — and its own seed-to-seed range (0.29–0.57) spans the baseline. The conclusion is
+unchanged: no deep configuration, temporal or not, is a defensible improvement on 292 points.
+
+**The seed-sensitivity itself is a finding worth reporting, not just a caveat.** Windowing 292 months
+into non-overlapping 6-month blocks leaves only ≈46 effective training sequences for the recurrent
+model — far too few to force different random initialisations toward the same solution, so different
+seeds converge to different local optima. Because the flagging threshold is the 95th percentile of
+that run's own error distribution, this instability directly changes *which months* get flagged: the
+most favourable seed happened to align with the labelled crises (F1 = 0.57), the least favourable did
+not (F1 = 0.29). A single-seed report would have shown a clear, wrong win; only checking seed
+variance, a bootstrap CI, and a paired significance test together revealed it was noise. This is a
+methodological result in its own right — a concrete illustration of why point estimates alone are not
+defensible on short series, complementing the bootstrap-CI/McNemar statistical-rigor findings on the
+classical detectors (`EVALUATION.md` §8). Full mechanism and architecture descriptions: `DEEP_MODELS.md`.
 
 ### 4.4 Example findings
 Germany is the largest exporter and runs the biggest surplus; the Netherlands is in surplus 100 % of
@@ -214,7 +244,7 @@ single-month export drops were Spain −35 % and Germany −31 %, both April 202
 | Deep model | CNN-AE/LSTM (won) | autoencoder (honestly **loses** to baseline on 292 pts) |
 | Interface | CLI + web | CLI logic + **web app** (trust-labelled) |
 | Truth layer | query engine | query engine (8/8 vs pandas) |
-| Tests | 197 | **79** |
+| Tests | 197 | **111** |
 
 ---
 

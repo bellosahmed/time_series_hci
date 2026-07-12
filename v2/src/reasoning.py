@@ -9,9 +9,9 @@ layer: the numbers here are computed deterministically; the LLM later only phras
 Deterministic + importable; no plotting.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
-import numpy as np
 import pandas as pd
 
 from .anomaly import seasonal_naive_z

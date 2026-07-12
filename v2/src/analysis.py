@@ -12,14 +12,15 @@ Deterministic, importable analytics used by notebook 03, the tests, and later st
 No plotting here — the notebook does the plots.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import STL
-from statsmodels.tsa.stattools import adfuller, acf, pacf
+from statsmodels.tsa.stattools import acf, adfuller, pacf
 
-from .preprocess import flow_columns, countries
+from .preprocess import countries, flow_columns
 
 
 # --------------------------------------------------------------------------- trend

@@ -76,3 +76,89 @@ def test_summarise_not_confused_with_rise(df):
     a = ui.ask(df, "summarise the netherlands")
     assert a.intent == "summary"
     assert "surplus" in a.computed
+
+
+def test_answer_str_formats_trust_labels():
+    computed = ui.Answer("q", "max", "computed fact", inferred="an inference", phrased="a phrasing")
+    s = str(computed)
+    assert "🔢 computed fact" in s and "🧠 an inference" in s and "💬 a phrasing" in s
+
+    errored = ui.Answer("q", "max", "", error="no country given")
+    assert str(errored) == "⚠️ no country given"
+
+
+def test_mean_answer_matches_engine(df):
+    a = ui.ask(df, "average exports for germany")
+    m, s = qe.get_mean_std(df, "DE", "EXP")
+    assert f"{m:,.0f}" in a.computed and f"{s:,.0f}" in a.computed
+    assert a.error is None
+
+
+def test_mean_missing_country_asks(df):
+    a = ui.ask(df, "what is the average?")
+    assert a.error is not None
+
+
+def test_correlation_answer_matches_engine(df):
+    a = ui.ask(df, "correlation between germany and france exports")
+    c = qe.get_correlation(df, "DE", "FR", "EXP")
+    assert f"{c:.2f}" in a.computed
+    assert a.error is None
+
+
+def test_balance_with_country(df):
+    a = ui.ask(df, "germany's trade balance")
+    b = qe.trade_balance(df, "DE", str(df.index[-1].date()))
+    word = "surplus" if b >= 0 else "deficit"
+    assert word in a.computed and f"{b:,.0f}" in a.computed
+
+
+def test_biggest_surplus_without_country(df):
+    a = ui.ask(df, "who has the biggest surplus?")
+    assert a.intent == "surplus"
+    e = qe.biggest_surplus(df, str(df.index[-1].date()))
+    assert e.country in a.computed
+
+
+def test_biggest_deficit_without_country(df):
+    a = ui.ask(df, "biggest deficit this month")
+    assert a.intent == "deficit"
+    e = qe.biggest_deficit(df, str(df.index[-1].date()))
+    assert e.country in a.computed
+
+
+def test_growth_with_two_explicit_months(df):
+    a = ui.ask(df, "how much did germany's exports grow from 2010-01 to 2020-01")
+    g = qe.growth(df, "DE", "EXP", "2010-01-01", "2020-01-01")
+    assert f"{g:+.0f}%" in a.computed
+
+
+def test_growth_missing_country_asks(df):
+    a = ui.ask(df, "how much did exports grow?")
+    assert a.error is not None
+
+
+def test_worst_drop_answer_matches_engine(df):
+    a = ui.ask(df, "spain's worst export drop")
+    e = qe.worst_drop(df, "ES", "EXP")
+    assert f"{e.value:.1f}%" in a.computed and e.month in a.computed
+
+
+def test_rank_answer_lists_top_countries(df):
+    a = ui.ask(df, "top exporters")
+    r = qe.rank_countries(df, "EXP", str(df.index[-1].date()), n=5)
+    assert all(c in a.computed for c in r.index)
+
+
+def test_shock_use_llm_calls_explain_and_sets_phrased(df, monkeypatch):
+    calls = {}
+
+    def fake_explain(question, computed, inferred=None, model=None, **kw):
+        calls["question"] = question
+        calls["computed"] = computed
+        return "a faithfulness-checked phrasing"
+
+    monkeypatch.setattr(ui.llm, "explain", fake_explain)
+    a = ui.ask(df, "which countries were abnormal in 2020-04?", use_llm=True)
+    assert a.phrased == "a faithfulness-checked phrasing"
+    assert calls["computed"] == a.computed          # the LLM was given the exact computed fact

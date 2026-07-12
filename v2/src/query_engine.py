@@ -10,9 +10,9 @@ Vocabulary (trade): EXP = exports, IMP = imports, balance = EXP-IMP (surplus/def
 total = EXP+IMP. Values are EUR millions, monthly.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 from .preprocess import countries

@@ -8,15 +8,16 @@ numbers always come from `query_engine`, never from the model.
 Pipeline:  question -> detect intent + country/flow/dates -> query_engine computes -> answer.
 """
 from __future__ import annotations
+
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pandas as pd
 
+from . import llm
+from . import preprocess as pp
 from . import query_engine as qe
 from . import reasoning as rz
-from . import preprocess as pp
-from . import llm
 
 # country name -> Eurostat code
 COUNTRY_ALIASES = {
@@ -105,7 +106,8 @@ def resolve_months(q: str, df: pd.DataFrame) -> list[str]:
     seen, res = set(), []
     for m in out:
         if m not in seen:
-            seen.add(m); res.append(m)
+            seen.add(m)
+            res.append(m)
     return res
 
 
@@ -171,9 +173,10 @@ def ask(df: pd.DataFrame, question: str, use_llm: bool = False, model: str = llm
         elif intent == "summary":
             if not cc:
                 return Answer(question, intent, "", error="Which country?")
-            s = qe.country_summary(df, cc[0])
-            computed = (f"{cc[0]}: avg exports {s['exp_mean']:,.0f}, avg imports {s['imp_mean']:,.0f} EUR m; "
-                        f"in surplus {s['surplus_share']:.0%} of months; latest balance {s['latest_balance']:,.0f}.")
+            summary = qe.country_summary(df, cc[0])
+            computed = (f"{cc[0]}: avg exports {summary['exp_mean']:,.0f}, avg imports "
+                        f"{summary['imp_mean']:,.0f} EUR m; in surplus {summary['surplus_share']:.0%} of "
+                        f"months; latest balance {summary['latest_balance']:,.0f}.")
 
         elif intent == "shock":
             month = months[0] if months else "2020-04-01"

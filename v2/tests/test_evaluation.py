@@ -55,3 +55,44 @@ def test_pr_curve_shape_and_auc():
     curve = ev.pr_curve(scores, truth, n=20)
     assert set(curve.columns) >= {"precision", "recall", "f1"}
     assert 0.0 <= ev.pr_auc(curve) <= 1.0
+
+
+def test_bootstrap_ci_brackets_perfect_recall():
+    idx = _idx(200)
+    truth = pd.Series([False]*200, index=idx); truth.iloc[::10] = True
+    ci = ev.bootstrap_ci(truth.copy(), truth, metric="recall", n_boot=200, seed=0)
+    assert ci["point"] == 1.0
+    assert ci["lower"] <= ci["point"] <= ci["upper"]
+    assert 0.0 <= ci["lower"] <= ci["upper"] <= 1.0
+    assert ci["n"] == 200          # labelled sample size is exposed to contextualise CI width
+
+
+def test_bootstrap_ci_has_width_for_imperfect_detector():
+    idx = _idx(300)
+    truth = pd.Series([False]*300, index=idx); truth.iloc[::10] = True
+    pred = truth.copy()
+    for p in list(range(0, 300, 10))[::2]:   # drop half the positives -> recall ~0.5
+        pred.iloc[p] = False
+    ci = ev.bootstrap_ci(pred, truth, metric="recall", n_boot=500, seed=1)
+    assert 0.3 < ci["point"] < 0.7
+    assert ci["upper"] - ci["lower"] > 0.0
+
+
+def test_mcnemar_flags_clear_difference():
+    idx = _idx(200)
+    truth = pd.Series([False]*200, index=idx); truth.iloc[::10] = True
+    good = truth.copy()                      # correct everywhere
+    bad = pd.Series(False, index=idx)        # flags nothing -> wrong on every positive
+    res = ev.mcnemar_test(good, bad, truth)
+    assert res["only_a_correct"] == int(truth.sum())
+    assert res["only_b_correct"] == 0
+    assert 0.0 <= res["p_value"] <= 1.0
+    assert res["p_value"] < 0.05
+
+
+def test_mcnemar_identical_detectors_not_significant():
+    idx = _idx(100)
+    truth = pd.Series([False]*100, index=idx); truth.iloc[::10] = True
+    res = ev.mcnemar_test(truth.copy(), truth.copy(), truth)
+    assert res["n_discordant"] == 0
+    assert res["p_value"] == 1.0

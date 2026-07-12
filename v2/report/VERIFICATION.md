@@ -6,7 +6,7 @@ Every headline result is **independently re-derived from the raw data and checke
 cd code/v2 && python3.12 verify_results.py      # -> 13/13 checks passed
 ```
 
-This is separate from the 79 unit tests (`pytest tests/`): the unit tests check the *code*; this
+This is separate from the 111 unit tests (`pytest tests/`): the unit tests check the *code*; this
 script checks the *claims*.
 
 ## Results (13/13 PASS)
