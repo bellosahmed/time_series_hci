@@ -30,9 +30,13 @@ def run(data_path: str, sensor: str = "T (degC)", freq: str = "1h") -> dict:
     decomp = analysis.decompose(df[sensor], period=24)
     top_corr = analysis.top_correlations(df, sensor, n=3)
 
-    # 3. Anomaly detection on the residual + multi-sensor Isolation Forest
+    # 3. Anomaly detection: single-sensor residual z-score, multi-sensor Isolation Forest (kept for
+    #    comparison), and the recommended multi-sensor portfolio (Mahalanobis + flat-line). Notebook
+    #    05 showed Isolation Forest collapses on single-sensor faults, so the portfolio is the default
+    #    for the sensor network.
     resid_anom = anomaly.zscore_anomalies(decomp["resid"].dropna(), threshold=4.0)
     iforest = anomaly.isolation_forest_anomalies(df, contamination=0.01)
+    network = anomaly.sensor_network_anomalies(df, contamination=0.01)
 
     # 4. Clustering of day-types
     feats = clustering.daily_features(df)
@@ -47,6 +51,7 @@ def run(data_path: str, sensor: str = "T (degC)", freq: str = "1h") -> dict:
         "top_correlations": top_corr.to_dict(),
         "n_residual_anomalies": int(resid_anom.sum()),
         "n_iforest_anomalies": int(iforest.sum()),
+        "n_network_anomalies": int(network.sum()),
         "n_day_clusters": int(labels.nunique()),
     }
 

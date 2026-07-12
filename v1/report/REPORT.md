@@ -210,7 +210,7 @@ Flask for the web UI; an optional local Ollama model for phrasing. Dependencies 
 (Blackwell) with the cu128 PyTorch build; results are equivalent to CPU.
 
 ### 4.4 Testing
-**182 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
+**197 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
 routing (incl. circular wind-direction handling and the LLM trust-gate), the Flask/CLI app layer,
 the client-side chart/legend JavaScript (run in Node), synthetic evaluation with confidence
 intervals, the retriever IR metrics, and the deep / ARIMA detectors. An independent
@@ -231,18 +231,18 @@ On the full dataset, every exact query matched the independent `pandas` ground t
 (values and timestamps): the `verify_results.py` harness passes **29/29** cross-checks — max, min,
 mean and correlation equal pandas; scoped and threshold queries equal the corresponding pandas slice;
 per-sensor availability and skew are recomputed and agree; and the retriever IR metrics are
-independently reproduced — and the unit suite (**182 tests**) covers the same guarantees. This
+independently reproduced — and the unit suite (**197 tests**) covers the same guarantees. This
 establishes the trust guarantee the architecture depends on.
 
 ### 5.3 Anomaly-detection comparison
 | Model | Type | Flags | Time | Precision* | Recall* | F1* |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Z-score (residual) | Statistical | 526 | ~4.0 s | 0.24 | 0.45 | 0.32 |
-| ARIMA forecast | Forecasting | 411 | ~2.7 s | 0.20 | 1.00 | 0.34 |
+| Z-score (residual) | Statistical | 184 | ~4.1 s | 0.24 | 0.45 | 0.32 |
+| ARIMA forecast | Forecasting | 495 | ~2.2 s | 0.20 | 1.00 | 0.34 |
 | Isolation Forest | Classical ML | 699 | ~0.3 s | 0.14 | 1.00 | 0.25 |
-| CNN Autoencoder | Deep (recon) | 702 | ~2.5 s | 0.14 | 1.00 | 0.25 |
-| LSTM Autoencoder | Deep (recon) | 702 | ~1.0 s | 0.14 | 1.00 | 0.25 |
-| LSTM Forecaster | Deep (forecast) | 702 | ~2.5 s | 0.14 | 1.00 | 0.25 |
+| CNN Autoencoder | Deep (recon) | 702 | ~2.3 s | 0.14 | 1.00 | 0.25 |
+| LSTM Autoencoder | Deep (recon) | 702 | ~0.4 s | 0.14 | 1.00 | 0.25 |
+| LSTM Forecaster | Deep (forecast) | 702 | ~1.3 s | 0.14 | 1.00 | 0.25 |
 
 \* From injecting 100 synthetic anomalies into the **real** series. Precision is understated because
 genuine background anomalies are flagged but count as false positives against synthetic-only labels.
@@ -254,7 +254,7 @@ genuine background anomalies are flagged but count as false positives against sy
 | ARIMA | 0.98 | 1.00 | 0.99 |
 | Isolation Forest | 1.00 | 1.00 | 1.00 |
 | CNN Autoencoder | 0.91 | 1.00 | 0.95 |
-| LSTM Autoencoder | 0.93 | 1.00 | 0.96 |
+| LSTM Autoencoder | 0.91 | 1.00 | 0.95 |
 | LSTM Forecaster | 0.93 | 1.00 | 0.96 |
 
 **Real-event recall (non-synthetic).** As an honest complement to the synthetic-spike numbers, each
@@ -270,8 +270,8 @@ ARIMA react to large residual/forecast errors, Isolation Forest to unusual multi
 combinations, and the deep models to unusual shapes/sequences.
 
 ### 5.4 Clustering
-K-means (k=4) on daily features recovers temperature-ordered day-types (means ≈ 1.4 / 11.5 / 16.4 /
-19.2 °C), aligning with the seasons — confirming the clustering is meaningful.
+K-means (k=4) on daily features recovers temperature-ordered day-types (means ≈ 0.5 / 6.5 / 12.2 /
+19.6 °C — cold/cool/mild/warm), aligning with the seasons — confirming the clustering is meaningful.
 
 ### 5.5 Interface and reasoning
 Example: *"What was the hottest temperature?"* → "🔢 max T (degC) was 37.04 at 2015-07-04 16:00"
@@ -309,8 +309,11 @@ with uncertainty. On the labelled synthetic-spike protocol, the z-score/STL-resi
 **recall 0.78 (95 % bootstrap CI 0.64–0.90)** and **precision 0.89 (0.76–0.98)** (2 000 resamples,
 seeded). A paired **McNemar test** comparing Isolation Forest and the z-score detector on the same
 points rejects the null of equal error patterns (**p ≈ 1×10⁻¹⁹**, 64 discordant points). Averaged
-over **8 random seeds**, the detector's performance is recall **0.87 (95 % CI 0.73–0.97)**, precision
-**0.92 (0.83–1.00)**, F1 **0.90 (0.80–0.99)** — a seed-robust estimate with an explicit interval.
+over the same protocol across **8 random seeds** (`evaluation.benchmark`, seeds 0–7), the detector's
+performance is recall **0.76 (95 % seed-percentile CI 0.59–0.90)**, precision **0.89 (0.78–1.00)**,
+F1 **0.81 (0.70–0.92)** — a seed-robust estimate with an explicit interval, and the wider spread
+relative to the single-seed bootstrap above is itself informative: performance is more seed-sensitive
+than a single draw suggests, reinforcing why this is reported as indicative, not confirmatory.
 Every interval also carries its labelled sample size `n`, so its width is read in context; the
 intervals are deliberately wide because the labelled set is necessarily small, and are framed as
 **indicative** rather than confirmatory. This McNemar
@@ -377,8 +380,10 @@ method for trustworthy natural-language analytics.
   approximate ground truth — not a gold-standard labelled benchmark.
 - **Threshold/contamination** parameters are chosen priors (justified by sensitivity sweeps), not learned.
 - **Interface routing** is keyword-based with an optional LLM planner. Coverage is measured by a
-  paraphrase test suite (23 realistic rephrasings across all intents route correctly, including
-  plurals and comparative forms), and truly novel phrasing falls through to the LLM planner — but it
+  paraphrase test suite (19 realistic rephrasings across all intents route correctly, including some
+  plural forms); comparative phrasing ("hotter than last year") currently routes to `trend` rather
+  than a dedicated `compare` intent — an acknowledged rough edge, not yet covered by a test — and
+  truly novel phrasing falls through to the LLM planner — but it
   still handles a *defined* set of intents, not fully arbitrary language.
 - **Correlation, not causation.** The system quantifies association, not cause. Causal questions
   ("does X cause Y?", "what causes…?") are answered honestly: the correlation is given (when a sensor
@@ -506,7 +511,7 @@ International Conference on Data Mining (ICDM)*, pp. 1317–1322.
 ```bash
 cd code/v1
 python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
-python -m pytest tests/          # 182 pass (1 skipped)
+python -m pytest tests/          # 197 pass (1 skipped)
 python verify_results.py         # 29/29 independent checks
 bash reproduce.sh                # both of the above, with an environment banner
 ```

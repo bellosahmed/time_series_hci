@@ -56,17 +56,34 @@ class Answer:
     inferred: str | None = None
     chart: object = None
     borderline: list = field(default_factory=list)  # near-threshold "almost anomalies"
+    network: list = field(default_factory=list)  # multi-sensor portfolio (Mahalanobis+flat-line) windows
+    detector: str | None = None  # which network detector produced the anomaly answer (transparency)
     resolved: str | None = None  # standalone rewrite of a follow-up (transparency), if any
+
+
+# Selectable **network-level** anomaly detectors (all read the whole in-scope sensor frame and return a
+# boolean Series; all are deterministic code — the LLM never detects, only phrases). "portfolio" is the
+# notebook-05 recommendation (Mahalanobis ∪ flat-line) and the default.
+NETWORK_DETECTORS: dict = {
+    "portfolio": anomaly.sensor_network_anomalies,
+    "mahalanobis": anomaly.mahalanobis_anomalies,
+    "isolation_forest": anomaly.isolation_forest_anomalies,
+    "lof": anomaly.lof_anomalies,
+    "ocsvm": anomaly.ocsvm_anomalies,
+}
+DEFAULT_DETECTOR = "portfolio"
 
 
 class Interface:
     """Answer natural-language questions about a prepared DataFrame."""
 
-    def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = llm.DEFAULT_MODEL):
+    def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = llm.DEFAULT_MODEL,
+                 detector: str = DEFAULT_DETECTOR):
         self.df = df
         self.retriever = rag_system.Retriever()
         self.use_llm = use_llm
         self.model = model
+        self.detector = detector          # which network-level anomaly detector the anomaly intent uses
         self.history: list[dict] = []  # recent turns, for follow-up resolution
         self._daytypes: tuple | None = None  # lazily-built K-means day-types (labels, profiles)
 
@@ -598,29 +615,40 @@ class Interface:
                                computed=f"{sensor}{where} has {n} missing values.", context=ctx)
 
         if intent == "anomaly":
-            decomp = analysis.decompose(data[sensor], period=24)
-            resid = decomp["resid"].dropna()
-            flags = anomaly.zscore_anomalies(resid, threshold=4.0)
+            # Network-level detection: the chosen detector reads the whole in-scope sensor frame and a
+            # window is anomalous if the sensor *network* looks wrong (a channel inconsistent with its
+            # neighbours, or a frozen sensor) — not just one sensor in isolation. The detector is
+            # selectable (portfolio/mahalanobis/isolation_forest/lof/ocsvm); all are deterministic code.
+            det = self.detector
+            fn = NETWORK_DETECTORS.get(det)
+            if fn is None:
+                valid = ", ".join(NETWORK_DETECTORS)
+                return Answer(question, "anomaly",
+                              f"Unknown detector {det!r}. Choose one of: {valid}.", None, [sensor],
+                              detector=det)
+            flags = fn(data)
             windows = qe.get_anomaly_windows(flags)
-            # Borderline: near-threshold "almost anomalies" — surfaced as uncertainty, not counted.
-            border_windows = qe.get_anomaly_windows(anomaly.zscore_borderline(resid, threshold=4.0))
-            # Multi-sensor reasoning: explain *why* the first
-            # flagged moment looked unusual — what every sensor did at that timestamp.
-            inferred = None
+            # Multi-sensor reasoning + attribution: explain *why* the first flagged moment looked
+            # unusual (what every sensor did) and name the sensor most responsible.
+            inferred = culprit = None
             if windows:
                 try:
-                    inferred = reasoning.describe_moment(data, windows[0]["start"])
+                    flat_sensor = anomaly.flatline_culprit(data, windows[0]["start"])
+                    inferred = reasoning.describe_network_moment(
+                        data, windows[0]["start"], flatline_sensor=flat_sensor)
                 except Exception as exc:
                     logger.warning("reasoning failed at %s (%s).", windows[0]["start"], exc)
                     inferred = None
-            first = f"First anomaly on {qe.fmt_when(windows[0]['start'])}." if windows else None
-            border_note = (f" ({len(border_windows)} more borderline near-misses)"
-                           if border_windows else "")
+                culprit = anomaly.network_culprit(data, windows[0]["start"])
+            n_sensors = data.shape[1]
+            first = (f"First cross-sensor anomaly on {qe.fmt_when(windows[0]['start'])}"
+                     f"{f' (driven by {culprit})' if culprit else ''}." if windows else None)
             ans = self._reply(question, intent, windows, [sensor],
-                              computed=f"{int(flags.sum())} anomalous {sensor} readings{where} "
-                                       f"in {len(windows)} windows{border_note}.",
+                              computed=f"{int(flags.sum())} cross-sensor anomaly windows{where} "
+                                       f"across {n_sensors} sensors (detector: {det}).",
                               context=first or ctx, inferred=inferred)
-            ans.borderline = border_windows
+            ans.network = windows
+            ans.detector = det
             return ans
 
         if intent == "summary":

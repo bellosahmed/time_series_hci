@@ -106,6 +106,101 @@ def ocsvm_anomalies(
     return pd.Series(model.predict(X) == -1, index=features.index, name="ocsvm_anomaly")
 
 
+def mahalanobis_anomalies(
+    features: pd.DataFrame, contamination: float = 0.01
+) -> pd.Series:
+    """Cross-sectional covariance detector: flag rows inconsistent with the sensor correlations.
+
+    Fits a shrunk (Ledoit-Wolf) mean + covariance on the standardised sensor vectors, then scores
+    every row by its Mahalanobis distance to that joint model. Unlike per-sensor z-scores, this
+    reads the *instantaneous* multi-sensor vector, so it catches a single channel that is
+    inconsistent with its correlated neighbours even when it is not extreme on its own — the common
+    IoT single-sensor fault. No training loop, no time window. The top ``contamination`` fraction of
+    distances are flagged. Returns a boolean Series (True = anomaly) aligned to ``features``.
+    """
+    from sklearn.covariance import LedoitWolf
+
+    X = StandardScaler().fit_transform(features.astype(float).to_numpy())
+    dist = LedoitWolf().fit(X).mahalanobis(X)     # squared Mahalanobis distance per row
+    n_flag = max(1, int(round(contamination * len(X))))
+    cutoff = np.sort(dist)[-n_flag]               # keep the n_flag largest distances
+    return pd.Series(dist >= cutoff, index=features.index, name="mahalanobis_anomaly")
+
+
+def flatline_anomalies(
+    features: pd.DataFrame, window: int = 4, min_ratio: float = 0.02
+) -> pd.Series:
+    """Variance-collapse detector: flag timestamps where a sensor's short-window variance dies.
+
+    A stuck / frozen sensor holds a constant value, so its rolling standard deviation collapses to
+    ~0 while its neighbours keep varying. Reconstruction and covariance detectors are structurally
+    blind to this (a constant segment is trivially "normal"); a variance check is the right tool.
+    For each sensor we compare its ``window``-length rolling std to that sensor's own median rolling
+    std (its normal wobble); a row is flagged when *any* sensor's ratio falls below ``min_ratio``.
+    Returns a boolean Series (True = anomaly) aligned to ``features``.
+
+    ``min_ratio`` defaults to 0.02 — a genuinely stuck sensor drops to ~0 variance, so requiring a
+    collapse below 2% of a sensor's normal wobble catches real freezes while leaving merely-quiet
+    real windows (e.g. an overnight-stable humidity sensor) unflagged. Looser values (0.1) over-fire
+    on real data — on the Jena set they flag ~15% of rows vs ~2% at 0.02.
+    """
+    Z = StandardScaler().fit_transform(features.astype(float).to_numpy())
+    rstd = pd.DataFrame(Z).rolling(window).std(ddof=0)
+    base = rstd.median().to_numpy() + 1e-9        # per-sensor normal rolling std
+    ratio = rstd.to_numpy() / base
+    ratio = np.where(np.isnan(ratio), np.inf, ratio)       # warm-up rows -> inf (never flagged)
+    collapsed = ratio.min(axis=1) < min_ratio              # any sensor's variance collapsed
+    return pd.Series(collapsed, index=features.index, name="flatline_anomaly")
+
+
+def sensor_network_anomalies(
+    features: pd.DataFrame, contamination: float = 0.01, window: int = 4
+) -> pd.Series:
+    """Recommended multi-sensor portfolio: Mahalanobis (cross-sectional) OR flat-line (variance).
+
+    Notebook 05's headline finding is that **no single detector wins** on a correlated sensor array:
+    a covariance model (Mahalanobis) dominates cross-sectional faults (spike/drift/single-stuck) but
+    is beaten on frozen sensors by a variance detector, while the default Isolation Forest *collapses*
+    (it splits axis-aligned and averages a single-channel fault across the normal dimensions). This
+    portfolio unions the two winners so both fault geometries are covered cheaply, without a deep net.
+    A row is anomalous if *either* detector flags it. Returns a boolean Series aligned to ``features``.
+    """
+    maha = mahalanobis_anomalies(features, contamination=contamination)
+    flat = flatline_anomalies(features, window=window)
+    return (maha | flat).rename("sensor_network_anomaly")
+
+
+def network_culprit(features: pd.DataFrame, timestamp) -> str:
+    """Name the sensor most responsible for a network anomaly at ``timestamp`` (arg-max attribution).
+
+    Standardises each sensor and returns the one with the largest absolute deviation at that row —
+    the cheap, honest attribution the notebook uses (arg-max per-sensor error). Attribution is easier
+    than detection: on the sensor array it is near-perfect at moderate fault sizes even for detectors
+    that barely flag the fault. Returns the column name.
+    """
+    std = features.std(ddof=0).replace(0, np.nan)
+    z = ((features.loc[timestamp] - features.mean()) / std).abs()
+    return str(z.idxmax())
+
+
+def flatline_culprit(
+    features: pd.DataFrame, when, window: int = 4, min_ratio: float = 0.02
+) -> str | None:
+    """Name the sensor whose short-window variance has collapsed at ``when`` (frozen-sensor attribution).
+
+    Pairs with ``flatline_anomalies``: that function only says *whether* a row is flagged, this says
+    *which* sensor caused it, using the same ratio test. Returns ``None`` if no sensor's variance has
+    actually collapsed at this row (so callers can fall back to a different explanation).
+    """
+    Z = StandardScaler().fit_transform(features.astype(float).to_numpy())
+    rstd = pd.DataFrame(Z, index=features.index, columns=features.columns).rolling(window).std(ddof=0)
+    base = rstd.median() + 1e-9
+    ratio = rstd.loc[when] / base
+    if ratio.isna().all() or ratio.min() >= min_ratio:
+        return None
+    return str(ratio.idxmin())
+
+
 def matrix_profile_anomalies(
     series: pd.Series, window: int = 24, threshold: float = 4.0
 ) -> pd.Series:

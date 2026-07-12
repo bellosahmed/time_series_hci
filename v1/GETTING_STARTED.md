@@ -177,7 +177,7 @@ at all.
 To confirm everything is wired up correctly:
 
 ```bash
-python3.12 -m pytest tests/        # 173 passed, 1 skipped (skips = optional LLM/dense-retriever deps)
+python3.12 -m pytest tests/        # 193 passed, 1 skipped (skips = optional LLM/dense-retriever deps)
 python3.12 verify_results.py       # 29/29 independent checks (results == pandas; LLM invents 0 numbers)
 ```
 

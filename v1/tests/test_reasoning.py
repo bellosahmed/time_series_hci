@@ -54,6 +54,26 @@ def test_reasoning_gets_direction_and_coherence_right():
     assert "high" in desc and "real weather event" in desc  # coherent multi-sensor verdict
 
 
+def test_describe_network_moment_reports_frozen_sensor_not_a_null_verdict():
+    # A frozen sensor's *level* is unremarkable (no marginal z-score spike), so the plain
+    # describe_moment story would wrongly say "nothing looks unusual". describe_network_moment
+    # must instead report the flat-line fault directly when told which sensor triggered it.
+    df = _df()
+    text = reasoning.describe_network_moment(df, df.index[10], flatline_sensor="rh (%)")
+    assert "rh (%)" in text and "frozen" in text and "sensor glitch" in text and "σ" in text
+
+
+def test_describe_network_moment_falls_back_without_a_flatline_sensor():
+    idx = pd.date_range("2024-01-01", periods=200, freq="h")
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"T (degC)": rng.normal(10, 1, 200),
+                       "rh (%)": rng.normal(70, 1, 200),
+                       "p (mbar)": rng.normal(1000, 1, 200)}, index=idx)
+    df.loc[idx[50], "T (degC)"] += 20
+    text = reasoning.describe_network_moment(df, idx[50])
+    assert text == reasoning.describe_moment(df, idx[50])
+
+
 def test_co_movement_names_the_actual_target():
     """The explanation must reference the queried sensor, not a hardcoded one."""
     df = _df()

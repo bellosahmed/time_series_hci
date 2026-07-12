@@ -2,7 +2,14 @@
 
 Evaluation of the **core (computational) pipeline** on the Jena Climate dataset
 (2009–2016, 70,129 hourly rows after preprocessing). RAG + LLM and the interface
-are intentionally out of scope for v1. Full reproducible workings: `notebooks/02_evaluation.ipynb`.
+are intentionally out of scope for v1. Full reproducible workings: `notebooks/02_methods_and_evaluation.ipynb`.
+> **Note (this file predates the 9→5 notebook consolidation and a later detector/reporting refresh):**
+> the exact figures below in "Labeled evaluation" and "Quantitative rigor" were produced by an earlier
+> evaluation protocol and could not be reproduced byte-for-byte against the current codebase when this
+> file was last audited. §5.3/§5.7 of `report/REPORT.md` supersede them with figures freshly verified
+> against the current code (`reproduce.sh`); treat this file as a historical snapshot for those two
+> sections. Everything else in this file (query-engine correctness, clustering, retrieval IR metrics,
+> forecast backtest MAE/RMSE/MASE, offline operation) has been independently re-verified and is current.
 
 ## 1. Query engine correctness (the trust guarantee)
 
@@ -51,7 +58,7 @@ Because Jena has no labels, we injected 100 known spikes and measured recovery:
 All achieve **very high recall** (they catch injected anomalies). Apparent precision is low
 because the data *also* contains genuine background anomalies that get flagged but count as
 "false positives" against synthetic-only labels — a useful illustration of why labels matter.
-On a controlled clean signal (see `notebooks/05`), precision is high too.
+On a controlled clean signal (see `report/MODELS.md`), precision is high too.
 
 ### Deep techniques compared (notebook 07)
 
@@ -69,7 +76,7 @@ the LSTM variants serve as comparison baselines.
 ## 3. Clustering (day-types)
 
 K-means (k=4) on per-day feature vectors yields temperature-ordered clusters with
-mean daily temperatures of **1.4, 11.5, 16.4, 19.2 °C** — a clean cold→warm gradient
+mean daily temperatures of **0.5, 6.5, 12.2, 19.6 °C** — a clean cold→warm gradient
 that maps onto winter → spring/autumn → summer. Clusters are meaningful.
 
 **Choice of k (justified, not assumed).** `clustering.kmeans_selection` scores inertia (elbow) +
@@ -144,9 +151,10 @@ hard ground truth:
   dew point and potential temperature all drop while air density rises together — which the
   multi-sensor reasoning labels a *real event*, not a sensor fault.
 
-**One-command check.** `python3.12 verify_results.py` runs **17 independent checks** (query engine ==
+**One-command check.** `python3.12 verify_results.py` runs **29 independent checks** (query engine ==
 pandas, scoped queries, thresholds, known-event placement, reasoning verdict, forecast bounds,
-point-adjusted ≥ strict recall, confusion sums to N) and exits non-zero on any failure.
+point-adjusted ≥ strict recall, confusion sums to N, retriever IR metrics, day-type clustering,
+statistical-rigor checks) and exits non-zero on any failure.
 
 **Point-adjusted metrics.** Alongside strict precision/recall we also report **point-adjusted**
 scores (`evaluation.point_adjust`): if a detector flags any point inside a true anomaly segment, the

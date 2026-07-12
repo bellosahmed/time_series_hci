@@ -2,16 +2,16 @@
 
 All anomaly-detection models used in v1, on the Jena temperature signal (70,129 hourly points).
 Recall / F1 are measured on **100 injected synthetic anomalies** (see `src/evaluation.py`).
-Reproduce with `notebooks/08_model_comparison.ipynb`.
+Reproduce with `notebooks/04_deep_models_comparison.ipynb`.
 
 | Model | Type | Flags | Time | Precision | Recall | F1 | Detects |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Z-score (STL residual) | Statistical | 526 | ~4.0 s | 0.24 | 0.45 | 0.32 | large residual spikes |
-| ARIMA forecast error | Forecasting | 411 | ~2.7 s | 0.20 | 1.00 | 0.34 | deviations from predicted dynamics |
+| Z-score (STL residual) | Statistical | 184 | ~4.1 s | 0.24 | 0.45 | 0.32 | large residual spikes |
+| ARIMA forecast error | Forecasting | 495 | ~2.2 s | 0.20 | 1.00 | 0.34 | deviations from predicted dynamics |
 | Isolation Forest | Classical ML | 699 | ~0.3 s | 0.14 | 1.00 | 0.25 | unusual feature combinations |
-| CNN Autoencoder | Deep (reconstruction) | 702 | ~2.5 s | 0.14 | 1.00 | 0.25 | unusual window *shapes* |
-| LSTM Autoencoder | Deep (reconstruction) | 702 | ~1.0 s | 0.14 | 1.00 | 0.25 | unusual *ordered* sequences |
-| LSTM Forecaster | Deep (forecasting) | 702 | ~2.5 s | 0.14 | 1.00 | 0.25 | sudden *jumps* (one step late) |
+| CNN Autoencoder | Deep (reconstruction) | 702 | ~2.3 s | 0.14 | 1.00 | 0.25 | unusual window *shapes* |
+| LSTM Autoencoder | Deep (reconstruction) | 702 | ~0.4 s | 0.14 | 1.00 | 0.25 | unusual *ordered* sequences |
+| LSTM Forecaster | Deep (forecasting) | 702 | ~1.3 s | 0.14 | 1.00 | 0.25 | sudden *jumps* (one step late) |
 
 > **Read precision carefully.** These numbers come from injecting 100 synthetic anomalies into the
 > *real* 8-year series. The models also (correctly) flag the hundreds of **genuine** background
@@ -29,7 +29,7 @@ flag can be judged — precision is high, confirming the detectors are accurate:
 | ARIMA | 0.98 | 1.00 | 0.99 |
 | Isolation Forest | 1.00 | 1.00 | 1.00 |
 | CNN Autoencoder | 0.91 | 1.00 | 0.95 |
-| LSTM Autoencoder | 0.93 | 1.00 | 0.96 |
+| LSTM Autoencoder | 0.91 | 1.00 | 0.95 |
 | LSTM Forecaster | 0.93 | 1.00 | 0.96 |
 
 **Takeaway:** the detectors are genuinely precise (0.85–1.00); the low real-data precision is an
@@ -47,7 +47,7 @@ FN = missed, TN = correctly left alone.
 | ARIMA | 40 | 1 | 0 | 2119 | 0.98 | 1.00 |
 | Isolation Forest | 40 | 0 | 0 | 2120 | 1.00 | 1.00 |
 | CNN Autoencoder | 40 | 4 | 0 | 2116 | 0.91 | 1.00 |
-| LSTM Autoencoder | 40 | 3 | 0 | 2117 | 0.91 | 1.00 |
+| LSTM Autoencoder | 40 | 4 | 0 | 2116 | 0.91 | 1.00 |
 | LSTM Forecaster | 40 | 3 | 0 | 2117 | 0.93 | 1.00 |
 
 Isolation Forest is perfect here (no false alarms, no misses); z-score is the weakest (it misses a

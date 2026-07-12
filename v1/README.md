@@ -100,11 +100,16 @@ python3.12 -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (de
 python3.12 apps/chat.py "what was the hottest temperature?"
 python3.12 apps/chat.py --llm                          # interactive
 python3.12 apps/chat.py --agent "compare the hottest of 2013, 2014 and 2015"   # multi-step tool-use
+python3.12 apps/chat.py --detector mahalanobis "any unusual readings in 2014?"  # pick the anomaly detector
 ```
 
 > `--agent` plans several query-engine tool calls for a multi-step question. The LLM chooses the
 > tools; every number is still computed deterministically and faithfulness-checked. Pull a larger
 > model (`ollama pull llama3.1:8b`, or set `TSHCI_MODEL`) and it is used automatically.
+>
+> `--detector` selects the **network-level** anomaly detector used for "unusual readings" questions —
+> `portfolio` (default) · `mahalanobis` · `isolation_forest` · `lof` · `ocsvm`. All read every sensor at
+> once and name the culprit sensor; the web app exposes the same choice as a header dropdown.
 
 **Launch the web app** — serves the chat UI on **http://localhost:3030**:
 
@@ -135,7 +140,7 @@ Stop it with `Ctrl-C` (or `pkill -f apps/web/app.py` if it's running in the back
 ## How to check it works
 
 ```bash
-python3.12 -m pytest tests/       # 173 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
+python3.12 -m pytest tests/       # 193 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
 python3.12 verify_results.py      # 29/29 independent checks (results == pandas, day-types, retriever IR metrics, LLM invents 0 numbers)
 python3.12 -m ruff check src tests apps    # lint (clean)
 python3.12 -m mypy                # lightweight static typing (clean)

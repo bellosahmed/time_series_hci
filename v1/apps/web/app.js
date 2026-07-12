@@ -16,8 +16,8 @@ function h(type, props, ...children) {
 }
 const html = htm.bind(h);
 
-// ---- header: dataset line, Ollama status lamp, "Explain with AI" toggle + model picker ----
-function Header({ dsInfo, aiAvailable, models, model, setModel, llmOn, setLlmOn }) {
+// ---- header: dataset line, Ollama status lamp, "Explain with AI" toggle + model picker + detector ----
+function Header({ dsInfo, aiAvailable, models, model, setModel, llmOn, setLlmOn, detectors, detector, setDetector }) {
   const ready = aiAvailable === true && models.length > 0;
   const statusText = aiAvailable === null ? 'checking…'
     : ready ? 'AI ready' : 'AI off — plain answers';
@@ -46,6 +46,11 @@ function Header({ dsInfo, aiAvailable, models, model, setModel, llmOn, setLlmOn 
           ${ready
             ? models.map(n => html`<option key=${n} value=${n}>${n.length > 32 ? n.slice(0, 32) + '…' : n}</option>`)
             : html`<option value="">plain template</option>`}
+        </select>
+        <label class="sr-only" for="detector">Anomaly detector</label>
+        <select id="detector" title="Anomaly detector (for 'any unusual readings?')"
+                value=${detector} onChange=${e => setDetector(e.target.value)}>
+          ${detectors.map(n => html`<option key=${n} value=${n}>${n.replace(/_/g, ' ')}</option>`)}
         </select>
       </div>
     </div></header>`;
@@ -181,6 +186,8 @@ function App() {
   const [aiAvailable, setAiAvailable] = useState(null);  // null while the status check is pending
   const [dsInfo, setDsInfo] = useState('German weather · Jena · 2009–2016 · loading…');
   const [suggestions, setSuggestions] = useState([]);
+  const [detectors, setDetectors] = useState(['portfolio']);
+  const [detector, setDetector] = useState('portfolio');  // network anomaly detector for 'anomaly' Qs
   const inputRef = useRef(null);
   const chatRef = useRef(null);
 
@@ -193,6 +200,9 @@ function App() {
       setAiAvailable(!!d.available);
       if (d.available && d.models && d.models.length) { setModels(d.models); setModel(d.models[0]); }
     }).catch(() => setAiAvailable(false));
+    fetch('/api/detectors').then(r => r.json()).then(d => {
+      if (d.detectors && d.detectors.length) { setDetectors(d.detectors); setDetector(d.default || d.detectors[0]); }
+    }).catch(() => {});
   }, []);
 
   // Keep the newest message in view.
@@ -210,7 +220,7 @@ function App() {
     try {
       const r = await fetch('/api/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: text, use_llm: llmOn, model, history: convo }),
+        body: JSON.stringify({ question: text, use_llm: llmOn, model, detector, history: convo }),
       });
       data = await r.json();
     } catch (e) {
@@ -226,7 +236,8 @@ function App() {
 
   return html`
     <${Header} dsInfo=${dsInfo} aiAvailable=${aiAvailable} models=${models} model=${model}
-               setModel=${setModel} llmOn=${llmOn} setLlmOn=${setLlmOn}/>
+               setModel=${setModel} llmOn=${llmOn} setLlmOn=${setLlmOn}
+               detectors=${detectors} detector=${detector} setDetector=${setDetector}/>
     <${TrustBar}/>
     <${Chips} suggestions=${suggestions} onPick=${ask}/>
     <${Chat} messages=${messages} chatRef=${chatRef}/>

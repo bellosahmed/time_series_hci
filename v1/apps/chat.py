@@ -41,6 +41,9 @@ def main() -> None:
     p.add_argument("--model", default=None, help="Ollama model name (default: auto, largest pulled)")
     p.add_argument("--agent", action="store_true",
                    help="agentic multi-step mode (plan+execute several tools; implies --llm)")
+    p.add_argument("--detector", default=interface.DEFAULT_DETECTOR,
+                   choices=list(interface.NETWORK_DETECTORS),
+                   help="network anomaly detector for 'anomaly' questions (default: portfolio)")
     p.add_argument("question", nargs="*", help="ask once and exit; omit for interactive mode")
     args = p.parse_args()
     if args.agent:
@@ -61,7 +64,8 @@ def main() -> None:
             print("       Start it with `ollama serve` and `ollama pull llama3.2:3b`.")
 
     model = model or llm.DEFAULT_MODEL
-    iface = interface.Interface(df, use_llm=use_llm, model=model)
+    iface = interface.Interface(df, use_llm=use_llm, model=model, detector=args.detector)
+    print(f"Anomaly detector: {args.detector}")
     ag = agent.Agent(df, use_llm=use_llm, model=model) if args.agent else None
 
     def answer(q: str) -> str:

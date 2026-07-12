@@ -44,6 +44,23 @@ def test_ask_route_rejects_empty_question():
     assert r.status_code == 400
 
 
+def test_detectors_route_lists_choices():
+    r = _client().get("/api/detectors")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["default"] == "portfolio"
+    assert "portfolio" in d["detectors"] and "isolation_forest" in d["detectors"]
+
+
+def test_ask_route_honours_detector_choice():
+    r = _client().post("/api/ask",
+                       json={"question": "any unusual readings?", "detector": "isolation_forest"})
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["intent"] == "anomaly"
+    assert d["detector"] == "isolation_forest"       # the choice is applied and echoed back
+
+
 def test_suggestions_route_lists_sensors():
     r = _client().get("/api/suggestions")
     assert r.status_code == 200
