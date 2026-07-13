@@ -53,11 +53,11 @@ The system runs on the **Jena Climate 2009–2016** dataset — the Kaggle "Jena
 Download `jena_climate_2009_2016.csv` and place it at exactly this path:
 
 ```
-code/data/jena_climate_2009_2016.csv
+code/v1/data/jena_climate_2009_2016.csv
 ```
 
-That is one level **above** `v1`, in a shared `code/data/` folder. If the file is missing or in the
-wrong place, the app fails to load — see Troubleshooting.
+That is inside `v1`'s own `data/` folder. If the file is missing or in the wrong place, the app
+fails to load — see Troubleshooting.
 
 ## Run it — the fastest path
 
@@ -129,8 +129,8 @@ python3.12 apps/chat.py --agent "compare the hottest of 2013, 2014 and 2015"
 
 ## Troubleshooting
 
-**"File not found" / it won't load the data.** The CSV isn't at `code/data/jena_climate_2009_2016.csv`.
-Confirm the exact filename and that it sits in `code/data/` (one level above `v1`). You can also point
+**"File not found" / it won't load the data.** The CSV isn't at `code/v1/data/jena_climate_2009_2016.csv`.
+Confirm the exact filename and that it sits in `v1`'s own `data/` folder. You can also point
 the CLI at another location with `--data /path/to/jena_climate_2009_2016.csv`.
 
 **Port 3030 already in use.** The web app automatically steps up to the next free port and prints
@@ -177,7 +177,7 @@ at all.
 To confirm everything is wired up correctly:
 
 ```bash
-python3.12 -m pytest tests/        # 193 passed, 1 skipped (skips = optional LLM/dense-retriever deps)
+python3.12 -m pytest tests/        # 197 passed, 1 skipped (skips = optional LLM/dense-retriever deps)
 python3.12 verify_results.py       # 29/29 independent checks (results == pandas; LLM invents 0 numbers)
 ```
 

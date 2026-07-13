@@ -25,7 +25,7 @@ sys.path.insert(0, str(V1))                      # make `src` importable from an
 
 from src import agent, interface, llm, preprocess
 
-DEFAULT_DATA = V1.parent / "data" / "jena_climate_2009_2016.csv"
+DEFAULT_DATA = V1 / "data" / "jena_climate_2009_2016.csv"
 
 
 def pick_model(requested: str | None) -> str:

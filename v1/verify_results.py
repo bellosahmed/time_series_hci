@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 from src import (preprocess, query_engine as qe, interface, anomaly, analysis,  # noqa: E402
                  evaluation, forecasting, reasoning, llm, rag_system, retrieval_eval, clustering)
 
-DATA = ROOT.parent / "data" / "jena_climate_2009_2016.csv"
+DATA = ROOT / "data" / "jena_climate_2009_2016.csv"
 S = "T (degC)"
 checks: list[tuple[str, bool, str]] = []
 

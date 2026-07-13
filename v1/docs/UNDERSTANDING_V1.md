@@ -106,10 +106,10 @@ cd code/v1
 
 # 0. One-time: install deps + place the dataset
 pip install -r requirements.txt
-#    put jena_climate_2009_2016.csv in code/data/  (it's gitignored)
+#    put jena_climate_2009_2016.csv in code/v1/data/  (it's gitignored)
 
 # 1. Headless pipeline — the simplest end-to-end run (read main.py alongside)
-python3.12 -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
+python3.12 -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)"
 
 # 2. Ask questions on the command line (read apps/chat.py + interface.py)
 python3.12 apps/chat.py "what was the hottest temperature?"

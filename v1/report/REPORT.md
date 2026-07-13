@@ -222,7 +222,7 @@ checks (plus one advisory LLM-faithfulness vote); `reproduce.sh` regenerates eve
 ## 5. Results & Evaluation
 
 ### 5.1 Data characteristics
-Temperature ranges from −22.7 °C (07 Jan 2009) to 37.0 °C (04 Jul 2015), mean 9.4 °C. It correlates
+Temperature ranges from −22.7 °C (07 Jan 2009) to 37.04 °C (04 Jul 2015), mean 9.4 °C. It correlates
 +0.997 with potential temperature and **−0.96 with air density** (cold air is denser) — physically
 correct, confirming the pipeline handles the data soundly.
 
@@ -510,7 +510,7 @@ International Conference on Data Mining (ICDM)*, pp. 1317–1322.
 ## Appendix A — How to run
 ```bash
 cd code/v1
-python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
+python -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)"
 python -m pytest tests/          # 197 pass (1 skipped)
 python verify_results.py         # 29/29 independent checks
 bash reproduce.sh                # both of the above, with an environment banner

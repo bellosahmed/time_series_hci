@@ -9,7 +9,7 @@
 # so the counted checks are deterministic across runs and machines.
 #
 # Requirements: Python 3.12 with requirements.txt installed, and the dataset at
-#   ../data/jena_climate_2009_2016.csv  (gitignored; Jena Climate 2009-2016).
+#   data/jena_climate_2009_2016.csv  (gitignored; Jena Climate 2009-2016).
 # The local LLM (Ollama) is optional — its faithfulness check is advisory only.
 set -euo pipefail
 

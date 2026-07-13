@@ -9,7 +9,7 @@ interface, RAG context, and local-LLM phrasing live in ``interface.py`` / ``rag_
 / ``llm.py`` and are driven from ``apps/`` (``chat.py`` CLI, ``web/`` browser UI).
 
 Usage:
-    python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
+    python -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)"
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def run(data_path: str, sensor: str = "T (degC)", freq: str = "1h") -> dict:
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Time-series HCI core pipeline")
-    p.add_argument("--data", default="../data/jena_climate_2009_2016.csv")
+    p.add_argument("--data", default="data/jena_climate_2009_2016.csv")
     p.add_argument("--sensor", default="T (degC)")
     p.add_argument("--freq", default="1h")
     return p.parse_args()

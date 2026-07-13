@@ -91,7 +91,7 @@ python3.12 -m pip install -r requirements.txt        # one-time setup
 **Run the whole pipeline once** (loads data, detects anomalies, prints a summary):
 
 ```bash
-python3.12 -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
+python3.12 -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)"
 ```
 
 **Ask a question in the terminal** (add `--llm` for local-LLM phrasing if Ollama is running):
@@ -140,7 +140,7 @@ Stop it with `Ctrl-C` (or `pkill -f apps/web/app.py` if it's running in the back
 ## How to check it works
 
 ```bash
-python3.12 -m pytest tests/       # 193 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
+python3.12 -m pytest tests/       # 197 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
 python3.12 verify_results.py      # 29/29 independent checks (results == pandas, day-types, retriever IR metrics, LLM invents 0 numbers)
 python3.12 -m ruff check src tests apps    # lint (clean)
 python3.12 -m mypy                # lightweight static typing (clean)
@@ -181,4 +181,90 @@ LLM never introduced a number that isn't in the data.
 **Jena Climate 2009–2016** — 420,551 rows at 10-minute resolution → resampled to **70,129 hourly**
 rows. **14 sensors** (temperature, humidity, pressure, wind, …); the default target is `T (degC)`.
 The wind columns contain `-9999` error codes, which preprocessing cleans. The CSV is gitignored (too
-large); download it and place it at `code/data/jena_climate_2009_2016.csv`.
+large); download it and place it at `code/v1/data/jena_climate_2009_2016.csv`.
+
+### Columns
+
+| Column | Unit | What it is |
+| --- | --- | --- |
+| `Date Time` | timestamp | Reading time, 10-minute steps. |
+| `p (mbar)` | mbar (= hPa) | Station air pressure. |
+| `T (degC)` | °C | Air temperature. The pipeline's default target sensor. |
+| `Tpot (K)` | K | Potential temperature — the temperature the air would have if brought to a reference pressure of 1000 mbar. Removes the effect of pressure changes so readings are comparable independent of pressure. |
+| `Tdew (degC)` | °C | Dew point — the temperature the air would need to cool to (at its current moisture content) to become saturated. A direct read of how much moisture is actually present, expressed as a temperature. |
+| `rh (%)` | % | Relative humidity — how close the air is to saturation. |
+| `VPmax (mbar)` | mbar | Saturation vapour pressure — the *maximum* water-vapour pressure the air could hold at its current temperature before condensing. Depends on temperature only. |
+| `VPact (mbar)` | mbar | Actual vapour pressure — how much water vapour is actually present. |
+| `VPdef (mbar)` | mbar | Vapour pressure deficit (`VPmax − VPact`) — how much more moisture the air could still absorb; an evaporative-demand / dryness indicator. |
+| `sh (g/kg)` | g water per kg moist air | Specific humidity — the mass of water vapour per kilogram of air. |
+| `H2OC (mmol/mol)` | mmol water per mol moist air | Water-vapour concentration — the same moisture information as `sh`, expressed as a molar fraction instead of a mass fraction. |
+| `rho (g/m**3)` | g/m³ | Air density. |
+| `wv (m/s)` | m/s | Mean wind speed over the 10-minute interval. |
+| `max. wv (m/s)` | m/s | Peak (gust) wind speed within the interval. |
+| `wd (deg)` | ° (compass) | Wind direction the wind is blowing from, 0–360°. |
+
+### How the columns relate to each other
+
+Several columns are not independent measurements — they are different views of the same underlying
+moisture and thermodynamic state, and can be derived from each other with standard meteorological
+formulas. Each formula below was checked against 5,000 real rows of this CSV (not assumed from memory);
+the residuals quoted are the small differences left over after that check, and are explained entirely
+by the file storing values to 2 decimal places (i.e. rounding, not modelling error):
+
+- **Temperature alone sets the moisture *capacity*** (`VPmax`), via the Magnus/Clausius–Clapeyron
+  formula:
+  `VPmax = 6.1078 · exp(17.27·T / (T + 237.3))` — matches the file to within 0.014 mbar.
+  This is why `VPmax` climbs steeply in summer: warm air can simply hold much more water vapour
+  than cold air, regardless of how much is actually in it.
+- **`VPmax` and `rh` together give the moisture actually present** (`VPact`):
+  `VPact = VPmax × rh / 100` — matches to within 0.009 mbar.
+- **The gap between capacity and actual moisture is the deficit**:
+  `VPdef = VPmax − VPact` — matches to within 0.01 mbar.
+- **The actual moisture, restated as a temperature, gives the dew point**: applying the inverse of
+  the Magnus formula to `VPact` instead of `T` gives
+  `Tdew = 237.3 × ln(VPact/6.1078) / (17.27 − ln(VPact/6.1078))` — matches to within 0.15 °C.
+- **Pressure converts a vapour *pressure* into a vapour *concentration***. `VPact` says how much
+  water vapour there is in pressure terms; dividing by the total air pressure `p` turns that into a
+  fraction of the air itself, which is what `sh` and `H2OC` report:
+  - mixing ratio `r = 0.622 × VPact / (p − VPact)`, then `sh = 1000 × r / (1 + r)` g/kg — matches to
+    within 0.008 g/kg.
+  - `H2OC = 1000 × VPact / p` mmol/mol (the water-vapour mole fraction) — matches almost exactly.
+
+  So the relationship in the question — pressure and temperature combining to explain the H₂O
+  columns — is right, but they enter at different steps: **temperature alone** fixes how much
+  moisture the air *could* hold (`VPmax`); **pressure** is then what turns an actual amount of
+  moisture (`VPact`, itself `VPmax` scaled by `rh`) into a concentration (`sh`, `H2OC`). Temperature
+  and pressure do not combine directly for these columns — humidity (`rh`) has to be the bridge
+  between them.
+- **Temperature and pressure together set the potential temperature**:
+  `Tpot = (T + 273.15) × (1000 / p)^0.286` — matches to within 0.02 K. This is a genuine two-variable
+  combination: it re-expresses `T` as "what it would read if this air parcel were moved to standard
+  pressure," which is what lets `Tpot` be compared across readings taken at slightly different
+  pressures.
+- **Pressure, temperature and vapour pressure together set air density** (`rho`), because moist air
+  is a mix of dry air and (lighter) water vapour held at the same total pressure `p`:
+  `rho = 1000 × [ (p − e)/(Rd·Tk) + e/(Rv·Tk) ]` g/m³, where `e = VPact` (in Pa), `Tk = T + 273.15`,
+  `Rd = 287.05`, `Rv = 461.5` — matches to within 0.12 g/m³ (out of ~1300 g/m³, i.e. <0.01%).
+
+In short: `T` drives `VPmax`; `VPmax` and `rh` drive `VPact` and `VPdef`; `VPact` and `p` drive `sh`
+and `H2OC`; and `T` with `p` (and, for density, `VPact` too) drive `Tpot` and `rho`. `rh` and
+`Tdew` are two more ways of stating the same actual-moisture information carried by `VPact`.
+
+### Stand-alone vs. calculated
+
+Of the 14 sensor columns, only **7 are independent measurements** — everything else is calculated
+from those seven using the formulas above, and carries no information beyond what `T`, `p` and `rh`
+already contain.
+
+| Stand-alone (measured) | Calculated (derived) | From |
+| --- | --- | --- |
+| `p (mbar)` | `VPmax (mbar)` | `T` |
+| `T (degC)` | `VPact (mbar)` | `VPmax`, `rh` |
+| `rh (%)` | `VPdef (mbar)` | `VPmax`, `VPact` |
+| `wv (m/s)` | `Tdew (degC)` | `VPact` (i.e. `T`, `rh`) |
+| `max. wv (m/s)` | `sh (g/kg)` | `VPact`, `p` |
+| `wd (deg)` | `H2OC (mmol/mol)` | `VPact`, `p` |
+| — | `Tpot (K)` | `T`, `p` |
+| — | `rho (g/m**3)` | `p`, `T`, `VPact` |
+
+(`Date Time` is the timestamp, not a sensor reading, so it isn't counted in either column.)
