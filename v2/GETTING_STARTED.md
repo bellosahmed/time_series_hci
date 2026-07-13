@@ -137,7 +137,7 @@ real crises).
 Two commands confirm everything is wired up correctly:
 
 ```bash
-python3.12 -m pytest tests/      # 79 passed
+python3.12 -m pytest tests/      # 111 passed
 python3.12 verify_results.py     # 13/13 independent checks
 ```
 

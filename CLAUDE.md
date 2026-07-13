@@ -24,12 +24,19 @@ table**, techniques + why-this-not-that, consolidated results/findings, limitati
 attacks matching the paper). Implemented: `preprocess` (scapy pcap→labelled MESSAGES frame) · `features`
 (value + flow channels) · `channels`/`fusion`/`evaluation`/`experiment` (two-channel + fusion detector,
 **real-label** eval with point-adjusted metrics + bootstrap CIs) · `query_engine` (truth layer) ·
-`interface`/`interface_parsing` (NL, trust-labelled) · `llm` (Ollama + faithfulness gate). Apps:
-`chat.py` + Flask `web/`. **65 tests · verify 12/12 · ruff clean.** Its draw: **real anomaly labels**
+`reasoning` (two-channel window explanation, `explain` intent) · `clustering` (day-type K-means,
+`day-type` intent — honest negative result: whole-day averages don't separate attack days) ·
+`forecasting` (SARIMA hourly forecast, `forecast` intent — honest negative result: doesn't beat naive
+persistence, MASE ≈ 1.4) · `interface`/`interface_parsing` (NL, trust-labelled) · `llm` (Ollama +
+faithfulness gate; a real, reproducible gap found and documented — spoofed-IP digit swaps in some
+positions slip past the number-matching check, see `report/EVALUATION.md`). Apps: `chat.py` + Flask
+`web/`. **80 tests · verify 12/12 · ruff clean · coverage 92%.** Its draw: **real anomaly labels**
 (fixes v1's synthetic-label limitation). Headline finding (honest): channels are complementary; fusion
 trades precision for recall and reaches 1.00 event-level recall, but AP CIs overlap so no config is
-significantly best. Running record: `v3/report/EVALUATION.md`. **Optional future:** detector tuning,
-supervised score-combiner.
+significantly best. Running record: `v3/report/EVALUATION.md`. **Still missing:** `rag_system.py` and
+`agent.py` (deliberately — the question set is narrow enough a full retrieval/agent layer would just
+re-retrieve the same facts already inlined in `interface.py`'s `ATTACK_KB`) and `main.py` (a unified
+entry point, for parity with v1/v2). **Optional future:** detector tuning, supervised score-combiner.
 
 The sections below marked **(v1)** describe the temperature system. The **(v2)** section describes the
 trade system. They share the *architecture* (preprocess → analyse → detect → reason → query → explain)
@@ -67,7 +74,7 @@ but **not the data** — v1 is temperature, v2 is trade.
 | Deep models: CNN-AE, LSTM-AE, LSTM-Forecaster | ✅ done |
 | Forecasting: ARIMA | ✅ done |
 | Evaluation: vs pandas ground truth + labeled (synthetic) precision/recall | ✅ done |
-| Tests | ✅ 193 passing (1 skipped); ruff + mypy clean; coverage 92% |
+| Tests | ✅ 197 passing (1 skipped); ruff + mypy clean; coverage 92% |
 | Agentic multi-step tool-use (`agent.py`), embedding-RAG option, larger-model auto-pick | ✅ done |
 | Retrieval eval (P@k/R@k/MRR/MAP/NDCG) + TF-IDF/BM25/LSA/dense retrievers; Matrix Profile detector (COP509 IR) | ✅ done |
 | Local LLM (Ollama) explanation layer | ⏳ deferred to write-up stage |
@@ -77,7 +84,7 @@ but **not the data** — v1 is temperature, v2 is trade.
 
 ## Dataset
 
-**Jena Climate 2009–2016** — `code/data/jena_climate_2009_2016.csv` (gitignored).
+**Jena Climate 2009–2016** — `code/v1/data/jena_climate_2009_2016.csv` (gitignored, v1-only folder).
 420,551 rows @ 10 min → resampled to **70,129 hourly** rows. 14 sensors; target `T (degC)`.
 Note: wind columns contain `-9999` sentinel errors, cleaned in preprocessing.
 
@@ -141,7 +148,7 @@ Cross-sectional/variance (Mahalanobis + flat-line, unioned as the `sensor_networ
 Shape/discords (Matrix Profile) · Deep (CNN-AE, LSTM-AE, LSTM-Forecaster).
 Full table: **`v1/report/MODELS.md`**.
 
-## Tests (`v1/tests/`) — 193 passing, 1 skipped (coverage 92%)
+## Tests (`v1/tests/`) — 197 passing, 1 skipped (coverage 92%)
 
 `test_query_engine` · `test_interface` (interface + evaluation) · `test_reasoning` ·
 `test_deep` · `test_forecasting` · `test_llm` · `test_agent` (agentic tool-use) ·
@@ -161,7 +168,7 @@ See `v1/README.md`.
 
 ```bash
 cd code/v1
-python -m src.main --data ../data/jena_climate_2009_2016.csv --sensor "T (degC)"
+python -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)"
 python -m pytest tests/
 python apps/chat.py --llm "what was the hottest temperature?"
 python apps/web/app.py            # website (prints the URL)

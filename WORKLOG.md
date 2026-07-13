@@ -5,6 +5,40 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-13
+
+### v3: closed three real module gaps (`reasoning.py`, `clustering.py`, `forecasting.py`) — and found the "§13" notebook section referenced below never actually existed
+While implementing these three modules, went to port their logic from
+`notebooks/standalone_full_pipeline.ipynb` §13 (per `docs/PLAN.md`'s status note, below) and found that
+section does not exist on disk — the notebook stops at §13 "Summary", with no §13.1–13.9. Confirmed via
+`git show` at the exact commit that supposedly added it: never written. **This means the specific
+numeric claims in the "paper-comparison gap analysis" entry below (dated 2026-07-12) and in
+`report/EVALUATION.md`'s "§13" section were never verified against a real artifact.** Spot-checked four
+of them directly against the real DAD data just now:
+- **Protocol split (96.6% TCP / 3.4% UDP)** — re-parsed all 7 pcaps independently: **confirmed exact.**
+- **`explain_window` sensor 134, z≈4.28 on a modification-day attack window** — reproduced independently
+  (same magnitude, 4.28) with the new `reasoning.py`: **confirmed.**
+- **Granger causality "both same-InRow and cross-InRow pairs significant at every lag"** — reproduced
+  same-InRow (131→132, p=0.0 at every lag) but the cross-InRow pair (131→231) came back **not
+  significant at any of 4 lags tested (p=0.58, 0.49, 0.07, 0.16)** — the claim is **false** as stated.
+- **DTW "same-InRow far more alike than cross-InRow, ratio ~3× vs Euclidean's ~14×"** — reproduced the
+  opposite: the cross-InRow pair came back **more** alike (smaller distance) than the same-InRow pair
+  for both Euclidean and DTW — the claim's direction is **inverted**.
+- SARIMA MAPE/z-score claims and the distribution goodness-of-fit claims were not re-checked yet.
+Built `reasoning.py` (window explanation across the two channels), `clustering.py` (day-type K-means —
+an honest negative result on the real week: whole-day averages don't separate attack from clean days)
+and `forecasting.py` (SARIMA vs naive persistence — another honest negative result: MASE ≈ 1.4, does
+not beat persistence on this short 7-day history) as real `src/` modules with unit tests, wired into
+`interface.py` as the `explain`/`forecast`/`day-type` intents. **80 tests passing (was 65), ruff clean,
+coverage 92%.** Corrected `docs/PLAN.md`'s status note to remove the false notebook-§13.1 claim.
+**Not yet done: `report/EVALUATION.md` and `report/REPORT.md` still contain the unverified/false §13
+claims and need the same correction** — flagged to the user rather than silently rewritten, since this
+content may already have been referenced in the separately-written final report.
+Also fixed unrelated doc drift found during a full-repo verification pass: stale test counts in
+`v1/README.md`/`v1/GETTING_STARTED.md`/`CLAUDE.md` (193→197) and `v2/GETTING_STARTED.md` (79→111), a
+rounding inconsistency in `v1/report/REPORT.md` (37.0→37.04 °C), and a `ruff` failure in
+`v3/tests/test_deep.py` (unused `pytest` import).
+
 ## 2026-07-12
 
 ### v3: paper-comparison gap analysis (§13) — Granger causality, DTW, and three closed module gaps
