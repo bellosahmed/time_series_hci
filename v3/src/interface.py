@@ -11,8 +11,11 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from . import clustering as cl
+from . import features as ft
+from . import forecasting as fc
 from . import interface_parsing as ip
-from . import llm
+from . import llm, reasoning
 from . import query_engine as qe
 
 DAY_NAMES = {"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
@@ -108,6 +111,43 @@ class Interface:
             ips = qe.attacker_ips(self.df)
             return (f"The attack traffic comes from {', '.join(ips)}.", ips,
                     "In DAD all attacks originate from a single injected host.", None)
+
+        if intent == "explain":
+            sub = self.df[self.df["day"] == day] if day else self.df
+            labels = ft.window_labels(sub, "5min")
+            if int(labels["label"].sum()) == 0:
+                return (f"No labelled attack windows{where} to explain.", None, None,
+                        "Try a day with attacks (Wednesday, Thursday, Friday or Saturday).")
+            when = labels[labels["label"] == 1].index[0]
+            flow = ft.flow_features(sub, "5min").reindex(labels.index).fillna(0.0)
+            sensors = ft.sensor_series(sub, "5min", fill=True).reindex(labels.index)
+            text = reasoning.describe_window(sensors, flow, when)
+            return (text, str(when), None,
+                    "This explains one representative attack window, not every attack in scope.")
+
+        if intent == "forecast":
+            hourly = fc.hourly_temperature(self.df)
+            fcst = fc.forecast(hourly, steps=24)
+            row0 = fcst.iloc[0]
+            return (f"Forecast temperature for the next hour: {row0['mean']:.2f} °C "
+                    f"(80% interval {row0['lower']:.2f}–{row0['upper']:.2f} °C).",
+                    float(row0["mean"]),
+                    "SARIMA fit on the hourly-mean temperature series with a 24h seasonal term.",
+                    "A backtest on this short 7-day history shows the forecast does not beat naive "
+                    "persistence (MASE ≈ 1.4) — treat this as illustrative, not a strong prediction.")
+
+        if intent == "day-type":
+            feats = cl.daily_features(self.df)
+            labels_ = cl.kmeans_cluster(feats, k=2)
+            groups: dict[int, list[str]] = {}
+            for d, c in labels_.items():
+                groups.setdefault(int(c), []).append(DAY_NAMES[d])
+            listed = "; ".join(f"cluster {c}: {', '.join(days)}" for c, days in sorted(groups.items()))
+            return (f"K-means (k=2) on daily temperature/traffic features groups the days as — "
+                    f"{listed}.", {c: days for c, days in groups.items()}, None,
+                    "This groups by whole-day averages, which does not separate attack days from "
+                    "clean days — DAD's attacks last hours, not the whole day, so they barely "
+                    "move a day-level mean. An honest negative result, not a working day-type detector.")
 
         if intent == "count":
             n = qe.count_attacks(self.df, day=day, attack_type=atype)

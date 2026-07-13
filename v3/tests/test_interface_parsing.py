@@ -12,6 +12,10 @@ def test_detect_intent_routes_common_questions():
     assert ip.detect_intent("show all the sensors in the dataset") == "sensors"
     assert ip.detect_intent("show me the anomalies") == "anomalies"
     assert ip.detect_intent("what are the unusual readings?") == "anomalies"
+    assert ip.detect_intent("why was wednesday anomalous?") == "explain"
+    assert ip.detect_intent("explain the attack on thursday") == "explain"
+    assert ip.detect_intent("forecast the temperature for tomorrow") == "forecast"
+    assert ip.detect_intent("what is the day-type breakdown?") == "day-type"
     assert ip.detect_intent("tell me a joke") is None
 
 

@@ -11,11 +11,11 @@ with **real, labelled anomalies**.
 
 ## Status
 **Core pipeline built (M0–M5) + apps (M6 in progress).** Preprocess → features → detection+fusion →
-query engine → NL interface → LLM+faithfulness are implemented and tested: **65 tests · verify 12/12 ·
-ruff clean**. Design in **[`docs/PLAN.md`](docs/PLAN.md)** / **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**;
-the running results-and-reasoning log is **[`report/EVALUATION.md`](report/EVALUATION.md)** and the
-write-up draft is **[`report/REPORT.md`](report/REPORT.md)**. Remaining: notebooks and detector
-refinements.
+query engine → reasoning/clustering/forecasting → NL interface → LLM+faithfulness are implemented and
+tested: **80 tests · verify 12/12 · ruff clean · coverage 92%**. Design in
+**[`docs/PLAN.md`](docs/PLAN.md)** / **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**; the running
+results-and-reasoning log is **[`report/EVALUATION.md`](report/EVALUATION.md)** and the write-up draft
+is **[`report/REPORT.md`](report/REPORT.md)**. Remaining: notebooks and detector refinements.
 
 ## Run
 ```bash
@@ -23,7 +23,7 @@ python3.12 -m pip install -r requirements.txt       # one-time setup
 bash tools/get_dad_dataset.sh                       # fetch the real dataset (~18 MB, gitignored)
 python3.12 apps/chat.py "how many attacks on wednesday?"   # CLI (add --llm for Ollama phrasing)
 python3.12 apps/web/app.py                          # browser UI, prints http://localhost:3040
-bash reproduce.sh                                   # pytest (47) + verify_results (12/12) + ruff
+bash reproduce.sh                                   # pytest (80) + verify_results (12/12) + ruff
 ```
 **Notebooks** (Restart & Run All) — an in-depth set mirroring v1/v2, each explaining its part fully:
 - `notebooks/00_code_walkthrough.ipynb` — module-by-module tour of every `src/` module with runnable examples.

@@ -191,25 +191,33 @@ quite unlike the weather and trade domains, extending the guard to IP addresses.
   adopted only for simplicity). Remaining future work: real multi-week/multi-attacker captures, which no
   amount of further tuning on this fixed dataset can substitute for.
 - **The project's own architecture plan (`docs/PLAN.md`) was not fully carried out.** Checking the
-  actual `src/` directory against the plan's module table programmatically (standalone notebook §13.1):
-  7 of 17 planned modules were never built — `analysis`, `reasoning`, `rag_system`, `clustering`,
-  `forecasting`, `agent`, `main` (`anomaly.py` was deliberately superseded by `channels.py`+`fusion.py`,
-  a documented design change, not a gap). This had gone unflagged — README.md's status line narrows
-  scope without ever crossing these off the plan's table. §13 closes three of the seven as notebook-only
-  demonstrations: a SARIMA forecasting section (which recovers the paper's Friday/Saturday "mixed"
-  windows but misses the Wednesday modification window — the same point-fault-vs-aggregate story as
-  §5.4), a minimal `reasoning.py`-style `explain_window` function, and a day-type clustering attempt
-  (an honest negative — it fails to recover the attack/clean split). `rag_system.py` and `agent.py`
-  remain undone, for a stated reason: v3's question set is narrow enough that a full retrieval/agent
-  layer would mostly retrieve the same handful of facts already inlined in `interface.py`.
-- **Several of the paper's own descriptive analyses are not yet used by v3's detectors** (§13.2–13.3):
-  protocol type, TCP flags and packet size are parsed by `scapy` but never kept by `preprocess.py`; a
-  re-parse with these fields replicates the paper's protocol split (96.6% vs 96.9% TCP) but finds its
-  claimed TCP-flag "atypical closure" signal does not reproduce at the per-packet level (an honest
-  negative, most likely because the signal operates at flow/connection level, a coarser aggregation than
-  tested). Distribution goodness-of-fit testing (mirroring the paper's KS/Anderson-Darling analysis)
-  finds every sensor's best-fitting static distribution is still formally rejected — independently
-  re-deriving why the paper (and this project) use STL/ARIMA rather than a fixed distribution.
+  actual `src/` directory against the plan's module table programmatically: 7 of 17 planned modules were
+  never built — `analysis`, `reasoning`, `rag_system`, `clustering`, `forecasting`, `agent`, `main`
+  (`anomaly.py` was deliberately superseded by `channels.py`+`fusion.py`, a documented design change,
+  not a gap). This had gone unflagged — README.md's status line narrows scope without ever crossing
+  these off the plan's table. Three of the seven have since been built as real `src/` modules with unit
+  tests, wired into the NL interface — `reasoning.py` (window-level explanation, the `explain` intent),
+  `clustering.py` (day-type K-means, the `day-type` intent — an honest negative: it fails to recover the
+  attack/clean split), and `forecasting.py` (SARIMA, the `forecast` intent — the detailed anomaly-sweep
+  variant recovers the paper's Friday/Saturday "mixed" windows but misses the Wednesday modification
+  window, the same point-fault-vs-aggregate story as §5.4; the general-purpose module variant is a
+  second honest negative, not beating naive persistence on this short history). `rag_system.py` and
+  `agent.py` remain undone, for a stated reason: v3's question set is narrow enough that a full
+  retrieval/agent layer would mostly retrieve the same handful of facts already inlined in
+  `interface.py`. **Correction:** an earlier draft of this section, and of `report/EVALUATION.md`,
+  claimed this gap analysis and these three closures lived in a `standalone_full_pipeline.ipynb` §13 —
+  that section was never actually written into the notebook. The underlying analysis has since been
+  independently re-verified directly against the raw data instead (see `EVALUATION.md` and
+  `WORKLOG.md`, 2026-07-13); two of its original numeric claims (Granger causality, DTW sensor-pair
+  similarity) turned out to be wrong and have been corrected there.
+- **Several of the paper's own descriptive analyses are not yet used by v3's detectors.** Protocol type,
+  TCP flags and packet size are parsed by `scapy` but never kept by `preprocess.py`; a re-parse with
+  these fields replicates the paper's protocol split (96.6% vs 96.9% TCP) but finds its claimed
+  TCP-flag "atypical closure" signal does not reproduce at the per-packet level (an honest negative,
+  most likely because the signal operates at flow/connection level, a coarser aggregation than tested).
+  Distribution goodness-of-fit testing (mirroring the paper's KS/Anderson-Darling analysis) finds every
+  sensor's best-fitting static distribution is still formally rejected — independently re-deriving why
+  the paper (and this project) use STL/ARIMA rather than a fixed distribution.
 
 ## 8. Conclusion
 

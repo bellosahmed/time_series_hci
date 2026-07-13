@@ -86,3 +86,25 @@ def test_show_all_sensors_lists_them(week):
 def test_show_anomalies_summarises_attacks(week):
     a = interface.Interface(week).ask("show me the anomalies")
     assert a.intent == "anomalies" and "544" in a.computed and a.chart["kind"] == "bar"
+
+
+def test_explain_names_a_driver_on_an_attack_day(week):
+    a = interface.Interface(week).ask("why was wednesday anomalous?")
+    assert a.intent == "explain"
+    assert "channel" in a.computed
+
+
+def test_explain_reports_no_windows_on_a_clean_day(week):
+    a = interface.Interface(week).ask("explain what happened on monday")
+    assert a.intent == "explain" and "No labelled attack windows" in a.computed
+
+
+def test_forecast_returns_a_temperature_with_interval(week):
+    a = interface.Interface(week).ask("forecast the temperature for the next hour")
+    assert a.intent == "forecast" and "°C" in a.computed and isinstance(a.value, float)
+
+
+def test_day_type_groups_all_seven_days(week):
+    a = interface.Interface(week).ask("what is the day-type breakdown?")
+    assert a.intent == "day-type"
+    assert sum(len(days) for days in a.value.values()) == 7

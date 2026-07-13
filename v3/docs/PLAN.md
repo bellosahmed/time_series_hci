@@ -113,16 +113,21 @@ joins to the parsed packets by **`frame.number`**, giving each message its attac
 
 > **Status update (checked against the real `src/` directory, not against this table):** `anomaly.py`
 > was superseded by `channels.py`+`fusion.py` (the two-channel design that became the headline
-> experiment, §6) — a deliberate, documented change. But **`analysis.py`, `reasoning.py`,
-> `rag_system.py`, `clustering.py`, `forecasting.py`, `agent.py` and `main.py` were never built** —
-> README.md's status line narrows scope to "M0–M5 core + M6 apps" without ever crossing them off this
-> table, so it silently read as if they were still coming. `notebooks/standalone_full_pipeline.ipynb`
-> §13.1 confirms this gap programmatically (by listing the real directory) and closes three of the six
-> — a forecasting section (SARIMA, mirroring the paper's own ARIMA use), a minimal reasoning layer
-> (`explain_window`), and a day-type clustering attempt (an honest negative result) — as notebook-only
-> demonstrations, not as permanent `src/` modules. `rag_system.py` and `agent.py` remain undone,
-> honestly, for a stated reason: v3's question set is narrow enough that a full retrieval/agent layer
-> would mostly retrieve the same handful of facts already inlined in `interface.py`'s `ATTACK_KB`.
+> experiment, §6) — a deliberate, documented change. `analysis.py`, `rag_system.py` and `agent.py`
+> remain undone, honestly, for a stated reason: v3's question set is narrow enough that a full
+> retrieval/agent layer would mostly retrieve the same handful of facts already inlined in
+> `interface.py`'s `ATTACK_KB`. **Correction to an earlier version of this note:** it previously
+> claimed `notebooks/standalone_full_pipeline.ipynb` §13.1 closed three of the six gaps as
+> notebook-only demonstrations — that section was never actually written into the notebook on disk,
+> and the claim was wrong. `reasoning.py`, `clustering.py` and `forecasting.py` have since been built
+> as real `src/` modules (not notebook cells), each with unit tests and wired into `interface.py` as
+> the `explain`, `day-type` and `forecast` intents respectively. Both `clustering.py` (day-type
+> grouping) and `forecasting.py` (SARIMA vs naive persistence) were tested against the real DAD week
+> and are **honest negative results**, kept in the code as tested findings rather than tuned to look
+> better: whole-day temperature/traffic averages do not separate attack days from clean days (DAD's
+> attacks last hours, not the whole day), and the SARIMA backtest does not beat naive persistence
+> (MASE ≈ 1.4) on this short 7-day history. `main.py` (a unified entry point, for parity with v1/v2)
+> is the one item from the original six still genuinely missing.
 
 Much of v1's code (`llm.py`, `rag_system.py`, `evaluation.py` metrics, the trust-labelling, the
 query-engine/interface scaffolding, the deep `get_device`) **ports over**; the domain-specific work is

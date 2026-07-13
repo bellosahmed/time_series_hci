@@ -9,6 +9,10 @@ import re
 # Intents, checked in order so the specific ones win over the generic "attack"/"count".
 INTENTS = {
     "attacker":   ["attacker", "which ip", "who is attacking", "malicious ip", "source of the attack"],
+    "explain":    ["why", "explain", "what caused", "what happened", "reason for"],
+    "forecast":   ["forecast", "predict", "next hour", "next day", "future temperature"],
+    "day-type":   ["day-type", "day type", "kind of day", "kinds of day", "similar days",
+                   "group the days", "cluster the days"],
     "anomalies":  ["anomaly", "anomalies", "unusual", "abnormal", "suspicious", "outlier", "outliers"],
     "breakdown":  ["type of attack", "types of attack", "kind of attack", "kinds of attack",
                    "what type", "what kind", "breakdown", "categor"],

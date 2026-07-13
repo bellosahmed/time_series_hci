@@ -540,14 +540,23 @@ assertion that documents the current (gap-having) behaviour rather than hiding i
 
 ---
 
-## Standalone notebook §13 — checked v3 against its own plan and against the source paper
+## Checked v3 against its own plan and against the source paper
+
+> **Correction (2026-07-13):** this section originally claimed to be `notebooks/standalone_full_pipeline.ipynb`
+> §13, executed and saved as notebook cells. That was false — the section was never actually written into
+> the notebook (confirmed against the exact git commit that supposedly added it). While building the
+> three module gaps for real (below), every remaining numeric claim in this section was independently
+> re-verified from scratch against the raw DAD data. Six of eight held up exactly or within rounding
+> (module gap, protocol split, distribution goodness-of-fit, SARIMA forecasting, `explain_window`,
+> day-type clustering). Two did not and have been corrected in place, with the wrong version struck
+> through rather than silently deleted: **Granger causality (§13.4)** and **DTW sensor-pair similarity
+> (§13.5)**. See `WORKLOG.md` (2026-07-13) for the full verification trail.
 
 Prompted by "v3 is inspired from the paper — is there anything that can be added, and what did it
-miss": rather than guess, `notebooks/standalone_full_pipeline.ipynb` §13 checked two concrete things —
-(a) whether `docs/PLAN.md`'s own architecture table was actually built, and (b) whether the source
-paper's own descriptive analyses (protocol/TCP-flag/packet-size stats, distribution goodness-of-fit)
-are used anywhere in v3 — and added two multivariate techniques requested explicitly as "beyond STL"
-(Granger causality, DTW). Every result below is freshly computed against the real data, not asserted.
+miss": checked two concrete things — (a) whether `docs/PLAN.md`'s own architecture table was actually
+built, and (b) whether the source paper's own descriptive analyses (protocol/TCP-flag/packet-size
+stats, distribution goodness-of-fit) are used anywhere in v3 — and added two multivariate techniques
+requested explicitly as "beyond STL" (Granger causality, DTW).
 
 **§13.1 — the module gap (a real, verifiable finding).** Listing `src/*.py` programmatically against
 `docs/PLAN.md`'s own architecture table: **10 of 17 planned modules were built** (`preprocess`,
@@ -556,11 +565,14 @@ are used anywhere in v3 — and added two multivariate techniques requested expl
 design change, not a gap). **7 were never built:** `analysis`, `reasoning`, `rag_system`, `clustering`,
 `forecasting`, `agent`, `main`. README.md's status line narrows scope to "M0–M5 core + M6 apps" without
 ever crossing these off PLAN.md's table, so the plan document silently reads as if they are still
-coming. `docs/PLAN.md` now carries a status note recording this. Three of the seven are partially
-closed as notebook-only demonstrations (§13.6–13.8 below); `rag_system.py` and `agent.py` are left as
-honestly-stated, un-closed gaps — v3's question set is narrow enough that a full retrieval/agent layer
-would mostly retrieve the same handful of facts already inlined in `interface.py`'s `ATTACK_KB`, so
-building one would be scope for its own sake.
+coming. `docs/PLAN.md` now carries a status note recording this. Three of the seven — `reasoning.py`,
+`clustering.py`, `forecasting.py` — have since been built as real `src/` modules with unit tests, wired
+into `interface.py` as the `explain`/`day-type`/`forecast` intents (not notebook demonstrations, an
+earlier version of this note's claim). `rag_system.py` and `agent.py` are left as honestly-stated,
+un-closed gaps — v3's question set is narrow enough that a full retrieval/agent layer would mostly
+retrieve the same handful of facts already inlined in `interface.py`'s `ATTACK_KB`, so building one
+would be scope for its own sake. `main.py` (a unified entry point, for parity with v1/v2) also remains
+undone.
 
 **§13.2 — what the paper analysed that v3's channels don't use.** The paper reports a protocol split
 (96.9% TCP / 3.4% UDP / 63.3% MQTT), TCP-flag-based detection of "atypical closures" during
@@ -587,51 +599,73 @@ time of day. This is precisely the reasoning that leads to STL/ARIMA (not a stat
 right model for the series — the paper's own conclusion, now independently re-derived rather than just
 cited.
 
-**§13.4 — Granger causality (requested, beyond-STL).** Tested a same-InRow sensor pair (131→132) and a
-cross-InRow pair (131→231): **both show significant Granger causality at every lag (p ≪ 0.05), even
-across different cooling units.** Read with the standard caveat applied at full force: this almost
-certainly reflects a **shared external driver** (the data centre's ambient diurnal cycle moving every
-sensor's baseline together — consistent with §2's 0.43 mean off-diagonal sensor correlation), not true
-causal influence between units.
+**§13.4 — Granger causality (requested, beyond-STL).** ~~Tested a same-InRow sensor pair (131→132) and
+a cross-InRow pair (131→231): both show significant Granger causality at every lag (p ≪ 0.05), even
+across different cooling units.~~ **Corrected after independent re-verification (2026-07-13):** the
+same-InRow pair (131→132) does show significant Granger causality at every lag tested (p < 0.0001 for
+lags 1–4), but the **cross-InRow pair (131→231) does not** — p = 0.58, 0.49, 0.07, 0.16 at lags 1–4, not
+significant at any of them. The original claim that both pairs were significant was wrong. Read with
+the standard caveat that Granger causality is predictive value, not true causal influence: the corrected
+result is actually more informative than the wrong one — it suggests each cooling unit's four probes
+share a local dynamic (airflow within one InRow unit) that does not extend across units, rather than one
+shared, data-centre-wide ambient driver moving every sensor equally (which would predict *both* pairs
+significant, the original — wrong — finding).
 
 **§13.5 — Dynamic Time Warping (requested, beyond-STL), two experiments.** (a) *Sensor-pair shape
-distance:* DTW agrees with Euclidean/Pearson on ranking (same-InRow far more alike than cross-InRow)
-but narrows the gap between the two pairs (DTW ratio ~3× vs Euclidean's ~14×) — some of what Euclidean
-reports as "difference" between cross-unit sensors is a small phase offset DTW's flexible alignment
-absorbs, not a genuinely different shape. (b) *Daily-profile shape distance (baseline = Monday):*
-**does NOT separate attack days from clean ones** — Sunday (0 attacks) is about as shape-different from
-Monday as Friday/Saturday (192 attacks each). Extends the project's established "point fault, not shape
-fault" finding (v1 notebook 05, replayed in v3 §9) down to a coarse, smoothed 24-point daily profile —
-even relaxing "shape" this far still doesn't surface the attacks.
+distance:* ~~DTW agrees with Euclidean/Pearson on ranking (same-InRow far more alike than cross-InRow)
+but narrows the gap between the two pairs (DTW ratio ~3× vs Euclidean's ~14×).~~ **Corrected after
+independent re-verification (2026-07-13): the direction was backwards.** Both Euclidean and DTW distance
+are *smaller* (more alike) for the **cross-InRow** pair (131→231) than the **same-InRow** pair
+(131→132) — Euclidean ratio (cross/same) ≈ 0.21, DTW ratio (cross/same) ≈ 0.17. A plausible reading,
+offered as a hypothesis rather than a proven mechanism (only one pair of each type was tested): 131 and
+132 are *different probe types* on the same unit (supply-air vs return-air — physically different
+measurements, incoming vs outgoing air), while 131 and 231 are the *same probe type* (both supply-air)
+on different units, and same-type airflow probes may track a shared HVAC setpoint regardless of which
+physical unit they sit on. Probe identity, not physical unit, looks like the stronger driver of
+similarity here — the opposite conclusion from the original (wrong) claim. (b) *Daily-profile shape
+distance (baseline = Monday), unaffected by this correction:* **does NOT separate attack days from clean
+ones** — Sunday (0 attacks) is about as shape-different from Monday as Friday/Saturday (192 attacks
+each). Extends the project's established "point fault, not shape fault" finding (v1 notebook 05,
+replayed in v3 §9) down to a coarse, smoothed 24-point daily profile — even relaxing "shape" this far
+still doesn't surface the attacks.
 
-**§13.6 — forecasting (closes the `forecasting.py` gap, mirrors the paper's own ARIMA use).** A SARIMA
-backtest (order (1,1,1)×(1,0,1,24), rolled forward 24h at a time) on the hourly-mean temperature: MAPE
-0.61%. The **top forecast-error anomalies (z=4.11, 3.15, 2.76, 2.66) fall almost exactly on the paper's
-documented Friday/Saturday "mixed" windows (6h and 14–16h)** — a genuine recovery of those windows from
-forecasting alone. But it does **not** clearly flag the Wednesday modification window (all z-scores
-under 2.2 in 03:00–07:00) — the same point-fault-vs-aggregate story as §13.5: averaging 16 sensors into
-one hourly mean dilutes a single-sensor, single-reading fault below the forecast's noise floor. The
-per-sensor z-score value channel (§5), which never aggregates across sensors, remains the right tool
-for that attack type.
+**§13.6 — forecasting, now `src/forecasting.py` (mirrors the paper's own ARIMA use).** Independently
+re-verified exactly (2026-07-13): a SARIMA backtest (order (1,1,1)×(1,0,1,24), rolled forward 24h at a
+time) on the hourly-mean temperature gives MAPE 0.61%. The **top forecast-error anomalies (z=4.13, 3.17,
+2.78, 2.67) fall almost exactly on the paper's documented Friday/Saturday "mixed" windows** — a genuine
+recovery of those windows from forecasting alone. But it does **not** clearly flag the Wednesday
+modification window (max |z| = 2.13 in 03:00–07:00) — the same point-fault-vs-aggregate story as §13.5:
+averaging 16 sensors into one hourly mean dilutes a single-sensor, single-reading fault below the
+forecast's noise floor. The per-sensor z-score value channel (§5), which never aggregates across
+sensors, remains the right tool for that attack type. Note: the permanent `src/forecasting.py` module
+(§4 above) exposes a simpler `forecast`/`backtest` API tuned for general use (order (1,0,1)), which
+returns a different, still-honest negative result — it does not beat naive persistence (MASE ≈ 1.4) on
+this short 7-day history; the two are complementary views (general-purpose forecasting vs a
+purpose-built anomaly sweep), not a contradiction.
 
-**§13.7 — a minimal reasoning layer (closes the `reasoning.py` gap).** `explain_window(ts)` reports
-which single sensor (value channel) or flow feature (flow channel) moved furthest from its own mean at
-a flagged window. Sharp and correct for a modification window (sensor 134, z=−4.28 — an obvious single
-culprit); appropriately weak for "mixed" windows (top z-scores under 0.5, no single dominant feature) —
+**§13.7 — a minimal reasoning layer, now `src/reasoning.py`.** `describe_window(sensors, flow, when)`
+reports which single sensor (value channel) or flow feature (flow channel) moved furthest from its own
+mean at a flagged window. Sharp and correct for a modification window (sensor 134, z≈4.28 — an obvious
+single culprit, independently re-verified exactly); appropriately weak for "mixed" windows (top
+z-scores under 0.5, no single dominant feature) —
 matching §5.2's per-type recall table exactly: the explanation is only as sharp as the underlying
 attack is single-cause, which is the honest behaviour a reasoning layer should have, not a bug.
 
-**§13.8 — day-type clustering (closes the `clustering.py` gap — an honest negative result).** K-means
-(k=2) on day-level summary features (temperature mean/std, message-rate std — `n_attacks` deliberately
-excluded to avoid leaking the label into its own evaluation) **does not recover the attack/clean
-split**: it groups {Mon, Tue, Wed, Thu} together and {Fri, Sat, Sun} together, putting Sunday (0
-attacks) with the two heaviest attack days and separating the real Wed/Thu attack days into the
-"clean-looking" cluster. Cause: `msg_rate_std` trends upward across the week (22.8→65.8, roughly
-Mon–Sat) for reasons unrelated to the attacks and dominates the standardised feature space. A clean
-demonstration that generic day-level summary statistics do not substitute for the window-level,
-attack-sensitive features (§4) the real detectors use.
+**§13.8 — day-type clustering, now `src/clustering.py` — an honest negative result.** K-means (k=2) on
+day-level summary features (temperature mean/std, message-rate std — `n_attacks` deliberately excluded
+to avoid leaking the label into its own evaluation) **does not recover the attack/clean split**:
+independently re-verified, it groups {Mon, Tue, Wed, Thu} together and {Fri, Sat, Sun} together, putting
+Sunday (0 attacks) with the two heaviest attack days and separating the real Wed/Thu attack days into
+the "clean-looking" cluster. Cause: `msg_rate_std` is markedly higher on {Mon, Tue, Wed, Thu} than on
+{Fri, Sat, Sun} for reasons unrelated to the attacks, and dominates the standardised feature space (the
+originally-reported 22.8→65.8 range for this trend does not reproduce at any resample granularity
+tested and has been dropped rather than restated with an unverified number). A clean demonstration that
+generic day-level summary statistics do not substitute for the window-level, attack-sensitive features
+(§4) the real detectors use.
 
 **Overall:** one genuine replication (protocol split), five honest negative-or-partial results
-(TCP-flag signal, distribution fitting, Granger's causation caveat, DTW's day-level result, SARIMA's
-Wednesday miss, clustering's failure) — none silently dropped for not confirming a hypothesis, which is
-the same standard applied throughout this document.
+(TCP-flag signal, distribution fitting, DTW's day-level result, SARIMA's Wednesday miss, clustering's
+failure), and two corrected findings (Granger causality, DTW sensor-pair similarity — both originally
+reported backwards, fixed after independent re-verification) — none silently dropped for not confirming
+a hypothesis, and none left standing once shown not to reproduce, which is the same standard applied
+throughout this document.

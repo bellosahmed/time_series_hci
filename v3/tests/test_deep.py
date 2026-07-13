@@ -3,7 +3,6 @@ v3) and a per-sensor LSTM forecaster for the value channel (v1's `LSTMForecaster
 instead of a single target). Run: cd code/v3 && python3.12 -m pytest tests/"""
 import numpy as np
 import pandas as pd
-import pytest
 
 from src import deep
 
