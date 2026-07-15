@@ -64,6 +64,7 @@ class Answer:
     network: list = field(default_factory=list)  # multi-sensor portfolio (Mahalanobis+flat-line) windows
     detector: str | None = None  # which network detector produced the anomaly answer (transparency)
     resolved: str | None = None  # standalone rewrite of a follow-up (transparency), if any
+    understood: str | None = None  # trace of what the deterministic parser found (transparency)
 
 
 # Selectable **network-level** anomaly detectors (all read the whole in-scope sensor frame and return a
@@ -185,11 +186,39 @@ class Interface:
                 if start is None and end is None:           # no explicit period found
                     s2, e2 = _coerce_date(plan.get("start")), _coerce_date(plan.get("end"))
                     if s2 or e2:
-                        start, end = s2 or e2, e2 or s2
-                        label = plan.get("period") or f"{start} to {end}"
+                        # A one-sided bound (only start or only end) must stay open-ended --
+                        # collapsing both to the one supplied date would silently turn "from
+                        # June onward" into a single-day window instead of an open range.
+                        start, end = s2, e2
+                        label = plan.get("period") or (
+                            f"{start} to {end}" if start and end
+                            else f"from {start}" if start else f"up to {end}")
                 if thr is None and plan.get("op") in (">", "<") and plan.get("value") is not None:
                     thr = (plan["op"], float(plan["value"]))
         return intent, sensors, start, end, label, thr, day, hour
+
+    def _describe_understanding(self, question: str) -> str:
+        """A short, human-readable trace of what the deterministic parser found in `question` --
+        sensor(s), time scope, and hour -- surfaced for transparency on every answer, not just
+        follow-up rewrites. Deliberately uses only the pure parsing functions (never `_understand`,
+        which may call the LLM planner) so building this trace can never trigger a second LLM call
+        and always reflects the verifiable, non-LLM parse -- the part of the pipeline a user can
+        actually audit.
+        """
+        sensors = resolve_sensors(question, list(self.df.columns))
+        day = resolve_day(question)
+        start, end, label = resolve_any_period(question, self._anchor)
+        hour = resolve_hour(question)
+        bits = []
+        if sensors:
+            bits.append("sensor=" + ", ".join(sensors))
+        if day is not None:
+            bits.append(f"day={day[3]}")
+        elif label:
+            bits.append(f"scope={label}")
+        if hour[0] is not None:
+            bits.append(f"hour={hour[2]}")
+        return "; ".join(bits) if bits else "no specific sensor or time scope named (using defaults)"
 
     def _slice(self, start, end, label):
         """Return (data, where_label) for a date window; (None, label) if it has no rows."""
@@ -269,6 +298,7 @@ class Interface:
         ans.question = question                 # keep the user's own wording for display
         if resolved != question:
             ans.resolved = resolved             # transparency: what we understood it as
+        ans.understood = self._describe_understanding(resolved)
         try:
             ans.chart = self._chart_for(ans)
         except Exception as exc:
@@ -323,8 +353,8 @@ class Interface:
         if not len(s):
             return None
         marks = []
-        if ans.intent in ("max", "min") and hasattr(ans.value, "when"):
-            marks = [{"x": ans.value.when.isoformat(), "y": round(float(ans.value.value), 2),
+        if ans.intent in ("max", "min") and isinstance(ans.value, dict) and "when" in ans.value:
+            marks = [{"x": ans.value["when"].isoformat(), "y": round(float(ans.value["value"]), 2),
                       "kind": ans.intent}]
         elif ans.intent == "anomaly" and isinstance(ans.value, list):
             for w in ans.value[:80]:
@@ -420,6 +450,15 @@ class Interface:
         sensor = sensors[0] if sensors else "T (degC)"  # default to temperature
         ctx = self._context_for(sensor)
 
+        # A question that names a real sensor but no statistic keyword ("what was the temperature
+        # at 3pm?") used to fall through to the generic "I couldn't map that" fallback even though
+        # the sensor and scope resolved perfectly -- defaulting to "summary" (min/max/mean/std/
+        # missing) answers it honestly without guessing which single statistic was meant. Only
+        # applies once a sensor was actually named; a truly unroutable question still falls
+        # through to the fallback below.
+        if intent is None and sensors:
+            intent = "summary"
+
         # Day-type classification ("what kind of day was 5 Jan 2014?"): surface the K-means
         # clustering through the interface (it was previously reachable only via main.py).
         if intent == "daytype":
@@ -432,7 +471,7 @@ class Interface:
                 if key not in labels.index:
                     return Answer(question, "daytype",
                                   f"I have no daily data for {day_label} to classify.", None, [])
-                cl = int(labels.loc[key])
+                cl = clustering.cluster_membership(labels, key)
                 return self._reply(question, "daytype", {"cluster": cl, "label": names[cl]},
                                    ["T (degC)"],
                                    computed=(f"{day_label} was a '{names[cl]}' day (K-means day-type "
@@ -595,12 +634,12 @@ class Interface:
         if intent == "max":
             r = qe.get_max(data, sensor)
             return self._reply(question, intent, r, [sensor],
-                               computed=f"max {sensor}{where} was {r.value:.2f} on {qe.fmt_when(r.when)}.", context=ctx)
+                               computed=f"max {sensor}{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}.", context=ctx)
 
         if intent == "min":
             r = qe.get_min(data, sensor)
             return self._reply(question, intent, r, [sensor],
-                               computed=f"min {sensor}{where} was {r.value:.2f} on {qe.fmt_when(r.when)}.", context=ctx)
+                               computed=f"min {sensor}{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}.", context=ctx)
 
         if intent in ("mean", "spread"):
             r = qe.get_mean_std(data, sensor)

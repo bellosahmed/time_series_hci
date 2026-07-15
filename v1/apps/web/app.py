@@ -106,6 +106,7 @@ def create_app(df: pd.DataFrame | None = None) -> Flask:
                 "inferred": ans.inferred,
                 "chart": ans.chart,
                 "resolved": ans.resolved,
+                "understood": ans.understood,
                 "detector": ans.detector,
                 "used_llm": use_llm and llm.is_available(),
             })

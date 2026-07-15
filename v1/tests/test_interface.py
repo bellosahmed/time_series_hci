@@ -27,6 +27,62 @@ def year_df():
     )
 
 
+# All 14 dataset columns except `wd (deg)`, a circular (compass-bearing) sensor whose "mean" is
+# deliberately routed through circular statistics, not a plain average -- already covered by
+# test_wd_mean_is_circular_not_linear below. This list is for linear-mean cross-sensor checks.
+LINEAR_SENSOR_COLUMNS = [
+    "p (mbar)", "T (degC)", "Tpot (K)", "Tdew (degC)", "rh (%)", "VPmax (mbar)",
+    "VPact (mbar)", "VPdef (mbar)", "sh (g/kg)", "H2OC (mmol/mol)", "rho (g/m**3)",
+    "wv (m/s)", "max. wv (m/s)",
+]
+
+
+@pytest.fixture
+def multi_sensor_df():
+    """All 13 linear sensors, each a distinct, well-separated series (loc spaced 100 apart) so
+    any cross-sensor mixup shows up as an obviously wrong mean, not a rounding-level coincidence.
+    """
+    idx = pd.date_range("2016-01-01 00:00", "2017-01-01 00:00", freq="h")
+    rng = np.random.default_rng(2)
+    data = {col: rng.normal(loc=100 * (i + 1), scale=1, size=len(idx))
+            for i, col in enumerate(LINEAR_SENSOR_COLUMNS)}
+    return pd.DataFrame(data, index=idx)
+
+
+# "max. wv (m/s)" (wind gust) literally contains the word "max", which trips the "max" intent
+# keyword ahead of "mean" if the raw column name is used in a question -- a real user would say
+# "wind gust", the natural alias, which has no such collision. Use that phrasing here instead of
+# the raw column name so the test reflects realistic usage rather than a self-inflicted collision.
+def _mention(sensor: str) -> str:
+    return "wind gust" if sensor == "max. wv (m/s)" else sensor
+
+
+@pytest.mark.parametrize("sensor", LINEAR_SENSOR_COLUMNS)
+def test_each_sensor_answer_matches_its_own_column_independently(multi_sensor_df, sensor):
+    iface = interface.Interface(multi_sensor_df)
+    ans = iface.ask(f"what was the mean {_mention(sensor)} last month?")
+    expected = multi_sensor_df.loc["2016-12-01":"2016-12-31", sensor].mean()
+    assert ans.value["mean"] == pytest.approx(expected)
+
+
+def test_no_cross_sensor_bleed_when_every_sensor_is_asked_in_sequence(multi_sensor_df):
+    # Ask about every sensor in turn on the SAME Interface (shared conversation history) -- that's
+    # the realistic risk for cross-contamination, not a fresh instance per sensor.
+    iface = interface.Interface(multi_sensor_df)
+    seen = {}
+    for sensor in LINEAR_SENSOR_COLUMNS:
+        ans = iface.ask(f"what was the mean {_mention(sensor)} last month?")
+        seen[sensor] = ans.value["mean"]
+    for sensor in LINEAR_SENSOR_COLUMNS:
+        expected = multi_sensor_df.loc["2016-12-01":"2016-12-31", sensor].mean()
+        assert seen[sensor] == pytest.approx(expected), \
+            f"{sensor}'s answer does not match its own independent computation -- possible bleed"
+    # each sensor's mean is well-separated (loc spacing of 100) -- a real mixup would land ~100x
+    # away from its neighbour, never a rounding-level discrepancy
+    values = sorted(seen.values())
+    assert all(values[i + 1] - values[i] > 50 for i in range(len(values) - 1))
+
+
 def test_interface_anchors_last_month_to_dataset_end(year_df):
     iface = interface.Interface(year_df)
     assert iface._anchor == year_df.index.max()
@@ -89,7 +145,7 @@ def test_followup_is_rewritten_and_routed(df, monkeypatch):
     iface.history = [{"question": "average temperature", "computed": "mean ..."}]
     ans = iface.ask("and the peak?")
     assert ans.intent == "max"                       # routed via the rewritten question
-    assert ans.value.value == df["T (degC)"].max()   # exact number still from the query engine
+    assert ans.value["value"] == df["T (degC)"].max()   # exact number still from the query engine
     assert ans.question == "and the peak?"           # original wording preserved for display
     assert ans.resolved == "what was the max temperature?"
 
@@ -122,6 +178,36 @@ def test_unroutable_rewrite_is_rejected(df, monkeypatch):
     iface.history = [{"question": "max temperature", "computed": "max ..."}]
     ans = iface.ask("and?")
     assert ans.resolved is None   # gibberish rewrite rejected; original kept, not silently applied
+
+
+def test_ask_exposes_an_understanding_trace_for_transparency(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean temperature last month at 3pm?")
+    assert ans.understood is not None
+    assert "T (degC)" in ans.understood
+    assert "December 2016" in ans.understood
+    assert "3pm" in ans.understood
+
+
+def test_understanding_trace_reflects_only_the_deterministic_parse_not_llm(year_df, monkeypatch):
+    # The trace must never trigger a second LLM call -- it's built from the pure parsing
+    # functions only, independent of whatever _understand's (possibly LLM-backed) plan step did.
+    from src import llm
+    calls = {"n": 0}
+
+    def fake_plan(*a, **k):
+        calls["n"] += 1
+        return None
+    monkeypatch.setattr(llm, "plan", fake_plan)
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    iface = interface.Interface(year_df, use_llm=True)
+    iface.ask("what was the mean temperature last month?")
+    assert calls["n"] == 1  # only _understand's own plan() call, not a second one for the trace
+
+
+def test_understanding_trace_says_something_when_nothing_was_named(year_df):
+    ans = interface.Interface(year_df).ask("blah blah nonsense")
+    assert ans.understood is not None
 
 
 def test_history_accumulates_across_turns(df):
@@ -194,7 +280,7 @@ def test_followup_resolved_without_llm(monkeypatch):
     ans = iface.ask("what about 2014?")
     assert ans.intent == "max"                       # intent carried across the turn, no LLM
     assert ans.resolved and "2014" in ans.resolved   # scope swapped to the new year
-    assert ans.value.value == two_year[two_year.index.year == 2014]["T (degC)"].max()
+    assert ans.value["value"] == two_year[two_year.index.year == 2014]["T (degC)"].max()
 
 
 def test_is_followup_cue_detects_continuations():
@@ -219,7 +305,7 @@ def test_followup_carries_scope_across_intent_swap_without_llm(monkeypatch):
     ans = iface.ask("and the coldest?")                  # cue, no new period -> inherit 2015
     assert ans.intent == "min"
     assert ans.resolved and "2015" in ans.resolved
-    assert ans.value.value == df3[df3.index.year == 2015]["T (degC)"].min()   # 2015, not whole record
+    assert ans.value["value"] == df3[df3.index.year == 2015]["T (degC)"].min()   # 2015, not whole record
 
 
 def test_fresh_noncue_question_ignores_prior_scope_without_llm(monkeypatch):
@@ -230,7 +316,7 @@ def test_fresh_noncue_question_ignores_prior_scope_without_llm(monkeypatch):
     iface = interface.Interface(df3, use_llm=False)
     iface.ask("what was the hottest in 2015?")
     ans = iface.ask("what was the coldest?")             # no cue -> whole record
-    assert ans.value.value == df3["T (degC)"].min()
+    assert ans.value["value"] == df3["T (degC)"].min()
 
 
 def test_resolve_legend_query_maps_markers():
@@ -303,10 +389,32 @@ def test_resolve_sensors(df):
     assert "rh (%)" in interface.resolve_sensors("humidity vs temperature", cols)
 
 
+def test_bare_sensor_question_defaults_to_summary_not_fallback(df):
+    # No intent keyword at all ("mean"/"max"/etc.) -- previously fell through to the generic
+    # "I couldn't map that" message even though the sensor+scope resolved perfectly.
+    ans = interface.Interface(df).ask("what was the temperature at 3pm on 1 january 2024?")
+    assert "couldn't map" not in ans.text
+    assert ans.intent == "summary"
+    assert ans.sensors == ["T (degC)"]
+
+
+def test_bare_sensor_question_with_no_scope_also_gets_a_real_answer(df):
+    ans = interface.Interface(df).ask("the humidity")  # no intent keyword, no time scope either
+    assert "couldn't map" not in ans.text
+    assert ans.intent == "summary"
+
+
+def test_question_with_neither_intent_nor_sensor_still_gets_the_fallback(df):
+    # The fallback must still fire when there's truly nothing to work with -- the new default
+    # only kicks in once a sensor was actually named, not for every unroutable question.
+    ans = interface.Interface(df).ask("blah blah nonsense")
+    assert "couldn't map" in ans.text
+
+
 def test_ask_max_matches_engine(df):
     ans = interface.Interface(df).ask("what was the max temperature?")
     assert ans.intent == "max"
-    assert ans.value.value == df["T (degC)"].max()
+    assert ans.value["value"] == df["T (degC)"].max()
     assert "Computed" in ans.text
 
 
@@ -335,6 +443,26 @@ def test_chart_renders_borderline_marks(df):
     ans.borderline = [{"start": ts, "end": ts, "n_points": 1}]
     chart = iface._chart_for(ans)
     assert "borderline" in {m["kind"] for m in chart["marks"]}
+
+
+def test_llm_plan_one_sided_date_stays_an_open_range(year_df, monkeypatch):
+    # If the LLM plan supplies only ONE of start/end (e.g. "from June onward"), the range must
+    # stay open-ended -- not collapse into a single-day window (both start and end pinned to the
+    # one supplied date), which is what happened before this fix.
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: {
+        "intent": None, "sensors": [], "start": "2016-06-01", "end": None,
+        "period": None, "op": None, "value": None,
+    })
+    iface = interface.Interface(year_df, use_llm=True)
+    ans = iface.ask("what was the mean temperature these days?")
+    expected = year_df.loc["2016-06-01":].mean()["T (degC)"]
+    assert ans.value["mean"] == pytest.approx(expected)
+    # a single collapsed day would have a much smaller (and different) mean than the whole
+    # June-to-year-end window -- assert it's NOT equal to just the first day's mean either
+    single_day_mean = year_df.loc["2016-06-01":"2016-06-01"].mean()["T (degC)"]
+    assert ans.value["mean"] != pytest.approx(single_day_mean)
 
 
 def test_llm_error_falls_back_to_template_and_logs(df, monkeypatch, caplog):
@@ -475,8 +603,8 @@ def test_ask_scopes_to_year():
     df = pd.DataFrame({"T (degC)": np.arange(400, dtype=float)}, index=idx)
     ans = interface.Interface(df).ask("what was the hottest temperature in 2013?")
     assert ans.intent == "max"
-    assert ans.value.value == df.loc["2013", "T (degC)"].max()   # the 2013 max, not global
-    assert ans.value.value < df["T (degC)"].max()               # proves it didn't use the whole record
+    assert ans.value["value"] == df.loc["2013", "T (degC)"].max()   # the 2013 max, not global
+    assert ans.value["value"] < df["T (degC)"].max()               # proves it didn't use the whole record
     assert "2013" in ans.text
 
 
@@ -641,6 +769,22 @@ JENA_COLUMNS = [
     "VPact (mbar)", "VPdef (mbar)", "sh (g/kg)", "H2OC (mmol/mol)", "rho (g/m**3)",
     "wv (m/s)", "max. wv (m/s)", "wd (deg)",
 ]
+
+
+def test_informal_synonyms_from_the_rag_description_text_are_also_wired_as_aliases():
+    # These words already appear in rag_system's own sensor descriptions ("how muggy, sticky,
+    # damp..."), but weren't wired into SENSOR_ALIASES -- found by the query-coverage benchmark
+    # (src/query_coverage.py), which showed a real routing miss for each of these questions.
+    cols = JENA_COLUMNS
+    assert interface.resolve_sensors("how muggy does it get", cols) == ["rh (%)"]
+    assert interface.resolve_sensors("how breezy is it", cols) == ["wv (m/s)"]
+    assert interface.resolve_sensors("how heavy is the air", cols) == ["rho (g/m**3)"]
+
+
+def test_going_forward_is_a_forecast_synonym():
+    # Also found by the coverage benchmark: "next week"/"future"/"outlook" were already forecast
+    # keywords, but the equally common "going forward" wasn't.
+    assert interface.detect_intent("what will the humidity be going forward?") == "forecast"
 
 
 def test_all_14_sensors_have_plain_english_aliases():

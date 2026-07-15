@@ -138,6 +138,7 @@ function BotMessage({ data }) {
     <div class="msg bot"><div class="bubble">
       <div class=${answerCls}>${answer}</div>
       ${data.resolved && html`<div class="tag">↳ understood as: “${data.resolved}”</div>`}
+      ${data.understood && html`<div class="tag">🧭 parsed: ${data.understood}</div>`}
       ${facts.length > 0 && html`
         <div class="details">
           ${facts.map(([cls, ico, lab, val]) => html`

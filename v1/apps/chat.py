@@ -69,7 +69,11 @@ def main() -> None:
     ag = agent.Agent(df, use_llm=use_llm, model=model) if args.agent else None
 
     def answer(q: str) -> str:
-        return ag.run(q).text if ag else iface.ask(q).text
+        if ag:
+            return ag.run(q).text
+        ans = iface.ask(q)
+        trace = f"\n🧭 Understood: {ans.understood}" if ans.understood else ""
+        return ans.text + trace
 
     if args.question:
         print("\n" + answer(" ".join(args.question)))
