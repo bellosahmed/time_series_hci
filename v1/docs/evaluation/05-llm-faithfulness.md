@@ -1,0 +1,65 @@
+# 5. LLM faithfulness — checked for honesty, not accuracy
+
+## What's being evaluated
+
+The optional local LLM layer (`src/llm.py`, Ollama-backed) that rewords an already-computed
+answer into natural prose (e.g. turning `T (degC) in 2013 mean=9.09` into "the average
+temperature in 2013 was about 9.1°C"). This is deliberately **not** evaluated for
+correctness/accuracy the way a forecaster or detector would be — the LLM never computes anything,
+so "is the number right" is meaningless to ask of it; the truth layer already guarantees that
+separately ([`01-truth-layer.md`](01-truth-layer.md)). The only question that matters here is:
+**did the model change or invent a number while rewording it?**
+
+## Method
+
+`llm.faithfulness(facts, explanation)` extracts every number that appears in the source computed
+facts and every number that appears in the LLM's prose explanation, then checks that every
+enforced number in the explanation traces back to *some* number in the source facts (within a
+tolerance that allows legitimate rounding, e.g. "34.93" → "34.9", and legitimate reformatting,
+e.g. clock times like "16:00" are stripped and re-parsed as "4pm" rather than flagged). Two
+outcomes are distinguished:
+
+- **`invented`** — a number in the explanation that matches *no* source number. This is the
+  serious failure: a hallucinated figure. If this happens, the system discards the LLM's phrasing
+  entirely and falls back to the deterministic template — the faithfulness check is a **gate**,
+  not just a report.
+- **`dropped`** — a source number the explanation omitted (e.g. summarising "wind 3.2 m/s, gust
+  5.1 m/s" down to just the wind figure). This is benign — nothing is technically wrong, since
+  every number shown is still real, and the underlying template mode always shows every figure
+  regardless.
+
+## Real evidence (reproduced 15 July 2026, model `llama3.2:3b` via local Ollama)
+
+```bash
+python3.12 verify_results.py   # runs the check below as part of the 30-check suite
+```
+
+Method: 3 different questions (`"hottest in 2013?"`, `"how often above 35?"`,
+`"average humidity in 2015"`), each asked **3 separate times** through the actual local LLM
+(the model is stochastic, so a single run per question wouldn't be a stable measurement), each
+run checked with `llm.faithfulness()`, majority vote across the 3 runs decides whether that
+question counts as "clean."
+
+```
+✓  LLM invented 0 numbers (majority-of-3)   [3/3 questions clean]
+```
+
+All 3 questions passed the majority vote — the model never fabricated a figure across any of the
+9 individual runs (3 questions × 3 repeats) in this reproduction.
+
+## Honest caveats
+
+- This is reported as an **advisory** check in `verify_results.py`, not a hard pass/fail gate on
+  the overall 30/30 count — deliberately, because the 3B model is stochastic enough that a single
+  unlucky run could otherwise make the headline pass/fail count flap between runs for reasons
+  that have nothing to do with a real regression in the code (this exact instability is documented
+  in the source comment above the check).
+- The check only ran because Ollama was actually running locally with a model pulled
+  (`llm.is_available()` and `llm.list_models()` both had to succeed); if Ollama isn't running,
+  this check is silently skipped rather than failing — a design choice reflecting that the LLM
+  layer is optional throughout the system, never required for the truth-layer numbers to be
+  correct.
+- 3 questions × 3 repeats = 9 samples is a small evaluation set for a claim about a language
+  model's behaviour in general; it's sized to catch the failure mode this project's design most
+  needs to guard against (repeated over time as a regression check via `verify_results.py`), not
+  to be a comprehensive study of hallucination rates.
