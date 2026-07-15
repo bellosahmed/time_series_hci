@@ -430,6 +430,76 @@ def resolve_ordinal_unit_in_year(question: str):
     return None, None, ""
 
 
+def resolve_any_period(question: str, anchor_ts=None):
+    """Best-available period across ordinal, explicit, and relative forms, in that priority order.
+
+    Tries `resolve_ordinal_unit_in_year` first (a relative/ordinal qualifier + explicit year), since
+    `resolve_period` would otherwise swallow a bare year into a whole-year default and miss the
+    qualifier. Falls back to `resolve_period` (explicit year/month/season/range), then -- only if
+    `anchor_ts` is given -- `resolve_relative_period` (bare relative phrase, dataset-anchored).
+    """
+    start, end, label = resolve_ordinal_unit_in_year(question)
+    if start or end:
+        return start, end, label
+    start, end, label = resolve_period(question)
+    if start or end:
+        return start, end, label
+    if anchor_ts is not None:
+        return resolve_relative_period(question, anchor_ts)
+    return None, None, ""
+
+
+_HOUR_WORDS = {"noon": 12, "midday": 12, "midnight": 0}
+_HOUR_BUCKETS = {"morning": (6, 12), "afternoon": (12, 18), "evening": (18, 21), "night": (21, 6)}
+
+
+def resolve_hour(question: str):
+    """Detect an hour-of-day sub-filter -> (start_hour, end_hour, label), else (None, None, "").
+
+    A half-open [start_hour, end_hour) range of 24h-clock hours; `end_hour < start_hour` marks a
+    bucket that wraps past midnight ("night" = 21-06). Independent of whatever day/period/relative
+    scope is also named in the question -- this only narrows by clock hour; the caller applies it as
+    an extra mask via `hour_mask`.
+    """
+    q = question.lower()
+
+    for word, h in _HOUR_WORDS.items():
+        if re.search(rf"\b{word}\b", q):
+            return h, h + 1, word
+
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", q)
+    if m:
+        h = int(m.group(1)) % 12
+        if m.group(3) == "pm":
+            h += 12
+        return h, h + 1, m.group(0)
+
+    m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", q)
+    if m:
+        h = int(m.group(1))
+        return h, h + 1, m.group(0)
+
+    m = re.search(r"\b(\d{1,2})\s*o'?clock\b", q)
+    if m:
+        h = int(m.group(1))
+        if 0 <= h <= 23:
+            return h, h + 1, m.group(0)
+
+    for word, rng in _HOUR_BUCKETS.items():
+        if re.search(rf"\b{word}\b", q):
+            return rng[0], rng[1], word
+
+    return None, None, ""
+
+
+def hour_mask(idx: pd.DatetimeIndex, start_hour: int, end_hour: int):
+    """Boolean mask selecting rows whose clock hour falls in [start_hour, end_hour) -- wraps past
+    midnight when `end_hour < start_hour` (e.g. "night" = 21-06)."""
+    if start_hour < end_hour:
+        return (idx.hour >= start_hour) & (idx.hour < end_hour)
+    return (idx.hour >= start_hour) | (idx.hour < end_hour)
+
+
 _COMPARE_WORDS = ["compare", "comparison", "versus", "vs", "difference", "hotter", "warmer",
                   "colder", "cooler", "higher", "lower", "than"]
 
