@@ -130,10 +130,12 @@ check("point-adjusted recall >= strict recall", padj.recall >= strict.recall,
 c = evaluation.confusion(pred, labels)
 check("confusion sums to N", sum(c.values()) == len(labels), str(c))
 
-# 13. forecast backtest is useful (MASE < 1.5; < 1 means it beats persistence)
-bt = forecasting.backtest(df[S], horizon=14, folds=3)
+# 13. forecast backtest is useful (MASE < 1.5; < 1 means it beats persistence). 20 folds (not 3) so
+# a confidence interval across folds is meaningful, not just a pooled point estimate.
+bt = forecasting.backtest(df[S], horizon=14, folds=20)
 check("forecast backtest MASE finite & < 1.5", np.isfinite(bt["mase"]) and bt["mase"] < 1.5,
-      f"MASE={bt['mase']:.2f}")
+      f"MASE={bt['mase']:.2f} (per-fold mean={bt['mase_mean']:.2f}, "
+      f"95%CI=[{bt['mase_ci_low']:.2f},{bt['mase_ci_high']:.2f}], n_folds={bt['folds']})")
 
 # 14. multi-seed anomaly benchmark recall is solid
 det = lambda noisy: anomaly.zscore_anomalies(
@@ -193,6 +195,14 @@ check("query-routing coverage: intent/sensor/scope all correct on >= 95% of labe
       f"overall={cov['overall_pct']:.1f}% intent={cov['intent_pct']:.1f}% "
       f"sensors={cov['sensors_pct']:.1f}% scope={cov['scope_pct']:.1f}% (n={cov['n']})")
 
+# 18b. HELD-OUT generalisation check: a separate, freshly-authored batch of questions the fixes
+# above were never tuned on -- proves the fixes generalise, not just that the specific 4 gaps
+# found in GROUND_TRUTH were closed. See query_coverage.HELD_OUT_GROUND_TRUTH.
+cov_ho = query_coverage.score_coverage(interface.Interface(df), query_coverage.HELD_OUT_GROUND_TRUTH)
+check("query-routing coverage generalises to a held-out question set (>= 90%)",
+      cov_ho["overall_pct"] >= 90.0,
+      f"overall={cov_ho['overall_pct']:.1f}% (n={cov_ho['n']})")
+
 # 17. LLM faithfulness — ADVISORY + majority-of-3. The 3B model is stochastic, so we vote
 # over 3 runs per question and REPORT the result without letting it flip the headline count
 # (previously this check made the total flap between 19/20 and 20/20 run to run).
@@ -209,6 +219,28 @@ if llm.is_available() and llm.list_models():
         )
         clean += votes >= 2  # majority of 3 runs invented no numbers
     advise("LLM invented 0 numbers (majority-of-3)", clean == 3, f"{clean}/3 questions clean")
+
+    # 17b. Faithfulness ABLATION — the gate's value is asserted above ("0 invented"); this
+    # measures what the RAW (ungated) rate would have been, so that claim is actually comparable
+    # to something, not just a bare number. See docs/evaluation/05-llm-faithfulness.md.
+    abl = llm.faithfulness_ablation(
+        interface.Interface(df, use_llm=True, model=model),
+        ["hottest in 2013?", "how often above 35?", "average humidity in 2015",
+         "was 2013 warmer than 2014?", "any anomalies in 2013?"],
+        model=model, n_repeats=3)
+    advise("faithfulness ablation: raw (ungated) vs gated invention rate", True,
+           f"raw={abl['raw_invention_rate']:.0%} gated={abl['gated_invention_rate']:.0%} "
+           f"(n={abl['n_total_runs']})")
+
+    # 18c. Independent-LLM-judge cross-check for query-routing coverage — a partial, automatable
+    # substitute for a second human rater (see docs/evaluation/06-query-routing-coverage.md, §3).
+    judge = query_coverage.score_against_llm_judge(
+        query_coverage.GROUND_TRUTH + query_coverage.HELD_OUT_GROUND_TRUTH, model=model)
+    if judge["available"]:
+        advise("query-routing ground truth vs. an independent LLM judge (informational, not "
+               "a pass/fail claim)", True,
+               f"intent={judge['intent_agreement_pct']:.1f}% sensors={judge['sensors_agreement_pct']:.1f}% "
+               f"scope={judge['scope_agreement_pct']:.1f}% (n={judge['n_judged']})")
 else:
     print("  (skipped LLM faithfulness advisory — Ollama not available)")
 

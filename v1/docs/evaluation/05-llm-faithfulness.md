@@ -47,6 +47,54 @@ question counts as "clean."
 All 3 questions passed the majority vote — the model never fabricated a figure across any of the
 9 individual runs (3 questions × 3 repeats) in this reproduction.
 
+## Ablation: what would the invention rate be *without* the gate?
+
+Reporting "0 invented numbers" for the gated system alone doesn't demonstrate the gate is doing
+anything — a model that already never hallucinates on this prompt would show the same "0"
+trivially. `llm.faithfulness_ablation()` measures both sides of the same comparison: for each
+question, the *raw* (ungated) LLM phrasing is checked directly against the facts, separately from
+what a user actually sees *after* `Interface`'s gate has had a chance to discard an invented reply
+and fall back to the template.
+
+```bash
+python3.12 -c "
+from src import preprocess, interface, llm
+df = preprocess.align(preprocess.clean(preprocess.load_data('data/jena_climate_2009_2016.csv')), freq='1h')
+model = 'llama3.2:3b'
+iface = interface.Interface(df, use_llm=True, model=model)
+questions = ['hottest in 2013?', 'how often above 35?', 'average humidity in 2015',
+             'was 2013 warmer than 2014?', 'any anomalies in 2013?']
+print(llm.faithfulness_ablation(iface, questions, model=model, n_repeats=3))
+"
+```
+
+```
+raw_invention_rate = 0.0, gated_invention_rate = 0.0, n_total_runs = 15
+```
+
+**Honest reading of this result**: on `llama3.2:3b` with this project's system prompt, the *raw,
+ungated* output never invented a number across 15 sampled runs (5 questions × 3 repeats) either.
+This means the gate's measured marginal contribution *on this sample* is not distinguishable from
+zero — the strict system prompt is already doing the work. This is not the same claim as "the gate
+demonstrably rescues bad output" — it's the more honest one: on the evidence collected so far, we
+have not observed a case the gate needed to catch. The gate is still worth keeping (it is cheap,
+and is the only thing standing between a future model/prompt regression and a hallucinated number
+reaching a user), but its value here is a documented hypothesis, not a demonstrated rescue.
+
+**An exploratory attempt to find a harder counter-example, reported transparently even though it
+was inconclusive**: the same ablation was run against a smaller, differently-tuned community model
+available locally (a 1B-parameter Gemma fine-tune) to see whether a less-aligned model would show a
+non-trivial raw invention rate. Three of four attempts on the identical 5-question set returned
+clean (0.0/0.0); one attempt returned `gated_invention_rate = 0.6` — which, if real, would be a
+contradiction (the gate cannot make the shown-to-user rate *higher* than the raw rate before it).
+Direct reproduction of that specific question in isolation, and two subsequent full 5-question
+reruns, both came back clean, so this was not a reproducible finding and is not presented as one —
+most likely transient inference-time instability specific to that experimental model/quantization,
+not a measurement bug (confirmed by manually replaying the exact call sequence that produced the
+anomaly and getting a clean result). Reported here rather than silently discarded, since a
+methodology section that only shows the clean result would be less honest than one that shows an
+attempt that didn't pan out.
+
 ## Honest caveats
 
 - This is reported as an **advisory** check in `verify_results.py`, not a hard pass/fail gate on

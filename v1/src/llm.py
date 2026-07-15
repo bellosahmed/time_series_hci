@@ -334,6 +334,61 @@ def explain(question: str, computed: str, context: str | None = None,
     return generate(prompt, model=model)
 
 
+def faithfulness_ablation(iface_llm, questions: list[str], model: str = DEFAULT_MODEL,
+                          n_repeats: int = 3) -> dict:
+    """Ablation: how often does the RAW (ungated) LLM phrasing invent a number, vs. the rate a
+    user actually sees after `Interface`'s faithfulness gate discards invented output and falls
+    back to the template?
+
+    Reporting "0 invented numbers" for the *gated* system alone doesn't demonstrate the gate is
+    doing anything -- a model that already never hallucinates on this prompt would show the same
+    "0" trivially. This measures both sides of the same comparison: for each question, the
+    deterministic facts (computed/context/inferred -- identical regardless of LLM use) are read
+    once from `iface_llm`, then `explain()` is called directly `n_repeats` times to measure the
+    model's *raw*, ungated behaviour, and `iface_llm.ask()` is called `n_repeats` times (history
+    reset before each call, so every repeat is judged standalone) to measure what a user actually
+    sees *after* gating. Both are checked with `faithfulness()` against the same facts.
+
+    `iface_llm` must be an `Interface` constructed with `use_llm=True`. Returns
+    ``{"available": False}`` if Ollama isn't reachable.
+    """
+    if not is_available():
+        return {"available": False}
+    per_question: list[dict] = []
+    for question in questions:
+        iface_llm.history = []
+        facts_ans = iface_llm.ask(question)
+        # Includes `context` (unlike the internal gate's own check, which -- being upstream of
+        # context ever being appended -- only compares against computed+inferred): context is
+        # static, pre-vetted reference text, not model output, so its numbers legitimately appear
+        # in what the user sees (`.text`) without being an "invention" by either the raw or
+        # gated phrasing.
+        facts = " ".join(filter(None, [facts_ans.computed, facts_ans.context, facts_ans.inferred]))
+        raw_invented = gated_invented = 0
+        for _ in range(n_repeats):
+            try:
+                raw = explain(question, computed=facts_ans.computed, context=facts_ans.context,
+                             inferred=facts_ans.inferred, model=model)
+                if faithfulness(facts, raw)["invented"]:
+                    raw_invented += 1
+            except (RuntimeError, urllib.error.URLError, OSError):
+                pass
+            iface_llm.history = []
+            gated_text = iface_llm.ask(question).text
+            if faithfulness(facts, gated_text)["invented"]:
+                gated_invented += 1
+        per_question.append({"question": question, "raw_invented": raw_invented,
+                             "gated_invented": gated_invented, "n_repeats": n_repeats})
+    total = sum(pq["n_repeats"] for pq in per_question)
+    return {
+        "available": True,
+        "per_question": per_question,
+        "raw_invention_rate": sum(pq["raw_invented"] for pq in per_question) / total if total else 0.0,
+        "gated_invention_rate": sum(pq["gated_invented"] for pq in per_question) / total if total else 0.0,
+        "n_total_runs": total,
+    }
+
+
 # --- Agentic, still-numberless tool-use ---------------------------------------------------
 # For MULTI-STEP questions ("compare the three hottest summers and explain why one stood out")
 # the LLM plans WHICH deterministic query-engine tools to call, in what order, with which
@@ -403,3 +458,48 @@ def explain_synthesis(question: str, facts: list[str], model: str = DEFAULT_MODE
               f"date exactly as given; do not add any number that is not below.\n"
               f"Question: {question}\nComputed facts:\n{joined}\n\nAnswer:")
     return generate(prompt, model=model)
+
+
+# --- Independent judgment (a partial, automatable substitute for a second human rater) ----------
+# `query_coverage.py`'s hand-authored ground truth was written by the same person who built the
+# system it tests -- a standard, acknowledged weakness in solo dissertations. The genuine fix
+# needs a real second human; this cannot manufacture that. What it offers instead: an independent
+# LLM judgment of the same questions, blind to the hand-authored label, as a recognised (if
+# imperfect) "LLM-as-judge" proxy for comparison -- more evidence than none, explicitly not
+# equivalent to a human rater.
+
+INDEPENDENT_JUDGE_SYSTEM = (
+    "You are an independent evaluator reading a question COLD, with no knowledge of any other "
+    "system's answer. Classify the question exactly as a careful human annotator would: which "
+    "single statistic/intent it is asking for (or null if none is clearly implied), which sensor "
+    "column(s) it names or clearly implies, and whether it names any specific time window (a "
+    "date, month, year, season, or relative period like 'last month'). "
+    "Respond with ONLY compact JSON, no prose."
+)
+
+
+def independent_intent_judgment(question: str, intents: list[str], sensors: list[str],
+                                model: str = DEFAULT_MODEL) -> dict | None:
+    """An independent LLM judgment of a question's (intent, sensors, has_scope) for comparison
+    against a hand-authored label -- NOT the same mechanism as `plan()` (which is part of the
+    production routing path and never influences what the interface computes); this exists solely
+    to give an independent second opinion. Returns None if Ollama is unavailable or the reply
+    can't be parsed.
+    """
+    prompt = (
+        f"Question: {question}\n"
+        f"Allowed intents: {intents}\n"
+        f"Allowed sensor columns: {sensors}\n"
+        'Return JSON ONLY: {"intent": <one allowed intent or null>, '
+        '"sensors": [<zero or more allowed columns actually named or clearly implied>], '
+        '"has_scope": <true if a specific date/month/year/season/relative-period is named, else false>}'
+    )
+    data = _generate_json(prompt, INDEPENDENT_JUDGE_SYSTEM, model, 30.0)
+    if not isinstance(data, dict):
+        return None
+    intent = data.get("intent")
+    return {
+        "intent": intent if intent in intents else None,
+        "sensors": [s for s in data.get("sensors", []) if s in sensors],
+        "has_scope": bool(data.get("has_scope")),
+    }

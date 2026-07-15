@@ -74,12 +74,19 @@ def backtest(series: pd.Series, horizon: int = 14, folds: int = 5,
     — error scaled by a persistence (last-value) baseline; MASE < 1 means the model
     beats naive persistence. (MAPE is deliberately avoided: temperature crosses 0 °C,
     which makes percentage error blow up.)
+
+    Also reports **per-fold MASE** plus its mean/std and a 95% percentile confidence
+    interval across folds -- the same statistical-rigor pattern `evaluation.benchmark`
+    already applies to the anomaly detectors, so a single lucky/unlucky fold can't be
+    mistaken for the model's real expected performance. `mae`/`rmse`/`mase` above remain
+    the pooled (all-folds-combined) figures for backward compatibility.
     """
     from statsmodels.tsa.arima.model import ARIMA
 
     daily = series.astype(float).resample("1D").mean().dropna()
     abs_err: list[float] = []
     naive_err: list[float] = []
+    per_fold_mase: list[float] = []
     used = 0
     for k in range(folds):
         cut = len(daily) - (k + 1) * horizon
@@ -88,15 +95,25 @@ def backtest(series: pd.Series, horizon: int = 14, folds: int = 5,
         train, actual = daily.iloc[:cut], daily.iloc[cut:cut + horizon].to_numpy()
         fit = ARIMA(train.iloc[-365:], order=order).fit()
         pred = fit.get_forecast(steps=len(actual)).predicted_mean.to_numpy()
-        abs_err.extend(np.abs(actual - pred))
-        naive_err.extend(np.abs(actual - train.iloc[-1]))   # persistence baseline
+        fold_abs_err = np.abs(actual - pred)
+        fold_naive_err = np.abs(actual - train.iloc[-1])   # persistence baseline
+        abs_err.extend(fold_abs_err)
+        naive_err.extend(fold_naive_err)
+        fold_mae, fold_base = float(np.mean(fold_abs_err)), float(np.mean(fold_naive_err))
+        per_fold_mase.append(fold_mae / fold_base if fold_base else float("nan"))
         used += 1
     mae = float(np.mean(abs_err))
     base = float(np.mean(naive_err))
+    pf = np.array(per_fold_mase)
     return {
         "folds": used, "horizon": horizon,
         "mae": mae,
         "rmse": float(np.sqrt(np.mean(np.square(abs_err)))),
         "baseline_mae": base,
         "mase": mae / base if base else float("nan"),
+        "per_fold_mase": per_fold_mase,
+        "mase_mean": float(np.mean(pf)),
+        "mase_std": float(np.std(pf)),
+        "mase_ci_low": float(np.percentile(pf, 2.5)),
+        "mase_ci_high": float(np.percentile(pf, 97.5)),
     }

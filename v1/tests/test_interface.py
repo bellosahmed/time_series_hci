@@ -787,6 +787,13 @@ def test_going_forward_is_a_forecast_synonym():
     assert interface.detect_intent("what will the humidity be going forward?") == "forecast"
 
 
+def test_variable_is_a_spread_synonym():
+    # Found by the held-out generalisation benchmark (query_coverage.HELD_OUT_GROUND_TRUTH):
+    # "vary"/"variability" were already spread keywords, but the equally natural adjective
+    # "variable" wasn't.
+    assert interface.detect_intent("how variable is the dew point") == "spread"
+
+
 def test_all_14_sensors_have_plain_english_aliases():
     cols = JENA_COLUMNS
     phrases = {

@@ -280,6 +280,117 @@ regressions at any step). `verify_results.py` → 30/30. `node chart.test.js` �
 (item 6) that max/min questions and their chart markers still work correctly on real data. Not yet
 committed/pushed, per standing instruction to hold off.
 
+### v1: full-day re-verification pass, a supervisor-style critical assessment, and doc reconciliation
+After the day's 6 commits were pushed, ran a complete independent re-verification (fresh `pytest`, fresh
+`verify_results.py`, fresh `chart.test.js`, `ruff`, `mypy` — all clean, same numbers as the commits: 273
+passed/1 skipped, 30/30) plus live checks of specific items requested: the README's column-correlation
+section (still intact), the LLM's date-format handling (tested live against real Ollama — asked it to
+plan "temperature between january and march 2013", correctly returned `2013-01-01`/`2013-03-31` using
+its own world knowledge, no explicit mapping table needed), and date/hour/date+hour/last-hour querying
+(4 fresh live CLI queries, 2 independently cross-checked against raw pandas, exact matches).
+
+Asked for an honest supervisor-style assessment before the next round of fixes. Given, without
+softening: the evaluation methodology itself is strong for MSc level (six appropriate methods, real CIs
+and significance testing, honest negative results throughout — the 91.8% coverage run, the missed 2015
+heatwave, MASE from only 3 folds) — but real gaps remain: **no human evaluation for the project's own
+"HCI" claim** (every trust/explainability result is validated computationally, never with a real user's
+calibrated trust); **no ablation for the LLM faithfulness gate** (0 invented numbers *with* it is
+reported, but never compared against the rate *without* it); **self-authored ground truth** for both the
+coverage benchmark and the known-event anomaly labels; **the coverage benchmark's 100% is on the same
+cases used to find and fix the 4 gaps**, not a held-out set; inconsistent statistical rigor across
+methods (anomaly detection gets full CIs, forecasting's MASE doesn't). Estimated **73–78/100** for the
+codebase/evaluation contribution specifically (not the written dissertation, which wasn't reviewed) —
+solid distinction-range technical execution, held back by the missing empirical HCI validation the
+project's own name promises.
+
+Then, per instruction: reconciled `report/EVALUATION.md` (an older, partially-stale report file — its own
+header already admitted some figures couldn't be reproduced byte-for-byte) with today's
+`docs/evaluation/` folder, which is now the current, actively-maintained source. Added a clear pointer at
+the top of `EVALUATION.md` directing to `docs/evaluation/`, corrected two stale check-count references
+("17/17" and "29 independent checks" → current 30/30), and — since a critical self-assessment shouldn't
+only live in a chat transcript — wrote the honest gaps above directly into `EVALUATION.md`'s Verdict
+section, so a reader of the report file sees them without having to find this conversation. Also removed
+"HCI user study" from the Notion Daily Log's tracked to-do checklist: it's an intentional, already-made
+scope decision (out of scope for the codebase, per repeated earlier instruction), not a pending task, and
+listing it as a checkbox implied otherwise.
+
+### v1: addressed 4 of the supervisor assessment's 5 gaps (HCI user study excluded, per instruction) — why, evidence, and where each result changed
+Asked to solve gaps #2 (no ablation), #3 (self-authored ground truth), #4 (self-fulfilling coverage
+result), #5 (inconsistent statistical rigor) from the earlier supervisor-style assessment, with #1 (HCI
+user study) explicitly excluded from consideration this time. Each below: **why** it mattered, **what**
+was built, **real evidence**, and **exactly where a previously-reported result changed**.
+
+**#5 — MASE confidence interval.** *Why*: a bare point-estimate MASE (0.75, from only 3 folds) can't
+support a claim like "beats persistence" without knowing how much it varies fold-to-fold — the same
+statistical-rigor gap `evaluation.benchmark` already closed for anomaly detection, left open here.
+*What*: `forecasting.backtest()` now also returns `per_fold_mase`, `mase_mean`, `mase_std`, and a 95%
+percentile CI across folds; `verify_results.py` raised its fold count from 3 to 20 (empirically confirmed
+fast — 20 folds run in ~2s). *Where the result changed*: the earlier 3-fold MASE=0.75 ("beats persistence
+by 25%") is **not the number that should be cited**. At 20 folds: pooled MASE=0.865 (still <1), but
+per-fold mean=0.952 and **95% CI=[0.388, 1.697], which crosses 1.0** — individual folds range from a
+strong win (0.29) to a clear loss (1.73). The honest, statistically supportable conclusion is now "on
+average edges out naive persistence, but not reliably so," not "beats it by 25%." `docs/evaluation/03-forecasting.md`
+rewritten to lead with this, stating plainly that it supersedes the earlier headline number.
+
+**#2 — Faithfulness gate ablation.** *Why*: "0 invented numbers with the gate" doesn't demonstrate the
+gate does anything — a model that already never hallucinates would show the same 0 trivially; the claim
+needs a comparison to the *raw, ungated* rate to mean anything. *What*: `llm.faithfulness_ablation()`
+measures both the raw (direct `explain()` call) and gated (`Interface.ask()`, post-gate) invention rate
+for the same questions, same facts. Found and fixed a real bug in the measurement itself while building
+it: `facts` originally excluded `context`, so the template's own legitimate context-derived numbers
+(e.g. a sensor's typical range) were being flagged as "invented" — a test written against a
+pathological always-hallucinating mocked model caught this immediately (asserted gated rate must be 0%;
+it came back 100% until context was included). *Evidence*: on the real dataset + real Ollama
+(`llama3.2:3b`, 5 questions × 3 repeats = 15 runs): **raw_invention_rate = 0%, gated_invention_rate =
+0%**. *Where the result changed*: nowhere — this is a new measurement, not a revision, and it's an
+honest null result: the strict system prompt already prevents invention on this sample, so the gate's
+*measured* marginal value here is not distinguishable from zero (still worth keeping as a safety net;
+its value is a documented hypothesis, not a demonstrated rescue). A follow-up exploratory attempt with a
+smaller, differently-tuned community model to find a harder counter-example produced one anomalous,
+non-reproducible reading (gated=60%, logically impossible if the gate works) — traced to transient
+model-server instability (3 of 4 repeat attempts came back clean; manually replaying the exact call
+sequence that produced it also came back clean) — reported transparently in
+`docs/evaluation/05-llm-faithfulness.md` as an inconclusive attempt, not presented as a finding.
+
+**#4 — Held-out generalisation test.** *Why*: `GROUND_TRUTH`'s 100% is measured on the exact cases used
+to find and fix the 4 original gaps — that only proves those specific holes are closed, not that the
+fixes generalise to new phrasing. *What*: `query_coverage.HELD_OUT_GROUND_TRUTH` — 23 freshly-authored
+questions, different specific wordings, written after the fixes without referring back to the original
+49. *Evidence*: first run **22/23 (95.7%)** — one genuine new miss, **"how variable is the dew point"**
+(expected `spread`, got `summary`): `"vary"`/`"variability"` were coded spread keywords, the equally
+natural adjective `"variable"` wasn't. Fixed (added the keyword), re-ran: **23/23 (100%)**, confirmed on
+real data (`verify_results.py` check #18b, new). *Where the result changed*: this is a **new, 5th real
+routing gap**, found only because the held-out set was independently authored rather than reused —
+direct evidence the held-out methodology is doing real work, not rubber-stamping. Also directly
+strengthens the original 49's 100%: it's no longer just "100% on the cases used to fix it," it's "100%,
+confirmed to generalise to a fresh, independently-written batch that itself caught one more real gap."
+
+**#3 — Self-authored ground truth.** *Why*: both `GROUND_TRUTH` and the anomaly `KNOWN_EVENTS` labels
+were written by the same person who built the tested system — the standard solo-dissertation weakness a
+strict marker flags. *What this actually solves, stated honestly*: a real second human rater can't be
+manufactured by code — this was **not** claimed to be fully solved. Two things were built: (1)
+`query_coverage.export_blind_worksheet` / `score_blind_labels` — tooling making it a five-minute task to
+hand the 72 questions (blind, no answers shown) to a real second person and get genuine inter-rater
+agreement; not yet run with an actual second human. (2) `llm.independent_intent_judgment` /
+`query_coverage.score_against_llm_judge` — a fully-automatable "LLM-as-judge" partial substitute: a
+separate LLM call judges each question cold, blind to the hand-authored label. *Evidence* (real, all 72
+questions, `llama3.2:3b`): **intent agreement ~65%, sensors ~71–72%, scope ~92–93%** (small run-to-run
+wobble from `temperature=0.2`). *Where the result changed*: this is a new measurement, and it's a
+genuinely informative one, not a rubber stamp — 39 itemised disagreements, with two explicable patterns
+dominating: (a) roughly half are questions where this project's `summary`-fallback convention (added
+earlier today) is a system-specific design choice an independent judge naturally doesn't reconstruct,
+guessing a plausible specific statistic instead — a real methodological insight (agreement here tests
+"does an outsider reconstruct this system's convention," not "is there one correct reading"); (b) a
+genuine semantic ambiguity found nowhere else in this evaluation — "hottest/lowest ___ recorded" judged
+`max`/`min` by the human label but `anomaly` by the independent LLM three times, a defensible alternative
+reading a real second rater might also raise. Full itemised disagreement list in
+`docs/evaluation/06-query-routing-coverage.md`, §3.
+
+**Final state: `pytest tests/` → 283 passed, 1 skipped** (was 273 before this task — +10 tests, zero
+regressions at any step, verified after every change). `verify_results.py` → **31/31** (was 30 — +1 hard
+check for held-out generalisation; +2 new advisories for the ablation and the LLM-judge cross-check).
+`ruff`/`mypy` clean (one `zip()` `strict=` lint caught and fixed along the way). Not yet committed/pushed.
+
 ## 2026-07-13
 
 ### v3: closed three real module gaps (`reasoning.py`, `clustering.py`, `forecasting.py`) — and found the "§13" notebook section referenced below never actually existed

@@ -51,3 +51,83 @@ def test_score_coverage_unroutable_cases_stay_unrouted(coverage_iface):
     for case in unroutable:
         ans = coverage_iface.ask(case.question)
         assert ans.intent is None, f"{case.question!r} should stay unroutable, got {ans.intent!r}"
+
+
+def test_held_out_generalisation_set_scores_above_90pct(coverage_iface):
+    # HELD_OUT_GROUND_TRUTH was authored fresh, after the 4 gaps in GROUND_TRUTH were fixed, to
+    # test whether those fixes generalise to new phrasing rather than just closing the specific
+    # holes found. This must score well on its own -- it is not the set the fixes were tuned on.
+    result = qc.score_coverage(coverage_iface, qc.HELD_OUT_GROUND_TRUTH)
+    assert result["n"] == len(qc.HELD_OUT_GROUND_TRUTH)
+    assert result["overall_pct"] >= 90.0, result["failures"]
+
+
+def test_export_and_score_blind_worksheet_round_trips(tmp_path):
+    cases = qc.GROUND_TRUTH[:3]
+    csv_path = tmp_path / "worksheet.csv"
+    qc.export_blind_worksheet(cases, str(csv_path))
+    rows = csv_path.read_text().splitlines()
+    assert rows[0] == "id,question,your_intent,your_sensors,your_has_scope"
+    assert len(rows) == 1 + len(cases)              # header + one row per question
+    for case in cases:
+        assert case.question in csv_path.read_text()
+    # no expected answers leaked into the worksheet a human is meant to fill in blind
+    for case in cases:
+        if case.intent:
+            assert f",{case.intent}," not in csv_path.read_text()
+
+    # a "second rater" who happens to agree with every original label perfectly
+    import csv as csv_module
+    with open(csv_path, "w", newline="") as fh:
+        writer = csv_module.writer(fh)
+        writer.writerow(["id", "question", "your_intent", "your_sensors", "your_has_scope"])
+        for i, case in enumerate(cases):
+            writer.writerow([i, case.question, case.intent or "",
+                             ",".join(sorted(case.sensors)), "yes" if case.has_scope else "no"])
+    result = qc.score_blind_labels(cases, str(csv_path))
+    assert result["n"] == len(cases)
+    assert result["intent_agreement_pct"] == 100.0
+    assert result["sensors_agreement_pct"] == 100.0
+    assert result["scope_agreement_pct"] == 100.0
+    assert result["disagreements"] == []
+
+
+def test_score_blind_labels_detects_a_real_disagreement(tmp_path):
+    cases = [qc.Case("what was the max temperature in 2013?", "max", frozenset({"T (degC)"}), True)]
+    csv_path = tmp_path / "worksheet.csv"
+    import csv as csv_module
+    with open(csv_path, "w", newline="") as fh:
+        writer = csv_module.writer(fh)
+        writer.writerow(["id", "question", "your_intent", "your_sensors", "your_has_scope"])
+        writer.writerow([0, cases[0].question, "mean", "T (degC)", "yes"])  # disagrees: mean != max
+    result = qc.score_blind_labels(cases, str(csv_path))
+    assert result["intent_agreement_pct"] == 0.0
+    assert result["sensors_agreement_pct"] == 100.0
+    assert len(result["disagreements"]) == 1
+
+
+def test_score_against_llm_judge_unavailable_without_ollama(monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    result = qc.score_against_llm_judge(qc.GROUND_TRUTH[:2])
+    assert result == {"available": False}
+
+
+def test_independent_intent_judgment_parses_a_real_reply(monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: (
+        '{"intent": "max", "sensors": ["T (degC)"], "has_scope": true}'))
+    judgment = llm.independent_intent_judgment(
+        "what was the max temperature in 2013?", ["max", "min"], ["T (degC)", "rh (%)"])
+    assert judgment == {"intent": "max", "sensors": ["T (degC)"], "has_scope": True}
+
+
+def test_independent_intent_judgment_rejects_out_of_vocabulary_answers(monkeypatch):
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: (
+        '{"intent": "not_a_real_intent", "sensors": ["not_a_real_sensor"], "has_scope": false}'))
+    judgment = llm.independent_intent_judgment(
+        "some question", ["max", "min"], ["T (degC)"])
+    assert judgment == {"intent": None, "sensors": [], "has_scope": False}

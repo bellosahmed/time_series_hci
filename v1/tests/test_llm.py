@@ -6,9 +6,11 @@ absent. The actual generation is only exercised if a local server is up.
 
 import json
 
+import numpy as np
+import pandas as pd
 import pytest
 
-from src import llm
+from src import interface, llm
 
 
 def test_generate_json_parses_a_wrapped_json_block(monkeypatch):
@@ -84,6 +86,34 @@ def test_faithfulness_allows_clock_reformatting():
     facts = "max T (degC) was 37.04 on 4 Jul 2015 16:00."
     exp = "The hottest was 37.04 degrees, on 4 July 2015 at 4pm."
     assert llm.faithfulness(facts, exp)["invented"] == []   # 16:00 -> 4pm must not be flagged
+
+
+def test_faithfulness_ablation_shows_the_gate_actually_does_something(monkeypatch):
+    # A pathological model that ALWAYS invents a number, regardless of the real facts: the raw
+    # (ungated) rate must come back 100%, but Interface's gate must still show 0% -- this is the
+    # comparison the gate's "0 invented numbers" claim depends on; without it, that claim is
+    # unfalsifiable (a model that already never hallucinates would show the same "0" trivially).
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "The answer is definitely 999.99 degrees.")
+    idx = pd.date_range("2024-01-01", periods=48, freq="h")
+    df = pd.DataFrame({"T (degC)": np.random.default_rng(0).normal(10, 5, 48)}, index=idx)
+    iface_llm = interface.Interface(df, use_llm=True, model="m")
+    result = llm.faithfulness_ablation(iface_llm, ["max temperature"], model="m", n_repeats=3)
+    assert result["available"] is True
+    assert result["raw_invention_rate"] == 1.0     # every raw call invented 999.99
+    assert result["gated_invention_rate"] == 0.0    # the gate caught every single one
+    assert result["n_total_runs"] == 3
+    assert result["per_question"][0]["raw_invented"] == 3
+    assert result["per_question"][0]["gated_invented"] == 0
+
+
+def test_faithfulness_ablation_unavailable_without_ollama(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    idx = pd.date_range("2024-01-01", periods=48, freq="h")
+    df = pd.DataFrame({"T (degC)": np.random.default_rng(0).normal(10, 5, 48)}, index=idx)
+    iface_llm = interface.Interface(df, use_llm=True, model="m")
+    result = llm.faithfulness_ablation(iface_llm, ["max temperature"], model="m")
+    assert result == {"available": False}
 
 
 def test_rewrite_followup_none_without_history(monkeypatch):
