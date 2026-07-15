@@ -5,6 +5,43 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-15
+
+### v1 interface: found a real gap in time-constraint parsing — hour-of-day silently dropped, relative phrases unhandled
+Investigated a report that the query interface "makes mistakes" with time-scoped questions (e.g. wind
+speed / temperature bound to a specific hour, date, month, "last month", "last hour"). Read
+`src/interface_parsing.py` and `interface.py`, then confirmed two real gaps by testing the parser
+directly against sample questions:
+- **Hour-of-day is silently dropped.** `resolve_day` correctly parses "3pm on 26 January 2015" as the
+  day (26 Jan 2015), but "3pm" is thrown away entirely — the answer is computed over the *whole day*,
+  not the requested hour, with no indication anything was ignored.
+- **Relative phrases don't resolve at all.** "last month", "last hour", "yesterday" all return
+  `None`/empty from both `resolve_period` and `resolve_day`. Depending on whether an intent keyword is
+  also present in the question, this either falls through to the generic "I couldn't map that" fallback,
+  or — worse — silently answers using the **entire 2009–2016 record**, as if no time constraint had been
+  given at all.
+- One thing already works correctly and is *not* part of the gap: numeric dates like "1/3/2012" already
+  parse via `resolve_day`'s existing regex (day/month/year order, matching the dataset's European
+  convention) — confirmed by direct test, no fix needed there.
+
+Brainstormed a fix with the user before touching code. Rejected a third-party date-parsing library and
+LLM-based resolution as approaches — both conflict with the project's deterministic/offline-first,
+explainable design (the query engine's numbers must never depend on a model's guess). Settled on
+extending `interface_parsing.py` with the same regex/keyword style already used by `resolve_period`/
+`resolve_day`:
+- `resolve_relative_period()` — bare relative phrases ("last/this hour", "week", "month", "year", "now"),
+  anchored to the **dataset's own last timestamp** (2017-01-01 00:10), since a static 2009–2016 record
+  has no real "now".
+- `resolve_ordinal_unit_in_year()` — a relative/ordinal qualifier combined with an **explicit year**
+  resolves *inside that year* instead of the dataset anchor (e.g. "last month 2013" → Dec 2013, "second
+  month 2016" → Feb 2016), generalised to week/day/hour with numeric ordinals ("34th week of 2013").
+- `resolve_hour()` — clock times ("3pm", "15:00", "noon", "midnight") and time-of-day buckets
+  (morning/afternoon/evening/night), applied as a sub-filter on top of whatever day/period/relative
+  scope is resolved.
+
+**Not yet implemented** — this entry records the confirmed gap and the agreed design; implementation
+(with deterministic unit tests for every phrase) is the next step.
+
 ## 2026-07-13
 
 ### v3: closed three real module gaps (`reasoning.py`, `clustering.py`, `forecasting.py`) — and found the "§13" notebook section referenced below never actually existed
