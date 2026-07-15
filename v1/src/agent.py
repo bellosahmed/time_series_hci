@@ -77,7 +77,7 @@ def _run_extremum(df, sensor, kind, start=None, end=None, **_):
         return (f"{sensor}{where} is a compass bearing; prevailing direction {cs['mean']:.1f}° "
                 f"({analysis.compass_point(cs['mean'])}), circular std {cs['std']:.1f}°."), cs
     r = qe.get_max(data, sensor) if kind == "max" else qe.get_min(data, sensor)
-    return f"{kind} {sensor}{where} was {r.value:.2f} on {qe.fmt_when(r.when)}.", r
+    return f"{kind} {sensor}{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}.", r
 
 
 def _run_average(df, sensor, start=None, end=None, **_):

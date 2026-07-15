@@ -115,6 +115,24 @@ def generate(prompt: str, model: str = DEFAULT_MODEL, system: str = SYSTEM_PROMP
         return json.loads(r.read()).get("response", "").strip()
 
 
+def _generate_json(prompt: str, system: str, model: str, timeout: float) -> dict | None:
+    """Call the LLM and parse its reply as JSON, or return None on any failure.
+
+    Shared by `classify`/`plan`/`plan_steps`: extracts the first ``{...}`` block from the reply
+    (models sometimes wrap JSON in prose despite instructions) and parses it. Network/timeout
+    errors and malformed JSON are handled the same way -- the caller always falls back to the
+    deterministic path, never surfaces a raw LLM/parsing failure to the user.
+    """
+    try:
+        out = generate(prompt, model=model, system=system, timeout=timeout)
+        match = re.search(r"\{.*\}", out, re.S)
+        if not match:
+            return None
+        return json.loads(match.group(0))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
 CLASSIFY_SYSTEM = (
     "You convert a user's question about sensor data into a structured query. "
     "Respond with ONLY compact JSON, no prose, no explanation."
@@ -139,13 +157,8 @@ def classify(question: str, intents: list[str], sensors: list[str],
         'Return JSON only: {"intent": <one allowed intent or null>, '
         '"sensors": [<zero or more allowed columns>]}'
     )
-    try:
-        out = generate(prompt, model=model, system=CLASSIFY_SYSTEM, timeout=30.0)
-        match = re.search(r"\{.*\}", out, re.S)
-        if not match:
-            return None
-        data = json.loads(match.group(0))
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+    data = _generate_json(prompt, CLASSIFY_SYSTEM, model, 30.0)
+    if data is None:
         return None
     intent = data.get("intent")
     if intent not in intents:
@@ -221,14 +234,7 @@ def plan(question: str, intents: list[str], sensors: list[str],
         '"period": <short human label like "summer 2012" or null>, '
         '"op": <">" or "<" or null>, "value": <number or null>}'
     )
-    try:
-        out = generate(prompt, model=model, system=PLAN_SYSTEM, timeout=30.0)
-        match = re.search(r"\{.*\}", out, re.S)
-        if not match:
-            return None
-        data = json.loads(match.group(0))
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
-        return None
+    data = _generate_json(prompt, PLAN_SYSTEM, model, 30.0)
     if not isinstance(data, dict):
         return None
     intent = data.get("intent")
@@ -371,14 +377,7 @@ def plan_steps(question: str, tools: list[dict], sensors: list[str],
         "call per item being compared. Use only the allowed tools and columns.\n"
         'Return JSON ONLY: {"steps": [{"tool": <tool name>, "args": {<arg>: <value>, ...}}, ...]}'
     )
-    try:
-        out = generate(prompt, model=model, system=AGENT_SYSTEM, timeout=45.0)
-        match = re.search(r"\{.*\}", out, re.S)
-        if not match:
-            return None
-        data = json.loads(match.group(0))
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
-        return None
+    data = _generate_json(prompt, AGENT_SYSTEM, model, 45.0)
     if not isinstance(data, dict) or not isinstance(data.get("steps"), list):
         return None
     steps: list[dict] = []

@@ -25,7 +25,7 @@ def _server_df(n=1000, seed=0):
 
 def test_query_engine_generalises_to_non_weather_data():
     df = _server_df()
-    assert qe.get_max(df, "cpu_load").value == df["cpu_load"].max()          # exact, any domain
+    assert qe.get_max(df, "cpu_load")["value"] == df["cpu_load"].max()          # exact, any domain
     assert np.isclose(qe.get_mean_std(df, "cpu_load")["mean"], df["cpu_load"].mean())
     assert np.isclose(qe.get_correlation(df, "cpu_load", "mem_gb"),
                       df["cpu_load"].corr(df["mem_gb"]))
@@ -41,4 +41,4 @@ def test_interface_answers_on_new_domain_with_explicit_column():
     df = _server_df()
     ans = interface.Interface(df).ask("max cpu_load")
     assert ans.intent == "max"
-    assert ans.value.value == df["cpu_load"].max()   # same interface, new domain, exact number
+    assert ans.value["value"] == df["cpu_load"].max()   # same interface, new domain, exact number

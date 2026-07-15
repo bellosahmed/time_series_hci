@@ -29,7 +29,7 @@ def test_extremum_matches_pandas(df):
     f = agent.execute_step(df, {"tool": "extremum", "args": {
         "sensor": "T (degC)", "kind": "max", "start": "2013-06-01", "end": "2013-08-31"}})
     assert f.ok
-    assert f.value.value == df.loc["2013-06-01":"2013-08-31", "T (degC)"].max()
+    assert f.value["value"] == df.loc["2013-06-01":"2013-08-31", "T (degC)"].max()
 
 
 def test_average_and_correlation_match_pandas(df):
@@ -83,7 +83,7 @@ def test_multi_step_plan_all_exact(df):
     facts = ag.execute_plan(plan)
     assert all(f.ok for f in facts)
     for y, f in zip((2013, 2014), facts, strict=True):
-        assert f.value.value == df.loc[f"{y}-06-01":f"{y}-08-31", "T (degC)"].max()
+        assert f.value["value"] == df.loc[f"{y}-06-01":f"{y}-08-31", "T (degC)"].max()
 
 
 # --- composition: template offline, faithfulness-gated narrative --------------------------

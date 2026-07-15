@@ -83,12 +83,29 @@ class Snippet:
     score: float
 
 
-class Retriever:
-    """TF-IDF retriever over the sensor knowledge base (local, offline)."""
+class _SensorDocsBase:
+    """Shared sensor-doc storage + direct-lookup, common to every retriever implementation below.
+
+    Each retriever's `__init__` calls `super().__init__(docs)` for this part, then builds its own
+    index (TF-IDF matrix, BM25 index, embedding matrix, ...) on top of `self.docs`/`self.keys`.
+    """
 
     def __init__(self, docs: dict[str, str] | None = None):
         self.docs = docs or SENSOR_DOCS
         self.keys = list(self.docs.keys())
+
+    def for_sensor(self, sensor: str) -> Snippet | None:
+        """Direct lookup of a sensor's description (no search)."""
+        if sensor in self.docs:
+            return Snippet(sensor, self.docs[sensor], 1.0)
+        return None
+
+
+class Retriever(_SensorDocsBase):
+    """TF-IDF retriever over the sensor knowledge base (local, offline)."""
+
+    def __init__(self, docs: dict[str, str] | None = None):
+        super().__init__(docs)
         self._vectorizer = TfidfVectorizer(stop_words="english")
         self._matrix = self._vectorizer.fit_transform(self.docs.values())
 
@@ -100,14 +117,8 @@ class Retriever:
         return [Snippet(self.keys[i], self.docs[self.keys[i]], float(sims[i]))
                 for i in order if sims[i] > 0]
 
-    def for_sensor(self, sensor: str) -> Snippet | None:
-        """Direct lookup of a sensor's description (no search)."""
-        if sensor in self.docs:
-            return Snippet(sensor, self.docs[sensor], 1.0)
-        return None
 
-
-class LSARetriever:
+class LSARetriever(_SensorDocsBase):
     """Latent Semantic Analysis retriever (the LSI method from the module).
 
     Builds TF-IDF vectors, then reduces them with **truncated SVD** to a small latent-topic
@@ -120,8 +131,7 @@ class LSARetriever:
     """
 
     def __init__(self, docs: dict[str, str] | None = None, n_components: int | None = None):
-        self.docs = docs or SENSOR_DOCS
-        self.keys = list(self.docs.keys())
+        super().__init__(docs)
         self._vectorizer = TfidfVectorizer(stop_words="english")
         tfidf = self._vectorizer.fit_transform(self.docs.values())
         # SVD rank is bounded by both dimensions of the term-document matrix.
@@ -139,14 +149,8 @@ class LSARetriever:
         return [Snippet(self.keys[i], self.docs[self.keys[i]], float(sims[i]))
                 for i in order if sims[i] > 0]
 
-    def for_sensor(self, sensor: str) -> Snippet | None:
-        """Direct lookup of a sensor's description (no search)."""
-        if sensor in self.docs:
-            return Snippet(sensor, self.docs[sensor], 1.0)
-        return None
 
-
-class BM25Retriever:
+class BM25Retriever(_SensorDocsBase):
     """BM25 (Okapi) retriever — the probabilistic ranking baseline (from the IR material).
 
     BM25 scores a query–document match with **term-frequency saturation** (extra occurrences
@@ -159,8 +163,7 @@ class BM25Retriever:
     def __init__(self, docs: dict[str, str] | None = None):
         from rank_bm25 import BM25Okapi
 
-        self.docs = docs or SENSOR_DOCS
-        self.keys = list(self.docs.keys())
+        super().__init__(docs)
         self._bm25 = BM25Okapi([self._tokenize(d) for d in self.docs.values()])
 
     @staticmethod
@@ -178,12 +181,6 @@ class BM25Retriever:
         return [Snippet(self.keys[i], self.docs[self.keys[i]], float(scores[i]))
                 for i in order if scores[i] > 0]
 
-    def for_sensor(self, sensor: str) -> Snippet | None:
-        """Direct lookup of a sensor's description (no search)."""
-        if sensor in self.docs:
-            return Snippet(sensor, self.docs[sensor], 1.0)
-        return None
-
 
 def ollama_embed(text: str, model: str = EMBED_MODEL, url: str = OLLAMA_URL,
                  timeout: float = 10.0) -> list[float]:
@@ -195,7 +192,7 @@ def ollama_embed(text: str, model: str = EMBED_MODEL, url: str = OLLAMA_URL,
         return json.loads(r.read())["embedding"]
 
 
-class EmbeddingRetriever:
+class EmbeddingRetriever(_SensorDocsBase):
     """Optional *semantic* retriever over the same sensor knowledge base.
 
     Embeds each doc with a local embedding model (Ollama, default ``nomic-embed-text``) and
@@ -211,8 +208,7 @@ class EmbeddingRetriever:
     """
 
     def __init__(self, docs: dict[str, str] | None = None, embed_fn=None):
-        self.docs = docs or SENSOR_DOCS
-        self.keys = list(self.docs.keys())
+        super().__init__(docs)
         self._embed = embed_fn or ollama_embed
         self._fallback: Retriever | None = None
         self._matrix: np.ndarray | None = None
@@ -241,12 +237,6 @@ class EmbeddingRetriever:
         order = np.argsort(sims)[::-1][:k]
         return [Snippet(self.keys[i], self.docs[self.keys[i]], float(sims[i]))
                 for i in order if sims[i] > 0]
-
-    def for_sensor(self, sensor: str) -> Snippet | None:
-        """Direct lookup of a sensor's description (no search)."""
-        if sensor in self.docs:
-            return Snippet(sensor, self.docs[sensor], 1.0)
-        return None
 
 
 def sentence_transformer_embedder(model_name: str = ST_MODEL):

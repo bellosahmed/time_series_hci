@@ -26,14 +26,27 @@ def df():
 
 def test_get_max_matches_pandas(df):
     res = qe.get_max(df, "temp")
-    assert res.value == df["temp"].max()
-    assert res.when == df["temp"].idxmax()
+    assert res["value"] == df["temp"].max()
+    assert res["when"] == df["temp"].idxmax()
 
 
 def test_get_min_matches_pandas(df):
     res = qe.get_min(df, "temp")
-    assert res.value == df["temp"].min()
-    assert res.when == df["temp"].idxmin()
+    assert res["value"] == df["temp"].min()
+    assert res["when"] == df["temp"].idxmin()
+
+
+def test_query_engine_functions_all_return_plain_dicts():
+    # Locks in a consistent return-type contract: every query_engine function returns a plain
+    # dict (get_max/get_min used to return a bespoke `Extremum` dataclass, forcing callers to
+    # special-case them -- see interface.py's chart-building code, which no longer needs to).
+    df = pd.DataFrame({"x": [1.0, 2.0, 3.0]}, index=pd.date_range("2024-01-01", periods=3, freq="h"))
+    for result in (
+        qe.get_max(df, "x"), qe.get_min(df, "x"), qe.get_mean_std(df, "x"),
+        qe.threshold_events(df, "x", ">", 1.5), qe.weather_report(df, ["x"]).get("x", {}),
+        qe.sensor_summary(df, "x"),
+    ):
+        assert isinstance(result, dict)
 
 
 def test_mean_std_matches_pandas(df):

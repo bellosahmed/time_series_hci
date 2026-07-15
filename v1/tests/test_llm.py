@@ -11,6 +11,31 @@ import pytest
 from src import llm
 
 
+def test_generate_json_parses_a_wrapped_json_block(monkeypatch):
+    # Models sometimes wrap JSON in prose despite instructions -- the {...} block must still be found.
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: 'Sure, here it is: {"a": 1, "b": [2, 3]} thanks')
+    assert llm._generate_json("p", "sys", "model", 5.0) == {"a": 1, "b": [2, 3]}
+
+
+def test_generate_json_none_on_no_braces(monkeypatch):
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "no json here at all")
+    assert llm._generate_json("p", "sys", "model", 5.0) is None
+
+
+def test_generate_json_none_on_malformed_json(monkeypatch):
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "{not: valid json}")
+    assert llm._generate_json("p", "sys", "model", 5.0) is None
+
+
+def test_generate_json_none_on_network_error(monkeypatch):
+    import urllib.error
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("connection refused")
+    monkeypatch.setattr(llm, "generate", boom)
+    assert llm._generate_json("p", "sys", "model", 5.0) is None
+
+
 def test_generate_sets_seed_and_temperature(monkeypatch):
     captured = {}
 

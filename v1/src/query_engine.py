@@ -6,8 +6,10 @@ Compute exact answers deterministically. The LLM must NEVER compute these values
 - correlations
 - missing-data count
 - anomaly windows
-- cluster membership
 - per-sensor summaries
+
+(Cluster membership/day-types are a separate concern, owned by `clustering.py` and called
+directly from `interface.py` — not part of this file.)
 
 Each function returns a structured result (value + sensor + timestamp where relevant)
 so the explanation layer can describe it without recomputing anything.
@@ -15,19 +17,7 @@ so the explanation layer can describe it without recomputing anything.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pandas as pd
-
-
-@dataclass
-class Extremum:
-    """An exact max/min result: the value, the sensor, and when it occurred."""
-
-    sensor: str
-    kind: str  # "max" or "min"
-    value: float
-    when: pd.Timestamp
 
 
 def _check(df: pd.DataFrame, sensor: str) -> None:
@@ -41,18 +31,18 @@ def fmt_when(ts, with_time: bool = True) -> str:
     return ts.strftime("%-d %b %Y %H:%M" if with_time else "%-d %b %Y")
 
 
-def get_max(df: pd.DataFrame, sensor: str) -> Extremum:
-    """Exact maximum of `sensor` with the timestamp at which it occurred."""
+def get_max(df: pd.DataFrame, sensor: str) -> dict:
+    """Exact maximum of `sensor`: {sensor, kind="max", value, when} (when = its timestamp)."""
     _check(df, sensor)
     s = df[sensor]
-    return Extremum(sensor, "max", float(s.max()), s.idxmax())
+    return {"sensor": sensor, "kind": "max", "value": float(s.max()), "when": s.idxmax()}
 
 
-def get_min(df: pd.DataFrame, sensor: str) -> Extremum:
-    """Exact minimum of `sensor` with the timestamp at which it occurred."""
+def get_min(df: pd.DataFrame, sensor: str) -> dict:
+    """Exact minimum of `sensor`: {sensor, kind="min", value, when} (when = its timestamp)."""
     _check(df, sensor)
     s = df[sensor]
-    return Extremum(sensor, "min", float(s.min()), s.idxmin())
+    return {"sensor": sensor, "kind": "min", "value": float(s.min()), "when": s.idxmin()}
 
 
 def get_mean_std(df: pd.DataFrame, sensor: str) -> dict:
@@ -137,6 +127,6 @@ def sensor_summary(df: pd.DataFrame, sensor: str) -> dict:
     """Structured summary (min/max/mean/std/range/missing) for one sensor."""
     summary = get_mean_std(df, sensor)
     summary["missing"] = count_missing(df, sensor)
-    summary["max_at"] = get_max(df, sensor).when
-    summary["min_at"] = get_min(df, sensor).when
+    summary["max_at"] = get_max(df, sensor)["when"]
+    summary["min_at"] = get_min(df, sensor)["when"]
     return summary

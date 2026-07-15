@@ -249,13 +249,3 @@ def contamination_sensitivity(features: pd.DataFrame,
     """Isolation-Forest anomaly count at each `contamination` prior (sweep to justify it)."""
     return {float(c): int(isolation_forest_anomalies(features, contamination=c).sum())
             for c in contaminations}
-
-
-def anomaly_windows(flags: pd.Series) -> list[tuple]:
-    """Collapse a boolean anomaly Series into (start, end) timestamp intervals.
-
-    Thin wrapper over ``query_engine.get_anomaly_windows`` (the canonical grouping)
-    so the interval logic lives in one place.
-    """
-    from .query_engine import get_anomaly_windows
-    return [(w["start"], w["end"]) for w in get_anomaly_windows(flags)]

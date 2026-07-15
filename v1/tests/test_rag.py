@@ -11,6 +11,15 @@ import pytest
 from src import rag_system as rag
 
 
+def test_all_retrievers_share_the_sensor_docs_base():
+    # for_sensor/docs/keys are common to every retriever implementation -- locks in that they
+    # stay on one shared base class instead of drifting back into four copy-pasted definitions.
+    assert issubclass(rag.Retriever, rag._SensorDocsBase)
+    assert issubclass(rag.LSARetriever, rag._SensorDocsBase)
+    assert issubclass(rag.BM25Retriever, rag._SensorDocsBase)
+    assert issubclass(rag.EmbeddingRetriever, rag._SensorDocsBase)
+
+
 def test_bm25_retriever_finds_relevant_doc():
     pytest.importorskip("rank_bm25")
     r = rag.BM25Retriever()

@@ -18,7 +18,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from src import (preprocess, query_engine as qe, interface, anomaly, analysis,  # noqa: E402
-                 evaluation, forecasting, reasoning, llm, rag_system, retrieval_eval, clustering)
+                 evaluation, forecasting, reasoning, llm, rag_system, retrieval_eval, clustering,
+                 query_coverage)
 
 DATA = ROOT / "data" / "jena_climate_2009_2016.csv"
 S = "T (degC)"
@@ -47,8 +48,8 @@ check("data shape sane (rows>60k, 14 sensors)", len(df) > 60_000 and df.shape[1]
       f"{df.shape}")
 
 # 2-5. query engine == pandas ground truth (the truth layer is exact)
-check("max == pandas", qe.get_max(df, S).value == df[S].max())
-check("min == pandas", qe.get_min(df, S).value == df[S].min())
+check("max == pandas", qe.get_max(df, S)["value"] == df[S].max())
+check("min == pandas", qe.get_min(df, S)["value"] == df[S].min())
 check("mean == pandas", np.isclose(qe.get_mean_std(df, S)["mean"], df[S].mean()))
 check("correlation == pandas",
       np.isclose(qe.get_correlation(df, S, "rho (g/m**3)"), df[S].corr(df["rho (g/m**3)"])))
@@ -72,7 +73,7 @@ check("multi-sensor table covers every numeric sensor",
 
 # 6. scoped query via the interface == pandas slice
 a13 = iface.ask("hottest in 2013")
-check("2013-scoped max == pandas slice", a13.value.value == df.loc["2013", S].max())
+check("2013-scoped max == pandas slice", a13.value["value"] == df.loc["2013", S].max())
 
 # 7. threshold count == pandas
 n_above = int((df[S] > 35).sum())
@@ -82,21 +83,21 @@ check("threshold count == pandas", ath.value["count"] == n_above, f"{n_above}")
 # 8. known-event corroboration: the all-time heat record is the July 2015 heatwave
 mx = qe.get_max(df, S)
 check("all-time max is a summer event (Jul 2015 heatwave)",
-      mx.when.year == 2015 and mx.when.month in (6, 7, 8), f"{mx.when}")
+      mx["when"].year == 2015 and mx["when"].month in (6, 7, 8), f"{mx['when']}")
 # cold extreme falls in winter (physical sanity)
 mn = qe.get_min(df, S)
-check("all-time min is a winter event", mn.when.month in (12, 1, 2), f"{mn.when}")
+check("all-time min is a winter event", mn["when"].month in (12, 1, 2), f"{mn['when']}")
 
 # 8b. reasoning is PHYSICALLY correct on the real extremes (validates the heuristic, not just
 # that it produces a plausible-sounding story)
-zmax = reasoning.sensor_zscores(df, mx.when)
-zmin = reasoning.sensor_zscores(df, mn.when)
+zmax = reasoning.sensor_zscores(df, mx["when"])
+zmin = reasoning.sensor_zscores(df, mn["when"])
 check("reasoning: temperature reads HIGH at the all-time heat extreme",
       zmax["T (degC)"] > 1.5, f"{zmax['T (degC)']:+.1f} sigma")
 check("reasoning: temperature reads LOW at the all-time cold extreme",
       zmin["T (degC)"] < -1.5, f"{zmin['T (degC)']:+.1f} sigma")
 check("reasoning verdict at the heat extreme is a real event (not a sensor glitch)",
-      "real weather event" in reasoning.describe_moment(df, mx.when))
+      "real weather event" in reasoning.describe_moment(df, mx["when"]))
 
 # 9. anomaly answer carries multi-sensor reasoning (the novelty) with a verdict
 aa = iface.ask("any unusual readings in 2014?")
@@ -182,6 +183,15 @@ check("LSA retriever runs & returns valid IR metrics in [0,1]",
       all(0.0 <= lsa_metrics[m] <= 1.0 for m in ("mrr", "map", "r_at_k"))
       and lsa_metrics["mrr"] >= 0.8,
       f"MRR={lsa_metrics['mrr']:.2f} MAP={lsa_metrics['map']:.2f}")
+
+# 18. query-routing coverage (does the interface correctly route realistic questions to the right
+# intent/sensor/scope?) — run against the REAL dataset, not a synthetic fixture, so this is the
+# same benchmark the report cites, exercised on real data. See src/query_coverage.py.
+cov = query_coverage.score_coverage(interface.Interface(df))
+check("query-routing coverage: intent/sensor/scope all correct on >= 95% of labelled questions",
+      cov["overall_pct"] >= 95.0,
+      f"overall={cov['overall_pct']:.1f}% intent={cov['intent_pct']:.1f}% "
+      f"sensors={cov['sensors_pct']:.1f}% scope={cov['scope_pct']:.1f}% (n={cov['n']})")
 
 # 17. LLM faithfulness — ADVISORY + majority-of-3. The 3B model is stochastic, so we vote
 # over 3 runs per question and REPORT the result without letting it flip the headline count
