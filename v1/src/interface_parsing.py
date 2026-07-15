@@ -340,6 +340,96 @@ def resolve_relative_period(question: str, anchor_ts):
     return None, None, ""
 
 
+_ORDINAL_WORDS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12,
+}
+
+
+def _qualifier_to_n(qual: str) -> int | None:
+    """'last' -> None (caller resolves the final index); a word/numeric ordinal -> its integer."""
+    if qual == "last":
+        return None
+    if qual in _ORDINAL_WORDS:
+        return _ORDINAL_WORDS[qual]
+    return int(re.match(r"\d+", qual).group())
+
+
+def _month_range_in_year(n: int | None, year: int):
+    import calendar
+    m = n if n is not None else 12
+    if not 1 <= m <= 12:
+        return None, None, ""
+    return f"{year}-{m:02d}-01", _month_end(year, m), f"{calendar.month_name[m]} {year}"
+
+
+def _week_range_in_year(n: int | None, year: int):
+    jan1 = pd.Timestamp(year=year, month=1, day=1)
+    dec31 = pd.Timestamp(year=year, month=12, day=31)
+    max_week = -(-((dec31 - jan1).days + 1) // 7)  # ceil division
+    w = n if n is not None else max_week
+    if not 1 <= w <= max_week:
+        return None, None, ""
+    start = jan1 + pd.Timedelta(days=(w - 1) * 7)
+    end = min(start + pd.Timedelta(days=6), dec31)
+    return str(start.date()), str(end.date()), f"week {w} of {year}"
+
+
+def _day_range_in_year(n: int | None, year: int):
+    jan1 = pd.Timestamp(year=year, month=1, day=1)
+    dec31 = pd.Timestamp(year=year, month=12, day=31)
+    n_days = (dec31 - jan1).days + 1
+    d = n if n is not None else n_days
+    if not 1 <= d <= n_days:
+        return None, None, ""
+    day = jan1 + pd.Timedelta(days=d - 1)
+    return str(day.date()), str(day.date()), f"day {d} of {year} ({day.strftime('%-d %B')})"
+
+
+def _hour_range_in_year(n: int | None, year: int):
+    jan1 = pd.Timestamp(year=year, month=1, day=1)
+    n_hours = int((pd.Timestamp(year=year, month=12, day=31, hour=23) - jan1).total_seconds() // 3600) + 1
+    h = n if n is not None else n_hours
+    if not 1 <= h <= n_hours:
+        return None, None, ""
+    start = jan1 + pd.Timedelta(hours=h - 1)
+    end = start + pd.Timedelta(minutes=59, seconds=59)
+    return str(start), str(end), f"hour {h} of {year} ({start.strftime('%-d %B, %H:00')})"
+
+
+_ORDINAL_RANGE_FNS = {
+    "month": _month_range_in_year,
+    "week": _week_range_in_year,
+    "day": _day_range_in_year,
+    "hour": _hour_range_in_year,
+}
+
+
+def resolve_ordinal_unit_in_year(question: str):
+    """Detect "<ordinal> <unit> of/in <year>" -> (start, end, label), else (None, None, "").
+
+    Fires only when an explicit year is present -- a relative/ordinal qualifier combined with a
+    named year resolves *inside that year* ("last month 2013" -> December 2013, "second month 2016"
+    -> February 2016), never against the dataset's own timeline (see `resolve_relative_period` for
+    the no-year case). Checked before `resolve_period` by the caller, since `resolve_period` would
+    otherwise swallow the bare year into a whole-year default and miss the qualifier entirely.
+    `week`/`day`/`hour` count consecutive fixed-size blocks from 1 January of that year -- not ISO
+    calendar weeks, which have year-boundary edge cases.
+    """
+    q = question.lower()
+    ymatch = re.search(r"\b((?:19|20)\d{2})\b", q)
+    if not ymatch:
+        return None, None, ""
+    year = int(ymatch.group(1))
+    qualifiers = "|".join(["last", *_ORDINAL_WORDS])
+    for unit, fn in _ORDINAL_RANGE_FNS.items():
+        m = re.search(rf"\b({qualifiers}|\d{{1,3}}(?:st|nd|rd|th))\s+{unit}\b", q)
+        if m:
+            n = _qualifier_to_n(m.group(1))
+            return fn(n, year)
+    return None, None, ""
+
+
 _COMPARE_WORDS = ["compare", "comparison", "versus", "vs", "difference", "hotter", "warmer",
                   "colder", "cooler", "higher", "lower", "than"]
 
