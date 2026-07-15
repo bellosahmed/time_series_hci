@@ -42,6 +42,244 @@ extending `interface_parsing.py` with the same regex/keyword style already used 
 **Not yet implemented** — this entry records the confirmed gap and the agreed design; implementation
 (with deterministic unit tests for every phrase) is the next step.
 
+### v1 interface: implemented relative/ordinal period + hour-of-day parsing
+Implemented the design above via TDD (`resolve_relative_period`, `resolve_ordinal_unit_in_year`,
+`resolve_hour`, `hour_mask`, `resolve_any_period` in `interface_parsing.py`; wired into `Interface` via
+`_understand`/`_routable`/`_needs_context`/`_scoped`). Caught and fixed a real inconsistency in the
+original design while writing the first tests: the dataset's anchor timestamp is `2017-01-01 00:10`, so
+`anchor_ts.year` is literally 2017 — "this year" resolves to a 10-minute stub of 2017 and "last year" to
+2016 (not 2015 as the first draft of the design table assumed), which is actually the *consistent* reading
+once you notice "this month" already correctly resolves to a partial January 2017, not December 2016.
+Corrected the spec doc and tests before implementing further.
+**Real results:** `pytest tests/` → **237 passed, 1 skipped** (was 197 — net +40 tests, no regressions).
+`python3.12 verify_results.py` → **29/29 checks passed**, unaffected (parsing-only change).
+Live-tested five of the new phrases against the real Jena CSV, each on a fresh `Interface` (no shared
+history, to get honest routing rather than accidental follow-up-inherited intent):
+- `"what was the mean temperature last month?"` → `T (degC) in December 2016 mean=2.00, std=4.28, range=20.55.`
+- `"what was the mean wind speed last hour?"` → `wv (m/s) in last hour mean=0.97, std=nan, range=0.00.` (a single hourly row after alignment; std of one value is NaN, not a bug)
+- `"what was the mean temperature in the second month 2016?"` → `T (degC) in February 2016 mean=3.58, std=4.03, range=17.56.`
+- `"what was the mean temperature at 3pm on 26 January 2015?"` → `T (degC) on 26 January 2015 at 3pm mean=2.38, std=nan, range=0.00.`
+- `"what was the mean wind speed at night in December 2016?"` → `wv (m/s) in December 2016 at night mean=1.50, std=0.96, range=4.29.`
+
+**Found a real, pre-existing, out-of-scope gap while testing in isolation:** a bare question with no
+statistic keyword at all — e.g. *"what was the temperature at 3pm on 26 January 2015?"* (no "mean"/"max"/
+etc.) — still falls through to the generic "I couldn't map that" fallback, because `detect_intent`
+requires an explicit keyword regardless of how well the time scope resolves. This predates today's work
+(confirmed: the same question already had no intent keyword before any of today's changes) and is not
+part of the time-constraint parsing gap this session set out to fix — flagged here rather than silently
+fixed, since it changes `detect_intent`'s behaviour for every question, not just time-scoped ones.
+
+### v1 interface: adversarial verification found two real bugs — fixed both, plus a cross-sensor independence test
+Ran the `verify` skill against the new parsing (real CLI, `apps/chat.py`, not import-and-call) and
+deliberately probed edge cases rather than just re-confirming the happy path. Found two genuine bugs:
+- **`resolve_hour` silently accepted malformed 12-hour clock times.** "13pm" resolved to hour 13 via
+  `13 % 12 = 1, +12 = 13` with no range check — nonsense input treated as if valid. Fixed: reject any
+  am/pm hour outside 1–12 before doing the arithmetic.
+- **Chained ordinal+relative phrasing silently dropped half the question.** "third week of last year"
+  matched `resolve_relative_period`'s `\blast year\b` as a plain substring and silently answered using
+  all of 2016, dropping "third week" — worse than the documented fallback (a clean "couldn't map that"),
+  since it produced a plausible-looking but wrong-scope answer with no signal anything was ignored.
+  Fixed with `_CHAINED_ORDINAL_PREFIX`, a guard that refuses to resolve when a `<qualifier> <unit>
+  (of|in)` pattern immediately precedes the relative phrase.
+
+Both confirmed fixed **live against the real CLI**, not just in unit tests: `"...at 13pm?"` and
+`"...third week of last year?"` now both correctly fall back to the whole-record mean (`9.44`, matching
+independent `df['T (degC)'].mean()` exactly) instead of fabricating a scope. Verified the guard doesn't
+over-trigger: plain `"...last year?"` still resolves to 2016 correctly.
+
+Also added a **permanent cross-sensor independence test** (`tests/test_interface.py`), per a follow-up
+request to guarantee — not just spot-check — that every sensor gets its own independently-computed
+answer with no cross-sensor bleed. A synthetic 13-sensor fixture with well-separated values (loc spaced
+100 apart, so any mixup is obviously wrong, not a rounding coincidence) is asked about in sequence *on
+the same `Interface` instance* (shared conversation history — the realistic contamination risk, not
+fresh instances per sensor). Caught one real self-inflicted collision while writing it: `"max. wv
+(m/s)"` (wind gust) literally contains the word "max", so using the raw column name in a question
+mis-routes to the max-intent ahead of "mean" — not a production bug (a real user says "wind gust", the
+alias, which doesn't collide), but a reminder that intent keywords and sensor names share one namespace.
+**`pytest tests/` → 255 passed, 1 skipped** (was 197 at the start of today's work — +58 tests total, zero
+regressions throughout). Not yet committed/pushed, per instruction to hold off.
+
+### v1 web app: chart x-axis showed only years — fixed to show month/day/hour ticks
+Reported gap: the SVG line chart's x-axis (`apps/web/chart.js`, `drawChart()`) drew **exactly two
+labels, always** — the start and end timestamp — no matter how many points were plotted or how wide the
+span. A full-year chart (365 daily points) showed only "Jan 1, 13" and "Dec 31, 13"; nothing in between
+was ever labelled, so month/day/hour context was invisible along the rest of the line.
+Fixed in two passes: (1) draw several evenly-spaced ticks along the continuous time axis instead of just
+the two ends, with label granularity adapting to the plotted span (HH:MM for sub-day spans, day+month
+for spans under 45 days, month+year beyond that); (2) a follow-up request to show a denser day-of-month
+progression for a single-month view — settled on a flat 8 ticks (short labels like "Jun 15" comfortably
+fit the 640px chart width regardless of span), which naturally gives a 30-day month roughly one tick
+every 4 days instead of 5 sparse points spanning what used to look like a whole year's worth of months.
+**Verified against the real, unmodified `drawChart()` function fed real payloads pulled live from the
+running Flask app** (`apps/web/app.py`, port 3037; not mocked): a full-year 2013 query went from 2
+labels to 8 (Jan/Feb/Apr/Jun/Jul/Sep/Nov/Dec '13); a June 2016 query now shows "Jun 1, 5, 9, 13, 17, 21,
+25, 30" — the requested 1-to-30 date-range coverage; a sub-day query ("at night on 26 January 2015") now
+shows 8 real clock times (12:00 AM through 11:00 PM) instead of a repeated date. A live browser
+screenshot wasn't possible in this environment (no Chromium, no sudo to install it); substituted the
+real rendering function's actual SVG output, published as an artifact for visual inspection.
+`node chart.test.js` and the full Python suite both pass: **255 passed, 1 skipped**, no regressions.
+
+### v1 web app: found and fixed a duplicate-tick bug introduced by the flat-8-ticks change
+Follow-up verification pass (fresh, not reusing earlier cached payloads): restarted the real Flask app,
+issued five brand-new live queries spanning different scopes (a month, a year, a week, an hour, the
+whole record), and fed each real payload through the real `drawChart()`. Four were correct; the
+**week-scoped chart had a real bug**: `"what was the mean wind speed last week?"` (a 6-day span, 18–24
+Dec 2016) produced x-axis labels `Dec 18 | Dec 18 | Dec 19 | Dec 20 | Dec 21 | Dec 22 | Dec 23 | Dec 24`
+— **two ticks both labelled "Dec 18"**. Root cause: the flat-8-ticks change (previous entry) spaces 8
+ticks evenly across the span regardless of the label format's own resolution; over 6 days, two adjacent
+ticks land under 24 hours apart, so both fall on the same calendar day under day-granularity formatting
+even though their underlying timestamps differ.
+**Fix:** each label-format tier now carries a `unitMs` (the smallest time gap it can render as a visibly
+different label — 1 day for the day+month tier, 28 days for month+year, 1 minute for HH:MM), and tick
+count is capped at `floor(span / unitMs) + 1`, never producing more ticks than the format can actually
+distinguish. A TDD regression test (`chart.test.js`) reproduces the exact 6-day/8-tick collision and
+asserts no duplicate labels.
+**Verified, twice, on real data:**
+- Before the fix (raw text ticks, live payload): `Dec 18 | Dec 18 | Dec 19 | Dec 20 | Dec 21 | Dec 22 | Dec 23 | Dec 24` (duplicate).
+- After the fix (same live payload, re-run): `Dec 18 | Dec 19 | Dec 20 | Dec 21 | Dec 22 | Dec 23 | Dec 24` (7 distinct days, none repeated).
+- The other four fresh live queries were re-checked against the fix and are unaffected/unchanged:
+  a June 2016 month view still shows `Jun 1, 5, 9, 13, 17, 21, 25, 30`; a 2014 year view still shows
+  8 distinct months; a single-point hour view still shows its one label; the whole-record view still
+  shows 8 distinct years/months.
+- Rendered actual PNG images (via `cairosvg`, installed in an isolated throwaway venv — not the system
+  Python — since no browser/Chromium was available to screenshot) of the real June and week charts
+  post-fix, confirming visually as well as textually that the axis reads correctly and the duplicate is
+  gone.
+**`node chart.test.js` and `pytest tests/` → 255 passed, 1 skipped**, no regressions. Not yet
+committed/pushed, per instruction to hold off.
+
+### v1: four self-recommended improvements — bare-question fallback, explainability trace, a query-coverage benchmark, y-axis ticks
+After the time-constraint work was verified end-to-end, proposed four concrete improvements (not
+generic suggestions — each tied to something actually observed this session) and implemented all four,
+each with its own TDD tests and live verification against the real dataset/app.
+
+**1. Bare-question fallback.** The exact gap flagged earlier ("what was the temperature at 3pm on 26
+January 2015?" — no statistic keyword, so it fell through to "I couldn't map that" despite the scope
+resolving perfectly) is now fixed: `Interface._answer` defaults `intent` to `"summary"` whenever a real
+sensor was named but no intent keyword matched, giving min/max/mean/std/missing rather than guessing a
+single statistic. The fallback still fires correctly for truly empty questions ("blah blah nonsense").
+Live-verified: the exact originally-broken question now returns
+`T (degC) on 26 January 2015 at 3pm: min=2.38, max=2.38, mean=2.38, std=nan, missing=0.` — the `2.38`
+matches the value independently cross-checked against raw pandas earlier in the session.
+
+**2. Explainability trace (`Answer.understood`).** Every answer now carries a short, human-readable
+trace of what the *deterministic* parser found — sensor(s), scope, hour — independent of intent routing
+or LLM phrasing, and built from the pure parsing functions only (verified by a monkeypatch test that
+`llm.plan` is called exactly once per `ask()`, proving the trace never triggers a second LLM call).
+Surfaced on all three surfaces: the CLI (`🧭 Understood: ...` line), the web API (`understood` field in
+`/api/ask`'s JSON), and the web UI (a `🧭 parsed: ...` tag under each answer). Live-verified via both the
+real CLI and a real `curl` to the running Flask app:
+`sensor=T (degC); day=26 January 2015; hour=3pm`.
+
+**3. Query-routing coverage benchmark (`src/query_coverage.py`).** A 49-question hand-labelled corpus
+(ground truth defined externally, by human judgement, before ever running the code — same principle as
+`retrieval_eval.py`) spanning every intent, several sensor aliases, and every time-scope style built this
+session, scored against the real `Interface.ask()` routing. **First honest run: 91.8% overall** (45/49),
+with 4 real, distinct misses:
+- Three were exactly the kind of gap the benchmark exists to catch: `"muggy"`, `"breezy"`, `"heavy"`
+  already appear in `rag_system`'s own sensor descriptions (added after an earlier retrieval-evaluation
+  session — see that module's own comment: *"the retrieval evaluation showed the original one-line docs
+  missed queries like 'muggy' / 'breezy'"*) but were never wired into `SENSOR_ALIASES`, the separate
+  dictionary that actually drives routing. Two subsystems, two vocabularies, only one updated.
+- One was a real keyword-coverage gap: `"going forward"` is an equally common way to ask about the
+  future as `"going to be"`/`"outlook"` (already-coded forecast synonyms), but wasn't itself coded.
+- Fixed all four (added `muggy/clammy/sticky/damp` → `rh (%)`, `heavy/thick/dense/thin` → `rho (g/m**3)`,
+  `breezy/blowy/gusty` → `wv (m/s)`, `"going forward"` → the forecast intent) and re-ran: **100.0% on
+  all four dimensions (intent/sensors/scope/overall), 49/49**, both on the synthetic benchmark fixture
+  and — added as `verify_results.py` check #18 — on the real Jena Climate dataset itself.
+- One apparent 5th "failure" during the process turned out to be a genuine bug in the *benchmark*, not
+  the interface: `score_coverage` originally reused one `Interface`'s conversation history across all 49
+  cases, so the follow-up-resolution system (a separate, already-tested feature) was silently hijacking
+  later keyword-less questions and making them inherit an unrelated earlier case's intent — dropping the
+  measured score to 77.6% before the benchmark itself was fixed to reset history per case.
+- One ground-truth label was also corrected mid-process: "how breezy is it in june" (no year) was
+  expected to resolve a scope, but `resolve_period` genuinely requires an explicit year by design (unlike
+  `resolve_day`, which does support a dayless month+day across all years) — a real, minor, documented
+  asymmetry, not a bug; the label was wrong, not the code.
+
+**4. Y-axis ticks.** Same underlying limitation the x-axis fix addressed, applied to the y-axis: it had
+only 2 labels (min/max), now has up to 4 evenly-spaced value labels plus faint horizontal gridlines
+(drawn behind the data line). TDD-verified via `chart.test.js`.
+
+**Final state: `pytest tests/` → 266 passed, 1 skipped** (was 197 at the very start of today's session —
++69 tests total across the whole day, zero regressions at any step). `verify_results.py` → **30/30**
+(was 29, +1 for the new coverage check). `node chart.test.js` → all assertions passed. Not yet
+committed/pushed, per instruction to hold off.
+
+### v1: wrote up all six evaluation methods, one doc each, with freshly-reproduced real evidence
+Created `v1/docs/evaluation/` (README index + 6 pages: truth layer, anomaly detection, forecasting,
+retrieval, LLM faithfulness, query-routing coverage) — every number in every page was **regenerated
+today** by directly calling the relevant module (`evaluation.benchmark`, `forecasting.backtest`,
+`retrieval_eval.evaluate_retriever`, `query_coverage.score_coverage`, `verify_results.py`'s own LLM
+faithfulness check), not copied from the older `report/EVALUATION.md` snapshot (which itself flags
+some of its own figures as no longer reproducible against the current codebase — see its header note).
+Fresh numbers captured: anomaly benchmark P/R/F1 = 0.871/0.867/0.868 (4-seed, 95% CI reported); known-event
+recall 4/5 (missed: 2015 July heatwave — reported honestly rather than only citing the better-looking
+synthetic numbers); bootstrap recall CI [0.836, 1.000]; McNemar IForest-vs-z-score p=4.4×10⁻¹⁶ (a real,
+significant difference in behaviour, not noise); forecast backtest MASE=0.75 (beats persistence); TF-IDF/LSA
+retrieval MRR=0.95 on the standard set (both docs also carry the earlier, still-relevant paraphrase/held-out
+finding: MRR collapses to 0.25 for keyword methods on genuinely unseen vocabulary vs. 0.556 for the dense
+encoder); LLM faithfulness 3/3 questions clean (majority-of-3, `llama3.2:3b`); query-routing coverage
+100%/49 (the honest 91.8%→100% story from earlier today, written up in full with the benchmark's own bug
+included as a documented finding, not smoothed over). Linked from `README.md`'s folder map. No code changes
+in this entry — documentation only, verified by literally re-running each command before writing the number
+next to it.
+
+### v1 src/: code-quality audit (read-only) + 7 fixes, user-prioritized before touching anything
+Asked to apply "best practice" cleanup to v1. Given the scope ("all folders," "arrange, fixed, debug, merge")
+was too vague to safely act on in a codebase with 266 passing tests, asked clarifying questions first — scope
+narrowed to `src/` only, general cleanup (no specific known bug), "merge" meaning consolidate duplication
+within v1 (not cross-version). Dispatched a read-only audit agent over all 18 `src/` files (~4400 lines) rather
+than guessing; it returned 8 concrete, evidence-backed findings (file/line references, not generic advice).
+Presented all 8 to the user with risk levels; **user selected everything except the one item the audit itself
+flagged as not-safe-to-merge-blindly** (`agent._scope` vs `interface._slice`, correctly left alone).
+
+Fixed, in risk order, each with tests and full-suite verification after every step:
+1. **Dead code** — `anomaly.anomaly_windows()` deleted (confirmed zero call sites in src/tests/apps/notebooks
+   via grep before deleting; every real caller already used `query_engine.get_anomaly_windows` directly).
+2. **Stale docstring** — `query_engine.py`'s module docstring claimed it owned "cluster membership"; that
+   logic has lived entirely in `clustering.py` since a much earlier refactor. Corrected.
+3. **Unused helper wired up** — `clustering.cluster_membership()` existed specifically so callers wouldn't
+   inline `int(labels.loc[when])`, but `interface.py`'s daytype handler inlined it anyway. Routed through
+   the helper.
+4. **`rag_system.py` duplication** — all 4 retriever classes (`Retriever`, `LSARetriever`, `BM25Retriever`,
+   `EmbeddingRetriever`) copy-pasted an identical `for_sensor()` method and `__init__` docs/keys prefix.
+   Extracted a shared `_SensorDocsBase`; added a structural test asserting all 4 classes inherit from it so
+   the duplication can't silently drift back.
+5. **`llm.py` duplication** — `classify`/`plan`/`plan_steps` each repeated the same JSON-extraction/
+   error-handling block. Extracted `_generate_json()`, with 4 new direct unit tests (wrapped-in-prose JSON,
+   no braces found, malformed JSON, network error) since this helper is now shared by three public functions.
+   Side-finding, not acted on (out of the approved scope, flagged for a separate decision): `llm.classify()`
+   itself has **zero call sites anywhere** — including notebooks — a second, larger dead-code candidate the
+   audit didn't separately call out.
+6. **Unified `query_engine`'s inconsistent return types** — `get_max`/`get_min` returned a bespoke `Extremum`
+   dataclass while every sibling function (`get_mean_std`, `threshold_events`, `weather_report`,
+   `sensor_summary`) returned a plain dict, forcing `interface.py`'s chart code to special-case
+   `hasattr(ans.value, "when")`. Converted `get_max`/`get_min` to dicts (fewer consumers than the reverse
+   direction would have touched) and removed the `Extremum` class. **This turned out to have a much larger
+   real blast radius than the audit estimated** — the initial grep-based sweep missed several call sites
+   entirely: `verify_results.py` had two additional direct `qe.get_max(df, S).value` calls and a whole
+   7-line block using `mx.when`/`mn.when` for the known-event-corroboration checks, and two notebooks
+   (`00_code_walkthrough.ipynb`, `02_methods_and_evaluation.ipynb`) used the same attribute-access pattern
+   and would have broken on next re-run. All found via exhaustive re-grepping after the first "clean" test
+   run passed too easily, and all fixed (notebooks patched via the same JSON-cell-editing approach used
+   earlier this session) — a concrete reminder that `pytest` passing is necessary but not sufficient
+   evidence a refactor's blast radius has been fully mapped; `verify_results.py` (a standalone script, not
+   part of the pytest suite) and the notebooks both had to be checked and run separately to catch this.
+   Added a regression test asserting every `query_engine` function returns a plain dict.
+7. **Fixed a real, narrow bug**: in `interface._understand`, when the LLM plan supplied only ONE of
+   start/end (e.g. "from June onward"), `start, end = s2 or e2, e2 or s2` silently collapsed both to the
+   same single date — turning an open-ended range into a one-day window. Only fires on the `use_llm=True`
+   path when the model returns a one-sided bound; was untested before this fix. Corrected to match the
+   already-correct pattern in `agent._scope` (open-ended `df.loc[start:end]` handles a `None` bound
+   natively), with a new regression test using a mocked `llm.plan` returning only `start`.
+
+**Final state: `pytest tests/` → 273 passed, 1 skipped** (was 266 before this task — +7 tests, zero
+regressions at any step). `verify_results.py` → 30/30. `node chart.test.js` → clean. `ruff check` → clean.
+`mypy` → clean, 18 source files. Live-verified end-to-end against the real CLI after the riskiest change
+(item 6) that max/min questions and their chart markers still work correctly on real data. Not yet
+committed/pushed, per standing instruction to hold off.
+
 ## 2026-07-13
 
 ### v3: closed three real module gaps (`reasoning.py`, `clustering.py`, `forecasting.py`) — and found the "§13" notebook section referenced below never actually existed

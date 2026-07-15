@@ -23,6 +23,30 @@ those numbers into friendly sentences; it never calculates anything.
 
 ---
 
+## Time constraints the interface understands
+
+Beyond explicit dates ("26 January 2015", "July 2015", "summer 2012"), the interface understands:
+
+**Relative to the dataset's own end** (the record runs to 1 Jan 2017; there's no real "now" in a
+static historical dataset, so these anchor to the record's last reading instead):
+`now`, `this hour` / `last hour`, `this week` / `last week`, `this month` / `last month`,
+`this year` / `last year`.
+
+**A relative/ordinal qualifier + an explicit year** resolves *inside that year*, not against the
+dataset's end — e.g. "last month 2013" → December 2013, "second month 2016" → February 2016,
+"last week of 2013", "34th week of 2013", "last day of 2013", "first hour of 2013". Week/day/hour
+count fixed-size blocks from 1 January of that year (not ISO calendar weeks).
+
+**Hour-of-day**, applied on top of whatever day/period/relative scope is also named — clock times
+("3pm", "15:00", "3 o'clock", "noon", "midnight") and time-of-day buckets ("morning" 06–12,
+"afternoon" 12–18, "evening" 18–21, "night" 21–06, wraps past midnight). Asked alone (no day/period),
+an hour filter reads across the whole record — e.g. "what's the hottest it's ever been at 3pm?".
+
+Examples: `"temperature last month"`, `"wind speed last hour"`, `"second month 2016"`,
+`"temperature at 3pm on 26 January 2015"`, `"mean wind speed at night in December 2016"`.
+
+---
+
 ## Start here (reading order)
 
 New to the code? Read in this order — each step is small and builds on the last:
@@ -140,14 +164,23 @@ Stop it with `Ctrl-C` (or `pkill -f apps/web/app.py` if it's running in the back
 ## How to check it works
 
 ```bash
-python3.12 -m pytest tests/       # 197 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
-python3.12 verify_results.py      # 29/29 independent checks (results == pandas, day-types, retriever IR metrics, LLM invents 0 numbers)
+python3.12 -m pytest tests/       # 266 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
+python3.12 verify_results.py      # 30/30 independent checks (results == pandas, day-types, retriever IR metrics, query-routing coverage, LLM invents 0 numbers)
 python3.12 -m ruff check src tests apps    # lint (clean)
 python3.12 -m mypy                # lightweight static typing (clean)
 ```
 
 `verify_results.py` is the trust gate: it re-computes headline results independently and confirms the
-LLM never introduced a number that isn't in the data.
+LLM never introduced a number that isn't in the data. It also runs `src/query_coverage.py` — a
+hand-labelled, 49-question benchmark of realistic questions, scored against the interface's real
+routing (intent/sensor/time-scope), the same "does it actually work on realistic input" principle
+`retrieval_eval.py` applies to the retriever. Currently 100% on all four scored dimensions; see
+`WORKLOG.md` (15 July 2026) for the honest first run (91.8%) and the specific gaps it found and closed.
+
+**Transparency:** every `Answer` also carries `.understood` — a short trace of what the deterministic
+parser found (sensor, time scope, hour), independent of intent routing or LLM phrasing, and guaranteed
+never to trigger a second LLM call. Shown in the CLI (`🧭 Understood: ...`), the web API's JSON, and the
+web UI (`🧭 parsed: ...`).
 
 ---
 
@@ -160,8 +193,9 @@ LLM never introduced a number that isn't in the data.
 | `notebooks/` | 5 Jupyter notebooks — walkthrough, EDA, methods, interface, deep models (see `notebooks/README.md`) |
 | `apps/` | things you **run**: `chat.py` (CLI) and `web/` (browser app) |
 | `report/` | things you **read**: the write-up, evaluation, model comparison (see below) |
-| `docs/` | design & review notes: `UNDERSTANDING_V1.md`, `ASSESSMENT_AND_RECOMMENDATIONS.md`, `AGENTIC_AND_POLISH.md`, `RETRIEVAL_EVALUATION.md`, `CHAT_MEMORY_PLAN.md` |
-| `verify_results.py` | the 29/29 independent verification of results |
+| `docs/` | design & review notes: `UNDERSTANDING_V1.md`, `ASSESSMENT_AND_RECOMMENDATIONS.md`, `AGENTIC_AND_POLISH.md`, `RETRIEVAL_EVALUATION.md`, `CHAT_MEMORY_PLAN.md`, `evaluation/` (below) |
+| `docs/evaluation/` | **how each of the 6 evaluation methods works, with reproducible real evidence** — start at `docs/evaluation/README.md` |
+| `verify_results.py` | the 30/30 independent verification of results |
 | `pyproject.toml` | package metadata + pytest/ruff config (puts `src` on the path from any directory) |
 
 ### Docs in `report/`
