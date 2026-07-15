@@ -291,6 +291,55 @@ def resolve_day(question: str):
     return None
 
 
+def resolve_relative_period(question: str, anchor_ts):
+    """Detect a bare relative period ("last month", "this hour", "now") -> (start, end, label).
+
+    Anchored to `anchor_ts` (the dataset's own last timestamp, e.g. `df.index.max()`) rather than
+    the real clock -- a static historical record has no real "now". Only fires when **no explicit
+    year** is named in the question; a year present changes the meaning entirely (see
+    `resolve_ordinal_unit_in_year`, which resolves inside that year instead). Returns
+    ``(None, None, "")`` when nothing relative is named.
+    """
+    q = question.lower()
+    if re.search(r"\b((?:19|20)\d{2})\b", q):
+        return None, None, ""
+    anchor_ts = pd.Timestamp(anchor_ts)
+
+    if re.search(r"\bnow\b", q):
+        return str(anchor_ts), str(anchor_ts), "now"
+
+    if re.search(r"\bthis hour\b", q):
+        return str(anchor_ts.floor("h")), str(anchor_ts), "this hour"
+    if re.search(r"\blast hour\b", q):
+        end = anchor_ts.floor("h") - pd.Timedelta(microseconds=1)
+        start = anchor_ts.floor("h") - pd.Timedelta(hours=1)
+        return str(start), str(end), "last hour"
+
+    if re.search(r"\bthis week\b", q):
+        return str(anchor_ts - pd.Timedelta(days=7)), str(anchor_ts), "this week"
+    if re.search(r"\blast week\b", q):
+        end = anchor_ts - pd.Timedelta(days=7) - pd.Timedelta(microseconds=1)
+        start = anchor_ts - pd.Timedelta(days=14)
+        return str(start), str(end), "last week"
+
+    if re.search(r"\bthis month\b", q):
+        start = anchor_ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return str(start), str(anchor_ts), f"{anchor_ts.strftime('%B %Y')} (to date)"
+    if re.search(r"\blast month\b", q):
+        prev = anchor_ts.replace(day=1) - pd.Timedelta(days=1)
+        return f"{prev.year}-{prev.month:02d}-01", _month_end(prev.year, prev.month), \
+            prev.strftime("%B %Y")
+
+    if re.search(r"\bthis year\b", q):
+        start = anchor_ts.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return str(start), str(anchor_ts), f"{anchor_ts.year} (to date)"
+    if re.search(r"\blast year\b", q):
+        y = anchor_ts.year - 1
+        return f"{y}-01-01", _month_end(y, 12), str(y)
+
+    return None, None, ""
+
+
 _COMPARE_WORDS = ["compare", "comparison", "versus", "vs", "difference", "hotter", "warmer",
                   "colder", "cooler", "higher", "lower", "than"]
 

@@ -54,10 +54,10 @@ last timestamp (`df.index.max()`, i.e. `2017-01-01 00:10`), since a static 2009�
 | `last hour` | the full clock hour immediately before that |
 | `this week` | rolling 7 days ending at the anchor (partial view of "this week") |
 | `last week` | the rolling 7-day window immediately before that |
-| `this month` | the 1st of the anchor's month up to the anchor (partial month) |
+| `this month` | the 1st of the anchor's month up to the anchor (partial month, Jan 2017) |
 | `last month` | the full previous calendar month (Dec 2016) |
-| `this year` | 1 Jan of the anchor's year up to the anchor (partial year, 2016) |
-| `last year` | the full previous calendar year (2015) |
+| `this year` | 1 Jan of the anchor's year up to the anchor (partial year, 2017 — a 10-minute stub, since the anchor is the very first reading of the year) |
+| `last year` | the full previous calendar year (2016) |
 
 Checked in `_understand` **after** `resolve_period`/`resolve_day` (an explicit date always wins) and
 **after** `resolve_ordinal_unit_in_year` (a year present changes the meaning entirely — see below).

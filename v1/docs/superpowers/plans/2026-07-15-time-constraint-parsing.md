@@ -84,13 +84,16 @@ def test_relative_this_month_is_partial_january():
     assert end == str(ANCHOR)
 
 
-def test_relative_last_year_is_2015():
-    assert resolve_relative_period("temperature last year", ANCHOR)[:2] == ("2015-01-01", "2015-12-31")
+def test_relative_last_year_is_2016():
+    # ANCHOR is 2017-01-01 00:10 -- "last year" is the last full calendar year, 2016.
+    assert resolve_relative_period("temperature last year", ANCHOR)[:2] == ("2016-01-01", "2016-12-31")
 
 
-def test_relative_this_year_is_partial_2016_to_date():
+def test_relative_this_year_is_partial_2017_to_date():
+    # ANCHOR's own year is 2017 (a 10-minute stub), consistent with "this month" resolving to a
+    # partial January 2017 rather than December 2016.
     start, end, _label = resolve_relative_period("temperature this year", ANCHOR)
-    assert start == "2016-01-01 00:00:00"
+    assert start == "2017-01-01 00:00:00"
     assert end == str(ANCHOR)
 
 
