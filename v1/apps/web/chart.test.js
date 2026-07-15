@@ -52,4 +52,78 @@ const clg = legendHtml(cmp);
 assert.ok(clg.includes('T (degC) — 2013') && clg.includes('T (degC) — 2014'));  // both named
 assert.ok(lineSwatch('#e07a34').includes('#e07a34'));
 
+// --- drawChart: x-axis has several intermediate ticks, not just the two end-points ---
+const wideChart = {
+  label: 'T (degC)',
+  x: Array.from({ length: 12 }, (_, i) => new Date(2013, i, 1).toISOString()),
+  y: Array.from({ length: 12 }, (_, i) => i),
+};
+const wideSvg = drawChart(wideChart);
+const axLabels = (wideSvg.match(/class="ax"/g) || []).length;
+assert.ok(axLabels >= 6, `expected >=6 "ax" labels (2 y-axis + several x-axis ticks), got ${axLabels}`);
+// intermediate ticks must actually be different months, not the same label repeated
+const monthLabels = [...wideSvg.matchAll(/class="ax">([^<]+)</g)].map(m => m[1]);
+assert.ok(new Set(monthLabels).size >= 5, `expected several distinct labels, got ${monthLabels}`);
+
+// --- drawChart: a sub-day span shows hour:minute on the x-axis, not just day/month/year ---
+const hourly = {
+  label: 'T (degC)',
+  x: ['2016-12-31T21:00:00.000Z', '2016-12-31T22:00:00.000Z',
+      '2016-12-31T23:00:00.000Z', '2017-01-01T00:00:00.000Z'],
+  y: [1, 2, 3, 4],
+};
+const hourlySvg = drawChart(hourly);
+assert.ok(/\d{1,2}:\d{2}/.test(hourlySvg), 'expected an HH:MM-style time label on a sub-day chart');
+
+// --- drawChart: monthaxis (year-on-year comparison) still gets multiple month ticks ---
+const cmpTicks = drawChart(cmp);
+const cmpAxLabels = (cmpTicks.match(/class="ax"/g) || []).length;
+assert.ok(cmpAxLabels >= 5, `expected >=5 "ax" labels on the comparison chart, got ${cmpAxLabels}`);
+
+// --- drawChart: a single-month span shows the day-of-month progression (1..30), not just a
+// handful of sparse points spanning a whole year's worth of months.
+const month = {
+  label: 'T (degC)',
+  x: Array.from({ length: 30 }, (_, i) => new Date(2016, 5, i + 1).toISOString()),
+  y: Array.from({ length: 30 }, (_, i) => i),
+};
+const monthSvg = drawChart(month);
+const monthDayLabels = [...monthSvg.matchAll(/class="ax">Jun (\d{1,2})</g)].map(m => Number(m[1]));
+assert.ok(monthDayLabels.length >= 6, `expected >=6 day-of-month labels, got ${monthDayLabels}`);
+assert.ok(new Set(monthDayLabels).size === monthDayLabels.length,
+  `expected distinct day numbers, got duplicates: ${monthDayLabels}`);
+assert.ok(monthDayLabels[0] <= 2 && monthDayLabels[monthDayLabels.length - 1] >= 29,
+  `expected labels spanning close to day 1 through 30, got ${monthDayLabels}`);
+
+// --- drawChart: a short span (e.g. a 6-day "last week" window) must not repeat the same
+// day-of-month label on two different ticks -- 8 flat ticks over 6 days can land two ticks less
+// than a day apart, which look identical under day-granularity formatting.
+const week = {
+  label: 'wv (m/s)',
+  x: Array.from({ length: 7 }, (_, i) => new Date(2016, 11, 18 + i).toISOString()), // Dec 18-24
+  y: [1.23, 1.19, 1.43, 1.44, 2.06, 1.57, 3.03],
+};
+const weekSvg = drawChart(week);
+const weekLabels = [...weekSvg.matchAll(/class="ax">(Dec \d{1,2})</g)].map(m => m[1]);
+assert.ok(weekLabels.length >= 5, `expected several distinct day labels, got ${weekLabels}`);
+assert.strictEqual(new Set(weekLabels).size, weekLabels.length,
+  `expected no duplicate day labels, got ${weekLabels}`);
+
+// --- drawChart: y-axis gets intermediate ticks too, not just the min/max end-points ---
+const yAxisChart = {
+  label: 'T (degC)',
+  x: Array.from({ length: 20 }, (_, i) => new Date(2016, 5, i + 1).toISOString()),
+  y: Array.from({ length: 20 }, (_, i) => i), // 0..19, so min=0, max=19
+};
+const yAxisSvg = drawChart(yAxisChart);
+// y-axis labels sit at a fixed x="3"; count how many distinct numeric labels appear there
+const yLabels = [...yAxisSvg.matchAll(/x="3" y="[^"]+" class="ax">([^<]+)</g)].map(m => Number(m[1]));
+assert.ok(yLabels.length >= 4, `expected >=4 y-axis labels, got ${yLabels}`);
+assert.ok(yLabels.includes(0) && yLabels.includes(19), `expected min (0) and max (19) among labels, got ${yLabels}`);
+assert.strictEqual(new Set(yLabels).size, yLabels.length, `expected distinct y-axis values, got ${yLabels}`);
+// gridlines: one faint horizontal line per y-tick, spanning the plot width
+const gridlineCount = (yAxisSvg.match(/<line[^>]*class="grid"/g) || []).length;
+assert.strictEqual(gridlineCount, yLabels.length,
+  `expected one gridline per y-tick (${yLabels.length}), got ${gridlineCount}`);
+
 console.log('chart.test.js: all assertions passed');

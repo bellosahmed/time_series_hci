@@ -22,6 +22,12 @@ function drawChart(c){
     (s2 ? ' compared with ' + (s2.label||'another period') : '') +
     (c.forecast ? ', with 14-day forecast band' : '');
   let svg=`<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${esc(desc)}"><title>${esc(desc)}</title>`;
+  // Faint horizontal gridlines at each y-tick, drawn first so the data line sits on top of them.
+  const nYTicks = yMax>yMin ? 4 : 1;
+  for(let i=0;i<nYTicks;i++){
+    const v = nYTicks>1 ? yMin + (yMax-yMin)*i/(nYTicks-1) : yMin;
+    svg+=`<line x1="${P}" y1="${sy(v).toFixed(1)}" x2="${W-P}" y2="${sy(v).toFixed(1)}" class="grid" stroke="#94a3b8" stroke-width="0.5" opacity="0.25"/>`;
+  }
   const hpts=hx.map((t,i)=>`${sx(t).toFixed(1)},${sy(hy[i]).toFixed(1)}`).join(' ');
   svg+=`<polyline points="${hpts}" fill="none" stroke="#2563eb" stroke-width="1.6"/>`;
   if(s2){  // amber = the second period, matching the compare legend
@@ -44,13 +50,34 @@ function drawChart(c){
     const col = mk.kind==='anomaly'?'#dc2626':(mk.kind==='max'?'#ea580c':'#0ea5e9');
     svg+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4" fill="${col}"/>`; });
   // monthaxis: a month-of-year comparison shares a synthetic year, so label months only.
-  const fmt = c.monthaxis
-    ? d=>new Date(d).toLocaleDateString(undefined,{month:'short'})
-    : d=>new Date(d).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'2-digit'});
-  svg+=`<text x="3" y="${(sy(yMax)+4).toFixed(1)}" class="ax">${yMax.toFixed(1)}</text>`;
-  svg+=`<text x="3" y="${(sy(yMin)+4).toFixed(1)}" class="ax">${yMin.toFixed(1)}</text>`;
-  svg+=`<text x="${P}" y="${H-7}" class="ax">${fmt(tMin)}</text>`;
-  svg+=`<text x="${W-P-52}" y="${H-7}" class="ax">${fmt(tMax)}</text>`;
+  // Otherwise the label granularity adapts to the plotted span, so a zoomed-in chart (a day or an
+  // hour) shows a time-of-day, not just a date that looks identical across every point. `unitMs`
+  // is the smallest time difference the chosen format can actually show as a different label --
+  // used below to cap tick count so two ticks never render the same-looking date twice.
+  const DAY=86400000, span=tMax-tMin;
+  let fmt, unitMs;
+  if(c.monthaxis){ fmt=d=>new Date(d).toLocaleDateString(undefined,{month:'short'}); unitMs=28*DAY; }
+  else if(span<DAY){ fmt=d=>new Date(d).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}); unitMs=60000; }
+  else if(span<45*DAY){ fmt=d=>new Date(d).toLocaleDateString(undefined,{day:'numeric',month:'short'}); unitMs=DAY; }
+  else { fmt=d=>new Date(d).toLocaleDateString(undefined,{month:'short',year:'2-digit'}); unitMs=28*DAY; }
+  // y-axis labels at the same ticks the gridlines were drawn at above, not just min/max.
+  for(let i=0;i<nYTicks;i++){
+    const v = nYTicks>1 ? yMin + (yMax-yMin)*i/(nYTicks-1) : yMin;
+    svg+=`<text x="3" y="${(sy(v)+4).toFixed(1)}" class="ax">${v.toFixed(1)}</text>`;
+  }
+  // Several evenly-spaced ticks along the continuous time axis (not just the two end-points, and
+  // not tied to how many raw data points there are) so month/day/hour context is visible all
+  // along the axis, not only at its edges. Up to 8 (short labels like "Jun 15" comfortably fit
+  // the chart width), but capped by how many *distinct* labels the format can actually produce
+  // over this span -- e.g. an 8-tick spread over a 6-day week would otherwise put two ticks
+  // under a day apart, rendering the same "Dec 18" twice.
+  const maxDistinct = span>0 ? Math.floor(span/unitMs)+1 : 1;
+  const nTicks = span>0 ? Math.max(2, Math.min(8, maxDistinct)) : 1;
+  for(let i=0;i<nTicks;i++){
+    const t = nTicks>1 ? tMin + span*i/(nTicks-1) : tMin;
+    const anchor = nTicks===1 || i===0 ? 'start' : i===nTicks-1 ? 'end' : 'middle';
+    svg+=`<text x="${sx(t).toFixed(1)}" y="${H-7}" text-anchor="${anchor}" class="ax">${fmt(t)}</text>`;
+  }
   return svg+`</svg>`;
 }
 
