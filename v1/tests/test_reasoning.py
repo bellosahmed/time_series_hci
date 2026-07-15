@@ -4,15 +4,11 @@ import numpy as np
 import pandas as pd
 
 from src import reasoning
+from tests.conftest import hourly_df
 
 
 def _df():
-    idx = pd.date_range("2024-01-01", periods=48, freq="h")
-    rng = np.random.default_rng(0)
-    return pd.DataFrame(
-        {"T (degC)": rng.normal(10, 5, 48), "rh (%)": rng.normal(70, 10, 48)},
-        index=idx,
-    )
+    return hourly_df(48, {"T (degC)": (10, 5), "rh (%)": (70, 10)})
 
 
 def test_sensor_zscores_sorted_by_magnitude():

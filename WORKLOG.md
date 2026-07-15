@@ -7,6 +7,107 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-15
 
+### v1: extended audit (`tests/`, `apps/`, `notebooks/`, `docs/`, `report/`) — 8 findings, 6 fixed
+Ran the same read-only Explore-agent audit pattern used earlier today on `src/` (line 228 below)
+over the rest of the tree, since the earlier audit was deliberately scoped to `src/` only. 8
+findings came back; user selected 6 to fix (deferred the two purely-structural, lower-value ones:
+splitting `tests/test_interface.py` was actually done anyway once the shared-fixture work made it
+easy — see below — leaving nothing deferred in the end).
+
+**Two real bugs, both one-line:**
+- `notebooks/00_code_walkthrough.ipynb` cell 9 called `anomaly.anomaly_windows(z)` — a function
+  deleted earlier today in the `src/` audit (item 7 of that batch, confirmed zero call sites at the
+  time). The notebook's saved output was from *before* that deletion, so it would error on
+  "Restart & Run All". *Why this slipped through*: the `src/`-only audit scope meant a caller in
+  `notebooks/` wasn't checked when the function was removed. Fixed: `qe.get_anomaly_windows(z)`
+  (the replacement, already imported as `qe` in that notebook's bootstrap cell).
+- `apps/web/app.py:89` hardcoded `model = body.get("model") or "llama3.2:3b"` instead of
+  `llm.DEFAULT_MODEL` — `apps/chat.py` already used the constant correctly. Meant the web UI
+  wouldn't track a `TSHCI_MODEL` env override the CLI would. One-line fix.
+
+**Stale check/test counts, 4 docs:** `report/REPORT.md` (3 spots: "29/29" / "197 tests"),
+`report/DATA_QUALITY.md` (a present-tense "20/20" with no date, now qualified as "as of 3 July
+2026" alongside the current 31/31), `docs/evaluation/README.md` and `report/EVALUATION.md` (both
+said "30/30" despite being dated *today* — the held-out-generalisation check, #18b, was added
+after those pages were written earlier in the same day). All corrected to the current **31/31
+checks, 296 tests** (verified: `pytest tests/ -q` exit 0, all dots, 1 skip, zero failures;
+`ruff check` clean).
+
+**Test duplication → `tests/conftest.py` (item 5, done narrower than first proposed).** The audit's
+framing ("~7 near-identical builders") overstated the real overlap on inspection: `test_query_engine`
+(hand-crafted deterministic values), `test_agent` (2-year seasonal sine), `test_clustering`
+(bimodal cold/warm day pattern), and `test_generalization` (injected spike, non-weather columns)
+each build a *genuinely different* shape for a reason specific to that test — forcing them through
+one generic helper would have hidden what's special about each rather than removing real
+duplication. Only `test_analysis._df`, `test_reasoning._df`, and `test_apps._small_df` were true
+duplicates (same n, same seed, same two/three normal-distributed sensor columns) — those three
+now call one shared `hourly_df(n, sensors, seed, start)` helper in the new `tests/conftest.py`.
+Also moved the `df`/`year_df` pytest fixtures used across the (now-split) interface tests into
+`conftest.py`, since they were identical fixtures re-declared in what was one file and are now
+several. *Verified*: `pytest tests/test_analysis.py tests/test_reasoning.py tests/test_apps.py -q`
+— all pass, `ruff` clean.
+
+**`tests/test_interface.py` split (item 7): 839 lines / 76 tests mixing 5+ concerns → 8 focused
+files.** The audit named follow-up resolution, intent detection, circular wind stats,
+evaluation-harness internals, and sensor-alias coverage as distinct concerns sharing one file; the
+remaining ~43 tests (general ask/routing, time-scope parsing, the anomaly/detector intent, the
+LLM faithfulness gate) split further into their own natural groupings rather than staying one
+catch-all. Result: `test_interface_intent.py`, `test_interface_scope.py`,
+`test_interface_followups.py`, `test_interface_anomaly.py`, `test_interface_llm_gate.py`,
+`test_interface_wind_circular.py`, `test_interface_evaluation.py`, `test_interface_aliases.py`.
+*Verified lossless before deleting the original*: diffed the sorted `def test_*` name list between
+the old file and the 8 new ones — identical set, 76/76, no renames, no drops. *Verified after*:
+`pytest tests/ --collect-only -q` collects exactly 297 items both before and after (76 test
+functions, one parametrized ×13, = 88 collected from the interface tests alone, matching the sum
+across the 8 new files exactly); full suite run clean (exit 0, dots only, 1 skip, no F/E).
+
+**Not re-litigated:** the audit's other two findings (three older docs in `docs/` carrying their
+own disagreeing historical snapshot numbers with no "superseded by" pointer; nothing else) were
+folded into the check-count fix pass rather than needing separate work.
+
+### v1: "do everyone" final batch — dead-code removal, the `_scope`/`_slice` merge, an adversarial faithfulness probe, and blind-worksheet delivery
+Follow-on to the 4 supervisor-gap fixes below (committed as `6acc283`). Five more items, all
+user-approved, all v1-only (v2/v3 explicitly excluded from this pass):
+
+- **Deleted `llm.classify()` and `CLASSIFY_SYSTEM`** — confirmed zero call sites anywhere
+  (src/tests/notebooks) before removing; flagged as a side-finding in the earlier `src/` audit
+  (line 252) but out of that batch's approved scope, picked up now.
+- **Merged `agent._scope`/`interface._slice`** into one `query_engine.slice_window(df, start, end,
+  label=None)` — the pair the first `src/` audit explicitly flagged as "not safe to merge blindly"
+  (line 235) because of a real behavioural gap: `agent._scope` didn't check for an empty result
+  window, `interface._slice` did. Traced the actual consequence through `execute_step` (the only
+  real caller) and found it wasn't a crash — `execute_step` already wraps every tool call in
+  `try/except Exception: return Fact(ok=False, error=str(exc))` — just a cryptic
+  `"attempt to get argmax of an empty sequence"` surfacing instead of a clean user-facing message.
+  Fixed as a message-quality improvement, not a crash fix (corrected an initial overstatement of
+  the bug's severity before writing this up). Verified via the real public API (`execute_step`)
+  before and after.
+- **Adversarial faithfulness probe** (`llm.adversarial_faithfulness_probe`) — the ablation on
+  ordinary questions had shown 0%/0% (an honest null: never observed a case the gate needed to
+  catch). Built 5 hand-crafted (question, facts) pairs that deliberately don't fully answer the
+  question, to actually tempt invention. *Real result*: 1 of 5 (20%, 3/3 repeats) — asked "how much
+  hotter was 2013 than 2012?" with only 2013's max supplied, `llama3.2:3b` fabricated "3.11 degrees
+  hotter... than 2012" every time. Replayed the identical scenario through the real, unmodified
+  `Interface._phrase()` gate: it caught the invented numbers and fell back to the template, exactly
+  as designed — the single clearest piece of evidence in the whole evaluation that the gate has
+  demonstrated (not just hypothesised) value. Also checked honestly: `Interface._compare()`, the
+  real code path for this question shape, always computes both years upfront, so this exact
+  vulnerable input can't actually occur through today's routing — real and demonstrated at the
+  `explain()`/gate level, not a live bug in current behaviour.
+- **Documented the max/min-vs-anomaly taxonomy ambiguity** the LLM-judge cross-check surfaced
+  (line 384 above): confirmed via `detect_intent()` and a new regression test that there's zero
+  actual keyword overlap in this system's own taxonomy — the ambiguity is a difference in how an
+  independent reader interprets "hottest ever recorded," not a routing bug.
+- **Blind-worksheet delivery**: `docs/evaluation/blind-worksheet/worksheet.csv` (72 questions, no
+  answers) + `README.md` (instructions, full intent/sensor vocab, the exact scoring command) —
+  ready for a real second human rater; running it remains the user's own action, not something
+  this session can complete.
+
+**Final state**: `pytest tests/` → 296 passed, 1 skipped (was 283 before this batch).
+`verify_results.py` → 31/31 hard checks + a new advisory (adversarial probe, `invention_rate=20%,
+n=15 runs across 5 adversarial cases`). Committed as part of the extended-audit fixes above (this
+batch itself had not yet been committed when the audit ran; both are being committed together).
+
 ### v1 interface: found a real gap in time-constraint parsing — hour-of-day silently dropped, relative phrases unhandled
 Investigated a report that the query interface "makes mistakes" with time-scoped questions (e.g. wind
 speed / temperature bound to a specific hour, date, month, "last month", "last hour"). Read

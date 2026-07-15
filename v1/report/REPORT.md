@@ -210,12 +210,13 @@ Flask for the web UI; an optional local Ollama model for phrasing. Dependencies 
 (Blackwell) with the cu128 PyTorch build; results are equivalent to CPU.
 
 ### 4.4 Testing
-**197 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
+**296 automated tests** pass (1 skipped) (`v1/tests/`): query-engine correctness vs pandas, interface
 routing (incl. circular wind-direction handling and the LLM trust-gate), the Flask/CLI app layer,
 the client-side chart/legend JavaScript (run in Node), synthetic evaluation with confidence
 intervals, the retriever IR metrics, and the deep / ARIMA detectors. An independent
-harness (`verify_results.py`) additionally recomputes results a different way and passes **29/29**
-checks (plus one advisory LLM-faithfulness vote); `reproduce.sh` regenerates everything in one command.
+harness (`verify_results.py`) additionally recomputes results a different way and passes **31/31**
+checks (plus advisory LLM-faithfulness/ablation/adversarial-probe and LLM-judge cross-check votes);
+`reproduce.sh` regenerates everything in one command.
 
 ---
 
@@ -228,10 +229,10 @@ correct, confirming the pipeline handles the data soundly.
 
 ### 5.2 Query-engine correctness
 On the full dataset, every exact query matched the independent `pandas` ground truth **exactly**
-(values and timestamps): the `verify_results.py` harness passes **29/29** cross-checks — max, min,
+(values and timestamps): the `verify_results.py` harness passes **31/31** cross-checks — max, min,
 mean and correlation equal pandas; scoped and threshold queries equal the corresponding pandas slice;
 per-sensor availability and skew are recomputed and agree; and the retriever IR metrics are
-independently reproduced — and the unit suite (**197 tests**) covers the same guarantees. This
+independently reproduced — and the unit suite (**296 tests**) covers the same guarantees. This
 establishes the trust guarantee the architecture depends on.
 
 ### 5.3 Anomaly-detection comparison
@@ -511,8 +512,8 @@ International Conference on Data Mining (ICDM)*, pp. 1317–1322.
 ```bash
 cd code/v1
 python -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)"
-python -m pytest tests/          # 197 pass (1 skipped)
-python verify_results.py         # 29/29 independent checks
+python -m pytest tests/          # 296 pass (1 skipped)
+python verify_results.py         # 31/31 independent checks
 bash reproduce.sh                # both of the above, with an environment banner
 ```
 Notebooks `00`–`04` reproduce the code walkthrough, exploration/visualisation, methods and evaluation,

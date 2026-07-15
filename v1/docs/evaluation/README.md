@@ -18,7 +18,7 @@ method explained and real, freshly-reproduced numbers as evidence (not copied fr
 All six feed into one command that reports pass/fail across the whole system:
 
 ```bash
-python3.12 verify_results.py   # 30/30 checks passed (15 July 2026)
+python3.12 verify_results.py   # 31/31 checks passed (15 July 2026)
 ```
 
 ## The one discipline that runs through all six

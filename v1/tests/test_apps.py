@@ -7,8 +7,7 @@ against a tiny in-memory DataFrame instead of loading the full 70k-row dataset.
 import sys
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
+from tests.conftest import hourly_df
 
 V1 = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(V1 / "apps" / "web"))
@@ -16,11 +15,7 @@ sys.path.insert(0, str(V1 / "apps"))
 
 
 def _small_df(n=48):
-    idx = pd.date_range("2024-01-01", periods=n, freq="h")
-    rng = np.random.default_rng(0)
-    return pd.DataFrame(
-        {"T (degC)": rng.normal(10, 5, n), "rh (%)": rng.normal(70, 10, n)}, index=idx
-    )
+    return hourly_df(n, {"T (degC)": (10, 5), "rh (%)": (70, 10)})
 
 
 def _client():

@@ -86,7 +86,7 @@ def create_app(df: pd.DataFrame | None = None) -> Flask:
         body = request.get_json(force=True) or {}
         question = (body.get("question") or "").strip()
         use_llm = bool(body.get("use_llm"))
-        model = body.get("model") or "llama3.2:3b"
+        model = body.get("model") or llm.DEFAULT_MODEL
         detector = body.get("detector") or interface.DEFAULT_DETECTOR
         history = body.get("history") or []   # recent turns from the client (server stays stateless)
         if not question:

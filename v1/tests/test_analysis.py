@@ -4,19 +4,11 @@ import pandas as pd
 import pytest
 
 from src import analysis, anomaly, evaluation, preprocess
+from tests.conftest import hourly_df
 
 
 def _df(n=500, seed=0):
-    idx = pd.date_range("2024-01-01", periods=n, freq="h")
-    rng = np.random.default_rng(seed)
-    return pd.DataFrame(
-        {
-            "T (degC)": rng.normal(10, 5, n),
-            "rh (%)": rng.normal(70, 10, n),
-            "p (mbar)": rng.normal(1000, 3, n),
-        },
-        index=idx,
-    )
+    return hourly_df(n, {"T (degC)": (10, 5), "rh (%)": (70, 10), "p (mbar)": (1000, 3)}, seed=seed)
 
 
 def test_distribution_stats_columns_and_symmetry():
