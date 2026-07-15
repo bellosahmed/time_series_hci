@@ -26,8 +26,10 @@ SENSOR_ALIASES = {
     "temperature": "T (degC)", "temp": "T (degC)", "hot": "T (degC)", "cold": "T (degC)",
     "potential temperature": "Tpot (K)", "potential": "Tpot (K)",
     "dew point": "Tdew (degC)", "dewpoint": "Tdew (degC)", "dew": "Tdew (degC)",
-    # humidity / water vapour
+    # humidity / water vapour -- "muggy"/"clammy"/"sticky"/"damp" match the colloquial vocabulary
+    # already used in rag_system's own rh (%) description (found missing by query_coverage.py)
     "relative humidity": "rh (%)", "humidity": "rh (%)", "humid": "rh (%)",
+    "muggy": "rh (%)", "clammy": "rh (%)", "sticky": "rh (%)", "damp": "rh (%)",
     "specific humidity": "sh (g/kg)",
     "water vapour concentration": "H2OC (mmol/mol)", "water vapor concentration": "H2OC (mmol/mol)",
     "water vapour": "H2OC (mmol/mol)", "water vapor": "H2OC (mmol/mol)",
@@ -36,13 +38,16 @@ SENSOR_ALIASES = {
     "vapour pressure deficit": "VPdef (mbar)", "vapor pressure deficit": "VPdef (mbar)",
     "actual vapour pressure": "VPact (mbar)", "actual vapor pressure": "VPact (mbar)",
     "vapour pressure": "VPact (mbar)", "vapor pressure": "VPact (mbar)",
-    # pressure / density
+    # pressure / density -- "heavy"/"thick"/"dense"/"thin" match rag_system's rho description
     "pressure": "p (mbar)",
     "air density": "rho (g/m**3)", "density": "rho (g/m**3)",
-    # wind (direction/gust phrases before the generic "wind")
+    "heavy": "rho (g/m**3)", "thick": "rho (g/m**3)", "dense": "rho (g/m**3)", "thin": "rho (g/m**3)",
+    # wind (direction/gust phrases before the generic "wind") -- "breezy"/"blowy"/"gusty" match
+    # rag_system's wv (m/s) description
     "wind direction": "wd (deg)", "direction": "wd (deg)",
     "wind gust": "max. wv (m/s)", "gust": "max. wv (m/s)",
     "wind speed": "wv (m/s)", "wind": "wv (m/s)",
+    "breezy": "wv (m/s)", "blowy": "wv (m/s)", "gusty": "wv (m/s)",
 }
 
 INTENTS = {
@@ -56,7 +61,8 @@ INTENTS = {
                     "linked", "associated", "associate"],
     "missing": ["missing", "gap", "gaps", "absent", "incomplete"],
     "forecast": ["forecast", "predict", "prediction", "projection", "next week", "next month",
-                 "next few days", "coming days", "future", "will it", "going to be", "outlook"],
+                 "next few days", "coming days", "future", "will it", "going to be", "going forward",
+                 "outlook"],
     "trend": ["trend", "trending", "rising", "falling", "increasing", "decreasing", "increase",
               "decrease", "warming", "cooling", "going up", "going down", "over time",
               "warmer", "colder", "hotter", "cooler"],
@@ -291,17 +297,38 @@ def resolve_day(question: str):
     return None
 
 
+_ORDINAL_WORDS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12,
+}
+
+# Guards resolve_relative_period against a chained ordinal+relative construct it can't resolve
+# ("third week of last year", "second month of this year"): without this, e.g. "last year" inside
+# "third week of last year" would match on its own and silently answer with the wrong (too-broad)
+# scope, dropping "third week" with no signal anything was ignored -- worse than not answering at
+# all. `resolve_ordinal_unit_in_year` only handles a literal year, not a nested relative unit, so
+# this combination is genuinely unsupported; refusing it here lets it fall through cleanly instead.
+_CHAINED_ORDINAL_PREFIX = re.compile(
+    r"\b(?:last|" + "|".join(_ORDINAL_WORDS) + r"|\d{1,3}(?:st|nd|rd|th))"
+    r"\s+(?:month|week|day|hour)\s+(?:of|in)\b"
+)
+
+
 def resolve_relative_period(question: str, anchor_ts):
     """Detect a bare relative period ("last month", "this hour", "now") -> (start, end, label).
 
     Anchored to `anchor_ts` (the dataset's own last timestamp, e.g. `df.index.max()`) rather than
     the real clock -- a static historical record has no real "now". Only fires when **no explicit
     year** is named in the question; a year present changes the meaning entirely (see
-    `resolve_ordinal_unit_in_year`, which resolves inside that year instead). Returns
-    ``(None, None, "")`` when nothing relative is named.
+    `resolve_ordinal_unit_in_year`, which resolves inside that year instead). Also refuses when the
+    question is a chained ordinal+relative construct ("third week of last year") that neither this
+    function nor `resolve_ordinal_unit_in_year` fully resolves -- see `_CHAINED_ORDINAL_PREFIX`.
+    Returns ``(None, None, "")`` when nothing (cleanly) relative is named.
     """
     q = question.lower()
     if re.search(r"\b((?:19|20)\d{2})\b", q):
+        return None, None, ""
+    if _CHAINED_ORDINAL_PREFIX.search(q):
         return None, None, ""
     anchor_ts = pd.Timestamp(anchor_ts)
 
@@ -338,12 +365,6 @@ def resolve_relative_period(question: str, anchor_ts):
         return f"{y}-01-01", _month_end(y, 12), str(y)
 
     return None, None, ""
-
-
-_ORDINAL_WORDS = {
-    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
-    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12,
-}
 
 
 def _qualifier_to_n(qual: str) -> int | None:
@@ -469,10 +490,12 @@ def resolve_hour(question: str):
 
     m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", q)
     if m:
-        h = int(m.group(1)) % 12
-        if m.group(3) == "pm":
-            h += 12
-        return h, h + 1, m.group(0)
+        h12 = int(m.group(1))
+        if 1 <= h12 <= 12:                # a 12-hour clock only has 1-12; "13pm" etc is malformed
+            h = h12 % 12
+            if m.group(3) == "pm":
+                h += 12
+            return h, h + 1, m.group(0)
 
     m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", q)
     if m:

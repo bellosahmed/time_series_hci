@@ -179,3 +179,25 @@ def test_resolve_any_period_yields_nothing_for_relative_phrase_without_an_anchor
 
 def test_resolve_any_period_falls_back_to_relative_with_an_anchor():
     assert resolve_any_period("last month", ANCHOR)[:2] == ("2016-12-01", "2016-12-31")
+
+
+def test_resolve_hour_rejects_out_of_range_12h_clock_time():
+    # "13pm" is not a valid 12-hour-clock time (only 1-12 are); must not silently accept it.
+    assert resolve_hour("temperature at 13pm") == (None, None, "")
+    assert resolve_hour("temperature at 19pm") == (None, None, "")
+
+
+def test_resolve_hour_still_accepts_valid_12h_boundary_values():
+    assert resolve_hour("temperature at 12pm")[:2] == (12, 13)
+    assert resolve_hour("temperature at 1am")[:2] == (1, 2)
+
+
+def test_relative_period_refuses_chained_ordinal_construct():
+    # "third week of last year" is a chained ordinal+relative construct that isn't fully
+    # resolvable -- must not silently answer using only "last year" and dropping "third week".
+    assert resolve_relative_period("third week of last year", ANCHOR) == (None, None, "")
+    assert resolve_relative_period("second month of this year", ANCHOR) == (None, None, "")
+
+
+def test_relative_period_still_resolves_plain_last_year_without_a_chained_prefix():
+    assert resolve_relative_period("temperature last year", ANCHOR)[:2] == ("2016-01-01", "2016-12-31")
