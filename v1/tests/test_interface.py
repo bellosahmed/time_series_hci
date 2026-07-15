@@ -17,6 +17,68 @@ def df():
     )
 
 
+@pytest.fixture
+def year_df():
+    idx = pd.date_range("2016-01-01 00:00", "2017-01-01 00:00", freq="h")
+    rng = np.random.default_rng(1)
+    return pd.DataFrame(
+        {"T (degC)": rng.normal(5, 3, len(idx)), "wv (m/s)": rng.normal(3, 1, len(idx))},
+        index=idx,
+    )
+
+
+def test_interface_anchors_last_month_to_dataset_end(year_df):
+    iface = interface.Interface(year_df)
+    assert iface._anchor == year_df.index.max()
+    ans = iface.ask("what was the mean temperature last month?")
+    expected = year_df.loc["2016-12-01":"2016-12-31"]
+    assert ans.value["mean"] == pytest.approx(expected["T (degC)"].mean())
+
+
+def test_interface_ordinal_month_with_year_beats_bare_year_default(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean temperature in the second month 2016?")
+    expected = year_df.loc["2016-02-01":"2016-02-29"]
+    assert ans.value["mean"] == pytest.approx(expected["T (degC)"].mean())
+    assert ans.value["mean"] != pytest.approx(year_df["T (degC)"].mean())
+
+
+def test_interface_hour_submask_narrows_a_named_period(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean temperature last month at 3pm?")
+    scoped = year_df.loc["2016-12-01":"2016-12-31"]
+    expected = scoped[scoped.index.hour == 15]
+    assert ans.value["mean"] == pytest.approx(expected["T (degC)"].mean())
+
+
+def test_interface_last_hour_is_the_final_clock_hour_of_the_record(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean temperature last hour?")
+    expected = year_df.loc["2016-12-31 23:00":"2016-12-31 23:59:59.999999"]
+    assert ans.value["mean"] == pytest.approx(expected["T (degC)"].mean())
+
+
+def test_interface_now_is_the_single_latest_reading(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean temperature now?")
+    assert ans.value["mean"] == pytest.approx(year_df["T (degC)"].iloc[-1])
+
+
+def test_interface_night_bucket_wraps_past_midnight(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean wind speed at night in december 2016?")
+    scoped = year_df.loc["2016-12-01":"2016-12-31"]
+    expected = scoped[(scoped.index.hour >= 21) | (scoped.index.hour < 6)]
+    assert ans.value["mean"] == pytest.approx(expected["wv (m/s)"].mean())
+
+
+def test_interface_hour_only_question_scopes_across_whole_record(year_df):
+    iface = interface.Interface(year_df)
+    ans = iface.ask("what was the mean temperature at 3pm?")
+    expected = year_df[year_df.index.hour == 15]
+    assert ans.value["mean"] == pytest.approx(expected["T (degC)"].mean())
+
+
 def test_followup_is_rewritten_and_routed(df, monkeypatch):
     from src import llm
     monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)

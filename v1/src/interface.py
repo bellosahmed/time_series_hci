@@ -30,13 +30,18 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
     SENSOR_ALIASES,
     _coerce_date,
     detect_intent,
+    hour_mask,
     is_causal_query,
     is_followup_cue,
+    resolve_any_period,
     resolve_compare,
     resolve_day,
     resolve_followup,
+    resolve_hour,
     resolve_legend_query,
+    resolve_ordinal_unit_in_year,
     resolve_period,
+    resolve_relative_period,
     resolve_sensors,
     resolve_threshold,
 )
@@ -80,6 +85,7 @@ class Interface:
     def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = llm.DEFAULT_MODEL,
                  detector: str = DEFAULT_DETECTOR):
         self.df = df
+        self._anchor = df.index.max()  # the dataset's own "now" -- a static record has no real one
         self.retriever = rag_system.Retriever()
         self.use_llm = use_llm
         self.model = model
@@ -102,10 +108,10 @@ class Interface:
         allowed to replace the user's words.
         """
         cols = list(self.df.columns)
-        start, end, _ = resolve_period(question)
+        start, end, _ = resolve_any_period(question, self._anchor)
         return bool(detect_intent(question) or resolve_sensors(question, cols)
                     or start or end or resolve_day(question) is not None
-                    or resolve_legend_query(question))
+                    or resolve_legend_query(question) or resolve_hour(question)[0] is not None)
 
     def _needs_context(self, question: str) -> bool:
         """True if `question` looks elliptical — i.e. not already a self-contained query.
@@ -115,9 +121,10 @@ class Interface:
         elliptical follow-ups ("what about 2014?", "and the peak?") are rewritten.
         """
         cols = list(self.df.columns)
-        start, end, _ = resolve_period(question)
+        start, end, _ = resolve_any_period(question, self._anchor)
         has_scope = bool(resolve_sensors(question, cols) or start or end
-                         or resolve_day(question) is not None)
+                         or resolve_day(question) is not None
+                         or resolve_hour(question)[0] is not None)
         return not (detect_intent(question) is not None and has_scope)
 
     def _context_for(self, sensor: str) -> str | None:
@@ -149,7 +156,7 @@ class Interface:
         return Answer(question, intent, text, value, sensors, computed, context, inferred)
 
     def _understand(self, question: str):
-        """Work out (intent, sensors, start, end, label, threshold) for a question.
+        """Work out (intent, sensors, start, end, label, threshold, day, hour) for a question.
 
         Deterministic parsing first (keywords + period/threshold regex, fully offline).
         If a local LLM is enabled it *refines* the plan — choosing the intent/sensor and
@@ -158,9 +165,10 @@ class Interface:
         """
         intent = detect_intent(question)
         sensors = resolve_sensors(question, list(self.df.columns))
-        start, end, label = resolve_period(question)
+        start, end, label = resolve_any_period(question, self._anchor)
         thr = resolve_threshold(question)
         day = resolve_day(question)
+        hour = resolve_hour(question)
 
         # The LLM only *fills gaps* the reliable deterministic parser left open — it
         # never overrides a confident keyword/explicit-date match (a small model is
@@ -181,7 +189,7 @@ class Interface:
                         label = plan.get("period") or f"{start} to {end}"
                 if thr is None and plan.get("op") in (">", "<") and plan.get("value") is not None:
                     thr = (plan["op"], float(plan["value"]))
-        return intent, sensors, start, end, label, thr, day
+        return intent, sensors, start, end, label, thr, day, hour
 
     def _slice(self, start, end, label):
         """Return (data, where_label) for a date window; (None, label) if it has no rows."""
@@ -277,9 +285,14 @@ class Interface:
         if day is not None:
             m, d, y, _ = day
             idx = self.df.index
-            return self.df[(idx.month == m) & (idx.day == d) & ((idx.year == y) if y else True)]
-        start, end, _ = resolve_period(question)
-        return self.df.loc[start:end] if (start or end) else self.df
+            data = self.df[(idx.month == m) & (idx.day == d) & ((idx.year == y) if y else True)]
+        else:
+            start, end, _ = resolve_any_period(question, self._anchor)
+            data = self.df.loc[start:end] if (start or end) else self.df
+        hour = resolve_hour(question)
+        if hour[0] is not None:
+            data = data[hour_mask(data.index, hour[0], hour[1])]
+        return data
 
     @staticmethod
     def _series_payload(s):
@@ -395,7 +408,7 @@ class Interface:
             return self._reply(question, "legend", marker, [],
                                computed=LEGEND_EXPLANATIONS[marker])
 
-        intent, sensors, start, end, label, thr, day = self._understand(question)
+        intent, sensors, start, end, label, thr, day, hour = self._understand(question)
 
         # Did the user ask about a sensor this dataset doesn't have?
         if not sensors:
@@ -476,6 +489,14 @@ class Interface:
                           f"I have no data for {scope or 'that period'}; the record runs "
                           f"{self.df.index.min():%Y-%m} to {self.df.index.max():%Y-%m}.",
                           None, [sensor])
+
+        if hour[0] is not None:
+            data = data[hour_mask(data.index, hour[0], hour[1])]
+            where = f"{where} at {hour[2]}" if where else f" at {hour[2]}"
+            if not len(data):
+                return Answer(question, intent,
+                              f"I have no data for {hour[2]}{(' ' + scope) if scope else ''}.",
+                              None, [sensor])
 
         # Weather report: a multi-sensor snapshot for the chosen day/period.
         if intent == "weather":
