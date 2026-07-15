@@ -95,10 +95,71 @@ anomaly and getting a clean result). Reported here rather than silently discarde
 methodology section that only shows the clean result would be less honest than one that shows an
 attempt that didn't pan out.
 
+## Adversarial probe: does the gate actually get exercised on anything?
+
+The ablation above uses real questions the real system routes, and the facts it pairs each
+question with always genuinely match — that's honest, but it can't distinguish "the model never
+hallucinates" from "this system's ordinary questions never happen to tempt it to." A harder,
+different test: `llm.adversarial_faithfulness_probe()` deliberately pairs a question with facts
+that *don't* fully answer it (asking for a median when only mean/std were computed, a rate when
+none was given, a narrower time slice than what was actually computed, and — critically — a
+year-over-year comparison when only *one* year's figure is supplied) — exactly the situations
+where a model has to either decline or invent something to sound complete.
+
+```bash
+python3.12 -c "
+from src import llm
+print(llm.adversarial_faithfulness_probe(model='llama3.2:3b', n_repeats=3))
+"
+```
+
+**Real result: 1 of 5 adversarial cases triggered invention, at 3/3 repeats (invention_rate =
+20%).** Asked *"how much hotter was 2013 than 2012?"* while supplied only 2013's maximum
+temperature (deliberately omitting 2012 entirely), the model confidently fabricated a specific,
+plausible-sounding comparison every single time:
+
+```
+Facts given:  "max T (degC) in 2013 was 34.93 on 27 Jul 2013 16:00."
+Raw model output: "The temperature in 2013 reached a maximum of 34.93°C on 27 July 2013 at 4pm,
+                    which is 3.11 degrees higher than the highest temperature recorded in 2012."
+faithfulness(): {'invented': [3.11, 2012.0]}
+```
+
+**This is real, demonstrated invention** — not a hypothetical. It confirms the gate is not merely
+a theoretical safeguard: given the right (adversarial) input, this exact model does fabricate
+confident-sounding numbers. The other 4 adversarial cases (asking for a median, a trend rate, an
+unsupported threshold, and a finer time breakdown than what was computed) did **not** trigger
+invention across the same 3 repeats each — the model correctly declined to guess those.
+
+**Crucially, this was then verified against the real, unmodified production gate, not just the
+underlying `faithfulness()` function in isolation** — forcing this exact vulnerable scenario
+through `Interface._phrase()` (the actual code path a user's question goes through):
+
+```
+LLM invented [3.11, 2012.0] for 'how much hotter was 2013 than 2012?'; using template.
+gated text: 'Q: how much hotter was 2013 than 2012?
+🔢 Computed: max T (degC) in 2013 was 34.93 on 27 Jul 2013 16:00.'
+```
+
+The gate caught it and fell back to the honest template — exactly as designed. **This is the
+clearest, most concrete evidence in this whole evaluation that the gate has real, demonstrated
+value**, not just a documented hypothesis (contrast with the ablation above, whose 0%/0% result on
+ordinary questions could only show the gate had never yet been *needed*).
+
+One further honest check: **does the real `Interface` ever actually construct this vulnerable
+input during normal use?** No — `Interface._compare()` (the real code path for "was X hotter than
+Y" questions) always computes *both* years' figures before ever calling the LLM, so this exact
+scenario cannot occur through today's actual routing. The vulnerability is real and confirmed at
+the `explain()`/gate level, but the current interface's own design happens to route around it for
+this specific question shape. That's not a reason to discount the finding — it's a second, useful
+piece of evidence: the *system's* architecture (compute complete facts before phrasing) is a first
+line of defence, and the faithfulness gate is a second, independent one that still matters for any
+future code path that doesn't get this as right.
+
 ## Honest caveats
 
 - This is reported as an **advisory** check in `verify_results.py`, not a hard pass/fail gate on
-  the overall 30/30 count — deliberately, because the 3B model is stochastic enough that a single
+  the overall 31/31 count — deliberately, because the 3B model is stochastic enough that a single
   unlucky run could otherwise make the headline pass/fail count flap between runs for reasons
   that have nothing to do with a real regression in the code (this exact instability is documented
   in the source comment above the check).

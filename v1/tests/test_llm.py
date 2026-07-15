@@ -116,6 +116,35 @@ def test_faithfulness_ablation_unavailable_without_ollama(monkeypatch):
     assert result == {"available": False}
 
 
+def test_adversarial_probe_unavailable_without_ollama(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    assert llm.adversarial_faithfulness_probe() == {"available": False}
+
+
+def test_adversarial_probe_detects_a_model_that_takes_the_bait(monkeypatch):
+    # A model that always answers with a plausible-sounding but unsupported number (e.g.
+    # inventing a median when only mean/std were given) must be caught, with the invented number
+    # itself reported.
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: "The median was about 8.2 degrees.")
+    cases = [("what was the median temperature in 2013?",
+             "T (degC) in 2013 mean=9.09, std=8.61, range=48.04.", None, None)]
+    result = llm.adversarial_faithfulness_probe(cases, model="m", n_repeats=2)
+    assert result["available"] is True
+    assert result["invention_rate"] == 1.0
+    assert 8.2 in result["per_case"][0]["invented_numbers"]
+
+
+def test_adversarial_probe_does_not_flag_a_model_that_declines_to_guess(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: (
+        "The average was 9.09 degrees; a median wasn't computed."))
+    cases = [("what was the median temperature in 2013?",
+             "T (degC) in 2013 mean=9.09, std=8.61, range=48.04.", None, None)]
+    result = llm.adversarial_faithfulness_probe(cases, model="m", n_repeats=2)
+    assert result["invention_rate"] == 0.0
+
+
 def test_rewrite_followup_none_without_history(monkeypatch):
     monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
     assert llm.rewrite_followup("what about 2014?", [], model="m") is None

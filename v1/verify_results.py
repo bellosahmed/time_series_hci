@@ -241,6 +241,14 @@ if llm.is_available() and llm.list_models():
                "a pass/fail claim)", True,
                f"intent={judge['intent_agreement_pct']:.1f}% sensors={judge['sensors_agreement_pct']:.1f}% "
                f"scope={judge['scope_agreement_pct']:.1f}% (n={judge['n_judged']})")
+
+    # 17d. Adversarial faithfulness probe -- deliberately mismatched (question, facts) pairs, to
+    # test whether the gate actually gets exercised, not just whether ordinary questions happen to
+    # avoid tempting it. See docs/evaluation/05-llm-faithfulness.md.
+    probe = llm.adversarial_faithfulness_probe(model=model, n_repeats=3)
+    advise("adversarial faithfulness probe: invention rate under deliberately mismatched facts",
+           True, f"invention_rate={probe['invention_rate']:.0%} (n={probe['n_total_runs']} runs "
+           f"across {len(probe['per_case'])} adversarial cases)")
 else:
     print("  (skipped LLM faithfulness advisory — Ollama not available)")
 

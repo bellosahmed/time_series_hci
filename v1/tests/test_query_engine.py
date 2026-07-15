@@ -88,3 +88,48 @@ def test_sensor_summary_keys(df):
     s = qe.sensor_summary(df, "temp")
     for key in ("mean", "std", "min", "max", "range", "missing", "max_at", "min_at"):
         assert key in s
+
+
+# --- slice_window: shared by Interface and Agent, which each used to carry a near-duplicate copy ---
+
+def test_slice_window_no_bounds_returns_whole_df_and_empty_label(df):
+    data, where = qe.slice_window(df, None, None)
+    assert data is df
+    assert where == ""
+
+
+def test_slice_window_with_external_label_on_hit(df):
+    data, where = qe.slice_window(df, "2024-01-01 02:00", "2024-01-01 05:00", label="a window")
+    assert len(data) == 4
+    assert where == " in a window"
+
+
+def test_slice_window_with_external_label_on_miss_returns_none(df):
+    data, where = qe.slice_window(df, "2099-01-01", "2099-01-02", label="the year 2099")
+    assert data is None
+    assert where == "the year 2099"
+
+
+def test_slice_window_auto_label_two_sided(df):
+    data, where = qe.slice_window(df, "2024-01-01 02:00", "2024-01-01 05:00")
+    assert len(data) == 4
+    assert where == " in 2024-01-01 02:00 to 2024-01-01 05:00"
+
+
+def test_slice_window_auto_label_one_sided_start_only(df):
+    data, where = qe.slice_window(df, "2024-01-01 05:00", None)
+    assert where == " from 2024-01-01 05:00"
+
+
+def test_slice_window_auto_label_one_sided_end_only(df):
+    data, where = qe.slice_window(df, None, "2024-01-01 05:00")
+    assert where == " up to 2024-01-01 05:00"
+
+
+def test_slice_window_auto_label_on_miss_also_returns_none(df):
+    # Previously agent.py's own copy of this logic (`_scope`) did NOT do this -- it silently
+    # returned an empty DataFrame, which crashed downstream query_engine calls (e.g. get_max on
+    # an empty Series raises ValueError). This is a real fix, not just deduplication.
+    data, where = qe.slice_window(df, "2099-01-01", "2099-01-02")
+    assert data is None
+    assert where == "2099-01-01 to 2099-01-02"

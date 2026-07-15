@@ -54,16 +54,9 @@ class AgentAnswer:
     plan: list = field(default_factory=list)
 
 
-def _scope(df: pd.DataFrame, start, end) -> tuple[pd.DataFrame, str]:
-    """Slice to a date window, returning (data, human label)."""
-    if not start and not end:
-        return df, ""
-    sub = df.loc[start:end]
-    if start and end:
-        label = f" in {start} to {end}"
-    else:
-        label = f" from {start}" if start else f" up to {end}"
-    return sub, label
+def _scope(df: pd.DataFrame, start, end) -> tuple[pd.DataFrame | None, str]:
+    """Slice to a date window, returning (data, human label); (None, label) if it has no rows."""
+    return qe.slice_window(df, start, end)
 
 
 # --- Tool executors -----------------------------------------------------------------------
@@ -72,6 +65,8 @@ def _scope(df: pd.DataFrame, start, end) -> tuple[pd.DataFrame, str]:
 
 def _run_extremum(df, sensor, kind, start=None, end=None, **_):
     data, where = _scope(df, start, end)
+    if data is None:
+        return f"I have no {sensor} data for {where}.", None
     if sensor in analysis.CIRCULAR_SENSORS:  # a plain max/min on a compass bearing is meaningless
         cs = analysis.circular_stats_deg(data[sensor])
         return (f"{sensor}{where} is a compass bearing; prevailing direction {cs['mean']:.1f}° "
@@ -82,6 +77,8 @@ def _run_extremum(df, sensor, kind, start=None, end=None, **_):
 
 def _run_average(df, sensor, start=None, end=None, **_):
     data, where = _scope(df, start, end)
+    if data is None:
+        return f"I have no {sensor} data for {where}.", None
     if sensor in analysis.CIRCULAR_SENSORS:
         cs = analysis.circular_stats_deg(data[sensor])
         return (f"{sensor}{where}: prevailing (circular mean) {cs['mean']:.1f}° "
@@ -93,6 +90,8 @@ def _run_average(df, sensor, start=None, end=None, **_):
 
 def _run_correlation(df, a, b, start=None, end=None, **_):
     data, where = _scope(df, start, end)
+    if data is None:
+        return f"I have no {a}/{b} data for {where}.", None
     circ = [s for s in (a, b) if s in analysis.CIRCULAR_SENSORS]
     if len(circ) == 1:  # one compass angle + one linear sensor -> circular-linear association
         deg = circ[0]
@@ -106,6 +105,8 @@ def _run_correlation(df, a, b, start=None, end=None, **_):
 
 def _run_threshold(df, sensor, op, value, start=None, end=None, **_):
     data, where = _scope(df, start, end)
+    if data is None:
+        return f"I have no {sensor} data for {where}.", None
     r = qe.threshold_events(data, sensor, op, value)
     sign = "above" if op == ">" else "below"
     when = f", first on {qe.fmt_when(r['first'])}" if r["first"] is not None else ""
@@ -115,6 +116,8 @@ def _run_threshold(df, sensor, op, value, start=None, end=None, **_):
 
 def _run_anomaly_count(df, sensor, start=None, end=None, **_):
     data, where = _scope(df, start, end)
+    if data is None:
+        return f"I have no {sensor} data for {where}.", None
     decomp = analysis.decompose(data[sensor], period=24)
     resid = decomp["resid"].dropna()
     from . import anomaly

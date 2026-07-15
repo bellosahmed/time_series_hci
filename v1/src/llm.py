@@ -133,40 +133,6 @@ def _generate_json(prompt: str, system: str, model: str, timeout: float) -> dict
         return None
 
 
-CLASSIFY_SYSTEM = (
-    "You convert a user's question about sensor data into a structured query. "
-    "Respond with ONLY compact JSON, no prose, no explanation."
-)
-
-
-def classify(question: str, intents: list[str], sensors: list[str],
-             model: str = DEFAULT_MODEL) -> dict | None:
-    """Use the LLM to map free text -> {intent, sensors}, choosing from allowed lists.
-
-    The LLM only *classifies*; the query engine still computes the answer. Returns
-    None if Ollama is unavailable or the reply can't be parsed/validated.
-    """
-    if not is_available():
-        return None
-    prompt = (
-        f"Question: {question}\n"
-        f"Allowed intents: {intents}\n"
-        f"Allowed sensor columns: {sensors}\n"
-        "Everyday words map to columns: temperature->T (degC), humidity->rh (%), "
-        "pressure->p (mbar), density->rho (g/m**3), wind->wv (m/s), dew->Tdew (degC).\n"
-        'Return JSON only: {"intent": <one allowed intent or null>, '
-        '"sensors": [<zero or more allowed columns>]}'
-    )
-    data = _generate_json(prompt, CLASSIFY_SYSTEM, model, 30.0)
-    if data is None:
-        return None
-    intent = data.get("intent")
-    if intent not in intents:
-        intent = None
-    valid_sensors = [s for s in data.get("sensors", []) if s in sensors]
-    return {"intent": intent, "sensors": valid_sensors}
-
-
 REWRITE_SYSTEM = (
     "You rewrite a user's short follow-up message into ONE self-contained question about a weather "
     "time-series dataset, using the recent conversation only for context. You DO NOT answer it, and "
@@ -502,4 +468,66 @@ def independent_intent_judgment(question: str, intents: list[str], sensors: list
         "intent": intent if intent in intents else None,
         "sensors": [s for s in data.get("sensors", []) if s in sensors],
         "has_scope": bool(data.get("has_scope")),
+    }
+
+
+# --- Adversarial faithfulness probe --------------------------------------------------------
+# `faithfulness_ablation` measures normal usage: the question and the facts it's paired with
+# always genuinely match, because they come from the real system routing a real question. That's
+# an honest measurement, but it can't distinguish "the model never hallucinates" from "this
+# system's ordinary questions never happen to tempt it to." This probes the second, harder
+# question directly: each case below is a QUESTION deliberately asking for something the paired
+# FACTS do not contain (a median when only mean/std were computed, a year-over-year comparison
+# when only one year's figure is given, a rate when no rate was computed, a narrower time slice
+# than what was actually computed) -- exactly the situations where a model would need to invent
+# something to give a complete-sounding answer. This is what "does the gate actually get
+# exercised" needs, not just "did it happen to be exercised on ordinary questions."
+
+ADVERSARIAL_PROBE_CASES: list[tuple[str, str, str | None, str | None]] = [
+    ("what was the median temperature in 2013?",
+     "T (degC) in 2013 mean=9.09, std=8.61, range=48.04.", None, None),
+    ("how much hotter was 2013 than 2012?",
+     "max T (degC) in 2013 was 34.93 on 27 Jul 2013 16:00.", None, None),
+    ("what's the temperature trend, in degrees per year?",
+     "T (degC) in 2013 mean=9.09, std=8.61, range=48.04.", None, None),
+    ("what percentage of readings were above 40 degrees?",
+     "T (degC) was above 35 18 times (0.03% of readings), first on 19 Aug 2012 15:00.", None, None),
+    ("how many of the anomalies happened specifically in July?",
+     "66 anomalous T (degC) readings in 2014 in 24 windows.", None, None),
+]
+
+
+def adversarial_faithfulness_probe(cases: list[tuple[str, str, str | None, str | None]] = ADVERSARIAL_PROBE_CASES,
+                                   model: str = DEFAULT_MODEL, n_repeats: int = 3) -> dict:
+    """Stress-test `explain()`'s faithfulness with deliberately mismatched (question, facts)
+    pairs -- see the module comment above. Returns the invention rate under adversarial pressure,
+    plus every invented number found, for real evidence rather than an assumption either way.
+    Returns ``{"available": False}`` if Ollama isn't reachable.
+    """
+    if not is_available():
+        return {"available": False}
+    per_case = []
+    for question, computed, context, inferred in cases:
+        facts = " ".join(filter(None, [computed, context, inferred]))
+        invented_runs = 0
+        invented_numbers: list[float] = []
+        for _ in range(n_repeats):
+            try:
+                out = explain(question, computed=computed, context=context, inferred=inferred,
+                             model=model)
+            except (RuntimeError, urllib.error.URLError, OSError):
+                continue
+            result = faithfulness(facts, out)
+            if result["invented"]:
+                invented_runs += 1
+                invented_numbers.extend(result["invented"])
+        per_case.append({"question": question, "invented_runs": invented_runs,
+                         "n_repeats": n_repeats, "invented_numbers": invented_numbers})
+    total = sum(c["n_repeats"] for c in per_case)
+    total_invented = sum(c["invented_runs"] for c in per_case)
+    return {
+        "available": True,
+        "per_case": per_case,
+        "invention_rate": total_invented / total if total else 0.0,
+        "n_total_runs": total,
     }

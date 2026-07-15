@@ -59,6 +59,46 @@ def get_mean_std(df: pd.DataFrame, sensor: str) -> dict:
     }
 
 
+def slice_window(df: pd.DataFrame, start, end, label: str | None = None) -> tuple[pd.DataFrame | None, str]:
+    """Slice `df` to a date window, returning (data, human label).
+
+    Shared by `Interface` and `Agent`'s tool executors, which each used to carry their own
+    near-duplicate copy of this (`interface._slice` / `agent._scope`) with a real behavioural gap
+    between them -- see below.
+
+    If `start`/`end` are both falsy, returns `(df, "")` -- no window named, use everything.
+
+    If `label` is given (a human-friendly period name, e.g. "summer 2012", already resolved by the
+    deterministic parser), it's used directly in the returned text; an EMPTY result returns
+    ``(None, label)`` so the caller can report "no data for X" instead of silently proceeding on
+    zero rows.
+
+    If `label` is omitted, one is synthesized directly from `start`/`end` (correctly handling a
+    one-sided open range: "from 2013-06-01" / "up to 2013-08-31") -- this is `agent.py`'s use case,
+    since its tool calls only ever have raw dates, no pre-resolved period name. An empty result in
+    this mode ALSO now returns ``(None, label)``: previously `agent._scope` did not check this and
+    silently returned an empty DataFrame, which crashed downstream `query_engine` calls (e.g.
+    `get_max` on an empty Series raises `ValueError`) -- a real, previously-untested bug, fixed here
+    as part of unifying the two copies, not just deduplicated.
+    """
+    if not start and not end:
+        return df, ""
+    sub = df.loc[start:end]
+    if label is not None:
+        if len(sub):
+            return sub, f" in {label}"
+        return None, label
+    if start and end:
+        auto_label = f"{start} to {end}"
+        prefix = " in "
+    else:
+        auto_label = f"{start}" if start else f"{end}"
+        prefix = " from " if start else " up to "
+    if len(sub):
+        return sub, f"{prefix}{auto_label}"
+    return None, auto_label
+
+
 def get_correlation(df: pd.DataFrame, a: str, b: str) -> float:
     """Exact Pearson correlation between two sensors."""
     _check(df, a)

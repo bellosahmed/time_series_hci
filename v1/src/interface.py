@@ -222,12 +222,7 @@ class Interface:
 
     def _slice(self, start, end, label):
         """Return (data, where_label) for a date window; (None, label) if it has no rows."""
-        if start is None and end is None:
-            return self.df, ""
-        sub = self.df.loc[start:end]
-        if len(sub):
-            return sub, f" in {label}"
-        return None, label
+        return qe.slice_window(self.df, start, end, label=label)
 
     def _missing_concept(self, question: str):
         """If the user named a sensor concept this dataset doesn't have, return the word."""

@@ -73,6 +73,29 @@ def test_execute_step_rejects_bad_input(df):
                     "args": {"sensor": "T (degC)", "op": ">", "value": "abc"}})     # bad value
 
 
+# --- empty date window: a clean "no data" message, not a raw pandas exception -------------
+# `_scope` (agent.py's tool-window slicer) and `interface._slice` used to be two near-duplicate
+# copies; `_scope`'s copy didn't check for an empty result, so a window with no data raised a
+# raw ValueError ("attempt to get argmax of an empty sequence") from inside query_engine. That
+# exception was always caught by execute_step's own try/except (so it was never a crash reaching
+# a user), but it surfaced as `ok=False` with a cryptic technical error instead of a clean
+# "I have no data" answer -- fixed as part of unifying the two copies into `query_engine.slice_window`.
+
+def test_extremum_on_empty_window_gives_a_clean_message_not_a_raw_exception(df):
+    fact = agent.execute_step(df, {"tool": "extremum", "args": {
+        "sensor": "T (degC)", "kind": "max", "start": "2099-01-01", "end": "2099-01-02"}})
+    assert fact.ok
+    assert fact.error is None
+    assert "no" in fact.computed.lower() and "T (degC)" in fact.computed
+
+
+def test_average_on_empty_window_gives_a_clean_message(df):
+    fact = agent.execute_step(df, {"tool": "average", "args": {
+        "sensor": "rh (%)", "start": "2099-01-01", "end": "2099-01-02"}})
+    assert fact.ok
+    assert "no" in fact.computed.lower()
+
+
 # --- orchestration: multi-step, all exact -------------------------------------------------
 
 def test_multi_step_plan_all_exact(df):

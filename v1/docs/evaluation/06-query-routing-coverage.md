@@ -167,7 +167,16 @@ account for most of the 39 disagreements:
   separate times — the LLM appears to conflate "an extreme value" with "an anomalous one." This is
   a real, defensible alternative reading (an all-time extreme *could* reasonably be framed as an
   anomaly) that a strict human second rater might also raise, and is exactly the kind of ambiguity
-  independent review is supposed to surface.
+  independent review is supposed to surface. **Checked whether this is an actual bug in the
+  system's own keyword taxonomy, not just an LLM-judge quirk**: it isn't. `INTENTS["anomaly"]` and
+  `INTENTS["max"]`/`["min"]` have zero keyword overlap ("record high"/"record low" are coded as
+  `max`/`min` keywords, not `anomaly` ones), and `detect_intent("hottest it got in summer 2013")`
+  correctly returns `"max"`, not `"anomaly"` — confirmed and locked in with a regression test
+  (`test_extreme_value_questions_route_to_max_min_not_anomaly`). So this is a genuine difference
+  between how an *outside* reader might frame the question and how this system's own explicit
+  design resolves it, documented here rather than "fixed" — there is nothing broken in the code to
+  fix; the taxonomy is unambiguous by design, an independent reader's alternative framing just
+  isn't the same question as "does the code do what it says it does."
 - A smaller pattern: the LLM sometimes named specific sensors for questions the human label marked
   as "no sensor required" (e.g. "compare 2012 and 2015" → LLM guessed `p (mbar), T (degC)`) —
   inferring plausible sensors rather than strictly reading only what's textually present. And on
