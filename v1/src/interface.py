@@ -16,6 +16,7 @@ Flow:  question -> interpret (intent + sensor) -> query engine (truth)
 
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 from dataclasses import dataclass, field
@@ -25,25 +26,36 @@ import pandas as pd
 from . import analysis, anomaly, clustering, forecasting, llm, rag_system, reasoning
 from . import query_engine as qe
 from .interface_parsing import (  # noqa: F401  re-exported for callers and tests
+    DIRECTION_LABELS,
+    DIRECTION_SUPERLATIVES,
     INTENTS,
     LEGEND_EXPLANATIONS,
     SENSOR_ALIASES,
     _coerce_date,
+    correlation_strength,
     detect_intent,
     hour_mask,
     is_causal_query,
+    is_correlation_breakdown_query,
     is_followup_cue,
+    is_forward_looking_query,
     resolve_any_period,
     resolve_compare,
     resolve_day,
+    resolve_direction,
+    resolve_explicit_scope_restriction,
     resolve_followup,
+    resolve_generic_direction,
     resolve_hour,
     resolve_legend_query,
     resolve_ordinal_unit_in_year,
     resolve_period,
+    resolve_recurring_month,
     resolve_relative_period,
+    resolve_secondary_period,
     resolve_sensors,
     resolve_threshold,
+    split_target_clause,
 )
 
 logger = logging.getLogger(__name__)
@@ -425,6 +437,25 @@ class Interface:
                              "lower": [round(float(v), 2) for v in fc["lower"]],
                              "upper": [round(float(v), 2) for v in fc["upper"]]}}
 
+    def _analog_scope(self, day, start, end, label):
+        """A parsed day/period -> (freq, target_start, target_end, scope_label) for the
+        "recommend" intent's analog mode, or None if the question named no day/month/year to
+        find similar dates for. Only day/month/year granularities are supported (not seasons —
+        their Dec-Feb wrap doesn't tile cleanly into `resample` buckets).
+        """
+        if day is not None and day[2] is not None:              # a specific, dated day
+            m, d, y, day_label = day
+            ts = pd.Timestamp(year=y, month=m, day=d)
+            return "D", ts, ts, day_label
+        if start is not None and end is not None:
+            s, e = pd.Timestamp(start), pd.Timestamp(end)
+            if s.month == 1 and s.day == 1 and e.month == 12 and e.day == 31 and s.year == e.year:
+                return "YS", s, e, label or str(s.year)
+            next_day = e + pd.Timedelta(days=1)
+            if s.day == 1 and next_day.day == 1 and s.year == e.year and s.month == e.month:
+                return "MS", s, e, label or f"{s:%B %Y}"
+        return None
+
     def _answer(self, question: str) -> Answer:
         # Legend/marker questions ("what is the red dot?") are explained from a fixed
         # knowledge base — the meaning is a known fact, so no computation is involved.
@@ -482,6 +513,219 @@ class Interface:
                                context=ctx,
                                inferred="Ask e.g. 'what kind of day was 5 January 2014?' to "
                                         "classify a specific day.")
+
+        # Recommend ("suggest similar dates", "recommend hot days in June"): two modes.
+        # Directional mode ranks days by a named quality (hot/cold/humid/dry/windy/calm) within
+        # a scope; analog mode finds other periods with the most similar overall weather to a
+        # named day/month/year.
+        if intent == "recommend":
+            # Known adjectives (hot/cold/humid/dry/windy/calm) first, for their natural
+            # phrasing; a generic "highest/lowest <sensor>" covers the other 11 sensors that
+            # have no colloquial adjective (pressure, dew point, wind direction, ...).
+            direction = resolve_direction(question) or resolve_generic_direction(
+                question, list(self.df.columns))
+            if direction is not None:
+                dsensor, ascending = direction
+                month_num = resolve_recurring_month(question)
+                if month_num is not None:                       # "hot days in June" (no year)
+                    scoped = self.df[self.df.index.month == month_num]
+                    years = scoped.index.year
+                    rec_scope = (f"{calendar.month_name[month_num]} (every year, "
+                                  f"{years.min()}–{years.max()})") if len(scoped) else \
+                                 calendar.month_name[month_num]
+                elif start is not None and end is not None:     # "hot days in June 2015"
+                    scoped, _ = self._slice(start, end, label)
+                    rec_scope = label or "that period"
+                elif day is None:                                # no scope named at all
+                    scoped = self.df
+                    rec_scope = "the whole record"
+                else:                                             # a specific day + adjective
+                    scoped = None
+                    rec_scope = None
+                if scoped is None or not len(scoped) or dsensor not in scoped.columns:
+                    return Answer(question, intent,
+                                  f"I have no data for {rec_scope or 'that period'} to rank.",
+                                  None, [dsensor])
+                result = qe.rank_calendar_days(scoped, self.df, dsensor, ascending, top_n=5)
+                if not result["candidates"]:
+                    return Answer(question, intent,
+                                  f"I have no daily data for {rec_scope} to rank.", None, [dsensor])
+                if (dsensor, ascending) in DIRECTION_LABELS:
+                    word = DIRECTION_LABELS[(dsensor, ascending)]
+                    superlative = DIRECTION_SUPERLATIVES[word]
+                else:                                    # generic sensor, no natural adjective
+                    word = f"low {dsensor}" if ascending else f"high {dsensor}"
+                    superlative = f"lowest {dsensor}" if ascending else f"highest {dsensor}"
+                lines = "; ".join(f"{qe.fmt_when(c['date'], with_time=False)} ({c['value']:.1f})"
+                                   for c in result["candidates"])
+                best = result["candidates"][0]
+                best_when = qe.fmt_when(best["date"], with_time=False)
+                if is_forward_looking_query(question):
+                    # "When next will it be hot?" has no real future to search -- this is a
+                    # fixed historical record ending at `self._anchor`, not a live feed, so
+                    # there's no forward window to restrict to (unlike analog mode's "when
+                    # next", where the user-named target date has real years of data after it).
+                    # Answer honestly with the RECURRING pattern instead of pretending to point
+                    # at a real future date beyond the data.
+                    months = sorted({c["date"].month for c in result["candidates"]})
+                    month_names = ", ".join(calendar.month_name[m] for m in months)
+                    computed = (f"This is a historical record (ends {self._anchor:%d %b %Y}), so "
+                                f"there's no real 'next' to point to — but going by the pattern, "
+                                f"{word} days in {rec_scope} happen most around {month_names}. "
+                                f"The {superlative} on record: {lines}.")
+                    if not result["meets_threshold"]:
+                        computed += (f" Note: {rec_scope} never gets genuinely {word} in this "
+                                    f"record (record-wide {word} threshold {result['threshold']:.1f}) "
+                                    f"— {best_when} ({best['value']:.1f}) is the closest it gets.")
+                    return self._reply(question, "recommend", result, [dsensor], computed=computed,
+                                       context=ctx)
+                if result["meets_threshold"]:
+                    computed = (f"The {superlative} days in {rec_scope}: {lines}. Best pick: "
+                                f"{best_when} ({best['value']:.1f}) — go with that one.")
+                else:
+                    computed = (f"{rec_scope} isn't genuinely {word} in this record (the record-wide "
+                                f"{word} threshold is {result['threshold']:.1f}) — these are just the "
+                                f"closest it gets, not a real {word} recommendation: {lines}. If you "
+                                f"must pick one, {best_when} ({best['value']:.1f}) is the closest it gets, "
+                                f"but expect nothing like real {word} weather.")
+                return self._reply(question, "recommend", result, [dsensor], computed=computed,
+                                   context=ctx)
+
+            # The TARGET (the weather being matched) is normally whatever `_understand` already
+            # parsed. But when a "similar to X" clause is present AND neither named period has a
+            # day number (so `resolve_day` can't disambiguate by day-adjacency), the marker
+            # clause overrides -- "a day to go out in January 2010 similar to June 2010" would
+            # otherwise resolve to January (dict order: jan sorts before jun), even though "similar
+            # to June" unambiguously means June is the target, not January.
+            clause = split_target_clause(question)
+            target_day, target_start, target_end, target_label = day, start, end, label
+            if clause is not None:
+                clause_day = resolve_day(clause)
+                if clause_day is not None:
+                    target_day, target_start, target_end, target_label = clause_day, None, None, ""
+                else:
+                    c_start, c_end, c_label = resolve_period(clause)
+                    if c_start or c_end:
+                        target_day, target_start, target_end, target_label = None, c_start, c_end, c_label
+
+            scope_info = self._analog_scope(target_day, target_start, target_end, target_label)
+            if scope_info is None:
+                return Answer(question, intent,
+                              "I need a specific day, month, or year to find similar dates for — "
+                              "try e.g. 'recommend dates similar to 13 February 2013'.", None, sensors)
+            freq, t_start, t_end, rec_scope = scope_info
+
+            # A second, explicit period named anywhere in the question -- same period restated
+            # ("...6 April 2013 in the month of April 2013"), a genuinely different one ("...5
+            # September 2012 in November 2012", even a different year: "...in June 2016"), or the
+            # OTHER half of a "similar to" split ("January 2010 similar to June 2010" -> June is
+            # the target above, January is the restriction found here) -- means search only
+            # inside THAT period, not the whole record. A phrase like "staying within that month"
+            # with no literal second date falls back to the target's own month/year. A bare date
+            # (nothing else named) searches everywhere.
+            search_start = search_end = restrict_label = None
+            if target_day is not None and target_day[2] is not None:
+                t_month, t_year = target_day[0], target_day[2]
+            elif t_start is not None:
+                # a month-level target has a real month to strip; a year-level one (freq="YS")
+                # has none -- month=0 never matches a real MONTHS entry (1-12), so nothing is
+                # spuriously stripped from the search text for a bare-year target.
+                t_month, t_year = (pd.Timestamp(t_start).month if freq == "MS" else 0), pd.Timestamp(t_start).year
+            else:
+                t_month, t_year = 0, None
+            if t_year is not None:
+                secondary = resolve_secondary_period(question, t_month, t_year)
+                if secondary is not None:
+                    search_start, search_end, restrict_label = secondary
+                elif resolve_explicit_scope_restriction(question):
+                    # Anaphoric restriction ("staying within that month") names no second date
+                    # to parse -- fall back to the MONTH CONTAINING the target's own date (not
+                    # `target_start/target_end`, which are None whenever the target came from a
+                    # specific day rather than a bare month/year).
+                    month_start = pd.Timestamp(t_start).replace(day=1)
+                    month_end = month_start + pd.offsets.MonthEnd(0)
+                    search_start, search_end = month_start, month_end
+                    restrict_label = f"{month_start:%B %Y}"
+
+            # "When next do we get conditions like this?" is asking for SOON, not "sometime in
+            # the next 8 years, possibly a different season" -- restrict to a near-term forward
+            # window by default (no restriction named), or make a named restriction forward-only.
+            forward_looking = is_forward_looking_query(question) and target_day is not None \
+                and target_day[2] is not None
+            if forward_looking:
+                target_ts = pd.Timestamp(year=target_day[2], month=target_day[0], day=target_day[1])
+                if search_start is None:
+                    search_start = target_ts + pd.Timedelta(days=1)
+                    search_end = target_ts + pd.DateOffset(months=3)
+                    restrict_label = f"the 3 months after {rec_scope}"
+                else:
+                    search_start = max(pd.Timestamp(search_start), target_ts + pd.Timedelta(days=1))
+
+            # A restriction means "find THE DAY within it" -- day-level candidates regardless of
+            # whether the target itself was named at month/year granularity.
+            search_freq = "D" if search_start is not None else freq
+            wanted = [c for c in (sensors or
+                                   ["T (degC)", "rh (%)", "Tdew (degC)", "p (mbar)", "wv (m/s)"])
+                      if c in self.df.columns]
+            result = qe.find_analog_periods(self.df, wanted, t_start, t_end, search_freq, top_n=5,
+                                            search_start=search_start, search_end=search_end)
+            if not result["candidates"]:
+                if forward_looking:
+                    return Answer(question, intent,
+                                  f"Nothing close to {rec_scope} shows up in {restrict_label} — "
+                                  f"the record may not run that far forward, or that stretch is "
+                                  f"missing data.", None, wanted)
+                where = f"within {restrict_label} " if restrict_label else ""
+                return Answer(question, intent,
+                              f"I don't have enough other periods {where}to compare {rec_scope} against.",
+                              None, wanted)
+            def _label(ts):
+                if search_freq == "YS":
+                    return str(ts.year)
+                if search_freq == "MS":
+                    return f"{ts:%B %Y}"
+                return qe.fmt_when(ts, with_time=False)
+
+            lines = "; ".join(_label(c["when"]) for c in result["candidates"])
+            noun = {"D": "Dates", "MS": "Months", "YS": "Years"}[search_freq]
+            best = result["candidates"][0]
+            noun_singular = {"D": "day", "MS": "month", "YS": "year"}[search_freq]
+            if forward_looking:
+                computed = (f"The next time conditions look like {rec_scope} is likely around "
+                            f"{_label(best['when'])} (closest match in {restrict_label}). Other "
+                            f"close days coming up: {lines}.")
+            else:
+                within = f" (searched within {restrict_label} only)" if restrict_label else ""
+                computed = (f"{noun} with the most similar weather to {rec_scope}{within}: {lines}. "
+                            f"Closest match: {_label(best['when'])} — if you want conditions like "
+                            f"{rec_scope}, that's the {noun_singular} to go with.")
+
+            # Honesty check, restricted searches only: is the closest match actually close on
+            # EVERY requested sensor, or just the least-bad option that's badly off on at least
+            # one (e.g. "January similar to June" restricted to January -- January never gets
+            # June-hot)? Checking only the first requested sensor would miss a restriction that's
+            # fine on temperature but badly wrong on humidity -- so every sensor in `wanted` is
+            # compared against the whole record's own natural spread for THAT sensor, and the
+            # worst offender(s) are named. The bar is always data-derived, never invented.
+            if restrict_label and result["target"]:
+                mismatches = []
+                for s in wanted:
+                    if s not in result["target"] or s not in best:
+                        continue
+                    target_value, best_value = result["target"][s], best[s]
+                    gap = abs(target_value - best_value)
+                    full_std = float(self.df[s].std())
+                    if full_std and gap > full_std:
+                        mismatches.append((s, target_value, best_value, gap, full_std))
+                if mismatches:
+                    mismatches.sort(key=lambda m: m[3] / m[4], reverse=True)  # worst first
+                    bits = "; ".join(
+                        f"{s} — {rec_scope} averaged {tv:.1f}, best {restrict_label} offers "
+                        f"{bv:.1f} (a {g:.1f} gap, more than the record's typical {sd:.1f} spread)"
+                        for s, tv, bv, g, sd in mismatches)
+                    computed += (f" Honest caveat: don't count on {restrict_label} for genuinely "
+                                f"{rec_scope}-like conditions — {bits}.")
+            return self._reply(question, "recommend", result, wanted, computed=computed, context=ctx)
 
         # Causal questions ("does X cause Y?", "what causes…?"): we measure correlation, not
         # causation — say so explicitly rather than pass a correlation off as an answer.
@@ -653,16 +897,47 @@ class Interface:
                 deg = circ[0]
                 lin = b if deg == a else a
                 c = analysis.circular_linear_corr(data[deg], data[lin])
+                strength = correlation_strength(c)
                 return self._reply(question, intent, c, [a, b],
                                    computed=f"circular–linear correlation({deg}, {lin}){where} = {c:.3f} "
-                                            f"(0–1, unsigned; {deg} is a compass angle).{cause_note}",
+                                            f"({strength}; 0–1, unsigned; {deg} is a compass angle)."
+                                            f"{cause_note}",
                                    inferred="Wind direction wraps at 360°, so this uses a circular "
                                             "measure of association, not linear Pearson.")
             c = qe.get_correlation(data, a, b)
             rel = "move together" if c > 0 else "move in opposite directions"
-            return self._reply(question, intent, c, [a, b],
-                               computed=f"correlation({a}, {b}){where} = {c:.3f}.{cause_note}",
-                               inferred=f"They {rel}.")
+            if c == 0:
+                strength_sign = "no correlation"
+            else:
+                strength_sign = f"{correlation_strength(c)} {'positive' if c > 0 else 'negative'} correlation"
+            computed = (f"correlation({a}, {b}){where} = {c:.3f} ({strength_sign}).{cause_note}")
+            if is_correlation_breakdown_query(question):
+                # "why is that only moderate?" -- explain the NUMBER's own magnitude with real
+                # computed evidence, not a canned line: how much variance it linearly explains,
+                # whether a nonlinear pattern is being missed, and whether the relationship
+                # actually holds steady across the year or is really a few-season effect that
+                # whole-record pooling averages into one middling figure.
+                bd = qe.correlation_breakdown(data, a, b)
+                bits = [f"R²={bd['r_squared']:.2f} ({a} 'explains' about {bd['r_squared'] * 100:.0f}% "
+                        f"of {b}'s variance in a straight line — the rest is other factors)"]
+                if abs(bd["spearman"] - bd["pearson"]) < 0.1:
+                    bits.append(f"rank correlation={bd['spearman']:.3f}, close to the Pearson value, "
+                                "so this is genuinely close to linear, not a stronger pattern being missed")
+                else:
+                    bits.append(f"rank correlation={bd['spearman']:.3f} — noticeably different from "
+                                "Pearson, hinting at a real but non-linear relationship")
+                if len(bd["by_season"]) >= 2:
+                    season_bits = "; ".join(f"{s} {v:+.2f}" for s, v in bd["by_season"].items())
+                    spread = max(bd["by_season"].values()) - min(bd["by_season"].values())
+                    if spread > 0.2:
+                        bits.append(f"by season: {season_bits} — the strength varies a lot across "
+                                    "the year, so the whole-record number is an average of quite "
+                                    "different regimes, not one steady relationship")
+                    else:
+                        bits.append(f"by season: {season_bits} — fairly steady across the year, so "
+                                    "this isn't a seasonal-averaging effect")
+                computed += " Breakdown: " + "; ".join(bits) + "."
+            return self._reply(question, intent, c, [a, b], computed=computed, inferred=f"They {rel}.")
 
         if intent == "missing":
             n = qe.count_missing(data, sensor)

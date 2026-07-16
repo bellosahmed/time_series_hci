@@ -97,7 +97,7 @@ The modules in `src/` fall into five layers — data flows top to bottom:
 | | `rag_system.py` | local retrieval — TF-IDF, **BM25**, **LSA/SVD**, and a **dense sentence-transformer** retriever — + trust-aware template explainer |
 | | `retrieval_eval.py` | IR metrics for the retriever (Precision@k, Recall@k, MRR, MAP, NDCG) over labelled + paraphrase query sets |
 | | `llm.py` | optional local Ollama layer — rewords facts, never changes numbers; model auto-pick + agentic planning |
-| **5. Interface** | `interface.py` | NL question → query engine → trust-aware answer (max/min/mean/trend/compare/threshold/anomaly/forecast/weather/**day-type**/summary) |
+| **5. Interface** | `interface.py` | NL question → query engine → trust-aware answer (max/min/mean/trend/compare/threshold/anomaly/forecast/weather/**day-type**/**recommend**/summary) |
 | | `agent.py` | **agentic multi-step tool-use** — LLM plans query-engine tool calls; every number still computed, faithfulness-gated |
 | | `main.py` | run the whole pipeline once, end to end |
 

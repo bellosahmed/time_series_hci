@@ -1,10 +1,11 @@
 # How v1 is evaluated
 
-v1 doesn't use one evaluation method — it uses **six**, because six genuinely different
+v1 doesn't use one evaluation method — it uses **seven**, because seven genuinely different
 components need rating: the truth layer, the anomaly detectors, the forecaster, the retriever,
-the local LLM, and the natural-language router. Each has its own page in this folder, with the
-method explained and real, freshly-reproduced numbers as evidence (not copied from an old report
-— every figure here was regenerated the day this folder was written, 15 July 2026).
+the local LLM, the natural-language router, and the `recommend`/correlation-explainability layer.
+Each has its own page in this folder, with the method explained and real, freshly-reproduced
+numbers as evidence (not copied from an old report — every figure here was regenerated the day
+this folder was written, 15 July 2026; §7 added 16 July 2026).
 
 | # | Doc | What's rated | Headline metric |
 | --- | --- | --- | --- |
@@ -14,14 +15,15 @@ method explained and real, freshly-reproduced numbers as evidence (not copied fr
 | 4 | [`04-retrieval.md`](04-retrieval.md) | The RAG retriever (sensor-description lookup) | Precision@k, Recall@k, MRR, MAP, NDCG |
 | 5 | [`05-llm-faithfulness.md`](05-llm-faithfulness.md) | The local LLM's phrasing | invented-number detection |
 | 6 | [`06-query-routing-coverage.md`](06-query-routing-coverage.md) | The natural-language interface's routing | % of labelled questions routed correctly |
+| 7 | [`07-recommend-and-explainability.md`](07-recommend-and-explainability.md) | The `recommend` intent (analog/directional search, honesty caveats) and correlation explainability (strength labels, breakdown) | independently-recomputed restriction/threshold/R² correctness, real bugs found & fixed |
 
-All six feed into one command that reports pass/fail across the whole system:
+All seven feed into one command that reports pass/fail across the whole system:
 
 ```bash
-python3.12 verify_results.py   # 31/31 checks passed (15 July 2026)
+python3.12 verify_results.py   # 35/35 checks passed (16 July 2026)
 ```
 
-## The one discipline that runs through all six
+## The one discipline that runs through all seven
 
 Every method here follows the same underlying rule, even though the *mechanics* differ
 completely from page to page:
@@ -40,7 +42,7 @@ completely from page to page:
 4. **Reproduce, don't just report.** Every number on every page below has the exact command that
    regenerates it, so a claim in the dissertation can be checked, not just trusted.
 
-## Why six *different* methods, not one
+## Why seven *different* methods, not one
 
 Because "is this correct" means something different for each component:
 
@@ -60,7 +62,12 @@ Because "is this correct" means something different for each component:
 - For the **router**, the question is different again: not "is the computed number right"
   (that's the truth layer's job) but "did the plain-English question get mapped to the right
   computation at all."
+- For **`recommend`/correlation explainability**, correctness has an extra dimension beyond
+  "is the number right": is the system honest about when its own answer is a *poor* one (a
+  restricted search that never gets close to the target), and does an explanatory add-on
+  (correlation strength, the seasonal breakdown) trace back to real computed evidence rather than
+  a canned phrase.
 
-Using one evaluation method for all six would either be meaningless for most of them (e.g.
+Using one evaluation method for all seven would either be meaningless for most of them (e.g.
 "precision/recall" makes no sense for the truth layer, which is either exactly right or a bug)
 or would hide exactly the kind of failure each specific method is designed to catch.

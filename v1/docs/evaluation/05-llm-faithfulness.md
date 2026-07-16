@@ -159,7 +159,7 @@ future code path that doesn't get this as right.
 ## Honest caveats
 
 - This is reported as an **advisory** check in `verify_results.py`, not a hard pass/fail gate on
-  the overall 31/31 count — deliberately, because the 3B model is stochastic enough that a single
+  the overall 35/35 count — deliberately, because the 3B model is stochastic enough that a single
   unlucky run could otherwise make the headline pass/fail count flap between runs for reasons
   that have nothing to do with a real regression in the code (this exact instability is documented
   in the source comment above the check).

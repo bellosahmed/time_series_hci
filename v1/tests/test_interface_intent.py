@@ -38,6 +38,118 @@ def test_causal_question_gives_correlation_with_causation_caveat(df):
     assert "causation" in ans.text.lower()      # explicit correlation-not-causation caveat
 
 
+def test_is_causal_query_word_boundary():
+    # "cause" is a literal substring of "because" -- a plain `w in question` check used to flag
+    # ANY question containing "because" (even bare, with no "of") as causal, hijacking it into
+    # the correlation branch instead of answering what was actually asked.
+    assert interface.is_causal_query("what causes the temperature to rise")
+    assert interface.is_causal_query("it was cold because of low pressure")   # "because of" -> legit
+    assert not interface.is_causal_query("I stayed in because it was cold")   # bare "because"
+    assert not interface.is_causal_query("the excause was cold weather")     # nonsense substring
+
+
+def test_bare_because_no_longer_hijacks_an_unrelated_question(df):
+    # the concrete bug: a bare "because" (mid-sentence, no causal claim intended) used to hijack
+    # ANY question into the correlation branch, silently ignoring what was actually asked.
+    ans = interface.Interface(df).ask(
+        "I went out because the weather was nice, what was the average temperature?")
+    assert ans.intent == "mean"
+    assert ans.intent != "correlation"
+
+
+def test_recommend_intent_beats_keyword_overlap_with_max_and_weather():
+    # "recommend" is checked first in INTENTS specifically so these don't fall through to
+    # "max" (via "hottest") or "weather" (via "weather") instead.
+    assert interface.detect_intent("recommend the hottest days in June") == "recommend"
+    assert interface.detect_intent("can you recommend the weather for a specific day") == "recommend"
+    assert interface.detect_intent("suggest some dates similar to today") == "recommend"
+
+
+def test_resolve_direction_maps_adjectives_to_sensor_and_direction():
+    assert interface.resolve_direction("recommend hot days") == ("T (degC)", False)
+    assert interface.resolve_direction("recommend the coldest week") == ("T (degC)", True)
+    assert interface.resolve_direction("recommend the driest month") == ("rh (%)", True)
+    assert interface.resolve_direction("recommend a calm day") == ("wv (m/s)", True)
+    assert interface.resolve_direction("recommend something") is None
+
+
+def test_resolve_recurring_month_only_fires_without_a_year():
+    assert interface.resolve_recurring_month("hot days in June") == 6
+    assert interface.resolve_recurring_month("hot days in June 2015") is None
+    assert interface.resolve_recurring_month("recommend something") is None
+
+
+def test_resolve_generic_direction_covers_sensors_with_no_adjective():
+    cols = ["p (mbar)", "Tdew (degC)", "T (degC)"]
+    assert interface.resolve_generic_direction("recommend the highest pressure days", cols) \
+        == ("p (mbar)", False)
+    assert interface.resolve_generic_direction("days with the lowest dew point", cols) \
+        == ("Tdew (degC)", True)
+
+
+def test_resolve_generic_direction_needs_both_a_sensor_and_a_direction_word():
+    cols = ["p (mbar)"]
+    assert interface.resolve_generic_direction("recommend the highest days", cols) is None  # no sensor
+    assert interface.resolve_generic_direction("recommend some pressure days", cols) is None  # no direction
+
+
+def test_resolve_secondary_period_finds_a_different_month_and_year():
+    # "5 September 2012 in November 2012": a genuinely different month than the target's own.
+    q = "recommend a day to go out in 5 september 2012 in november 2012"
+    assert interface.resolve_secondary_period(q, 9, 2012)[:2] == ("2012-11-01", "2012-11-30")
+    # different month AND different year, word order doesn't matter (found by value, not position)
+    q2 = "recommend a day like 5 september 2012 in june 2016"
+    assert interface.resolve_secondary_period(q2, 9, 2012)[:2] == ("2016-06-01", "2016-06-30")
+    # same month restated (the earlier bug report) still works
+    q3 = "similar to 6 april 2013 in the month of april 2013"
+    assert interface.resolve_secondary_period(q3, 4, 2013)[:2] == ("2013-04-01", "2013-04-30")
+    # nothing else named -> no secondary period
+    assert interface.resolve_secondary_period("similar to 13 february 2013", 2, 2013) is None
+
+
+def test_split_target_clause_finds_the_similar_to_target():
+    # "January 2010 similar to June 2010": resolve_period alone would pick January by dict
+    # order (jan sorts before jun) -- the marker clause makes June unambiguously the target.
+    q = "recommend a day to go out in january 2010 similar to june 2010"
+    clause = interface.split_target_clause(q)
+    assert clause is not None
+    assert interface.resolve_period(clause)[:2] == ("2010-06-01", "2010-06-30")
+
+
+def test_split_target_clause_returns_none_without_a_marker():
+    assert interface.split_target_clause("recommend a day like 5 september 2012 in june 2016") is None
+    assert interface.split_target_clause("recommend hot days in june") is None
+
+
+def test_recommend_intent_fires_on_plain_similar_conditions_phrasing():
+    # "similar conditions"/"similar weather" (no "to") and "when next"/"next time"/"how soon"
+    # weren't recommend keywords at all -- these questions used to fall through to a different
+    # intent entirely (e.g. "weather", via the word "weather" alone) with "similar conditions"
+    # or "when next" silently doing nothing.
+    q = "I liked the weather on 13th february 2013, when next do we get similar conditions?"
+    assert interface.detect_intent(q) == "recommend"
+    assert interface.detect_intent("recommend a day with similar conditions to today") == "recommend"
+
+
+def test_is_forward_looking_query():
+    assert interface.is_forward_looking_query("when next do we get similar conditions?")
+    assert interface.is_forward_looking_query("how soon will conditions be similar to this?")
+    assert interface.is_forward_looking_query("next time we get weather like this")
+    assert not interface.is_forward_looking_query("recommend other dates similar to 13 february 2013")
+
+
+def test_resolve_explicit_scope_restriction():
+    # a month named twice (once in the date, once as a restated scope) -> restrict
+    assert interface.resolve_explicit_scope_restriction(
+        "similar to 6 april 2013 in the month of april 2013") is True
+    # an explicit restriction phrase, even without repeating the month -> restrict
+    assert interface.resolve_explicit_scope_restriction(
+        "recommend days similar to 6 april 2013 staying within that month") is True
+    # a bare date, named once, no restriction phrase -> search the whole record
+    assert interface.resolve_explicit_scope_restriction(
+        "recommend other dates similar to 13 february 2013") is False
+
+
 def test_causal_question_without_pair_explains_no_causation(df):
     ans = interface.Interface(df).ask("what causes temperature spikes?")
     assert any(w in ans.text.lower() for w in ("causation", "correlation"))
@@ -102,6 +214,48 @@ def test_ask_correlation(df):
     ans = interface.Interface(df).ask("correlation between temperature and humidity")
     assert ans.intent == "correlation"
     assert len(ans.sensors) == 2
+
+
+def test_correlation_strength_labels_the_magnitude_not_just_the_number():
+    assert interface.correlation_strength(0.05) == "very weak"
+    assert interface.correlation_strength(-0.25) == "weak"      # sign doesn't affect magnitude
+    assert interface.correlation_strength(0.45) == "moderate"
+    assert interface.correlation_strength(-0.65) == "strong"
+    assert interface.correlation_strength(0.95) == "very strong"
+    # boundary values belong to the higher bin
+    assert interface.correlation_strength(0.80) == "very strong"
+    assert interface.correlation_strength(0.60) == "strong"
+
+
+def test_ask_correlation_answer_includes_a_strength_and_sign_label(df):
+    ans = interface.Interface(df).ask("correlation between temperature and humidity")
+    r = ans.value
+    expected_strength = interface.correlation_strength(r)
+    expected_sign = "positive" if r > 0 else "negative"
+    assert f"{expected_strength} {expected_sign} correlation" in ans.computed
+
+
+def test_is_correlation_breakdown_query():
+    assert interface.is_correlation_breakdown_query("why is that correlation only moderate?")
+    assert interface.is_correlation_breakdown_query("explain that correlation between T and rh")
+    assert interface.is_correlation_breakdown_query("break down the correlation between T and p")
+    assert not interface.is_correlation_breakdown_query("what is the correlation between T and rh?")
+
+
+def test_ask_correlation_breakdown_gives_r_squared_rank_and_seasonal_split(year_df):
+    ans = interface.Interface(year_df).ask(
+        "why is the correlation between temperature and wind speed only weak?")
+    assert ans.intent == "correlation"
+    assert "Breakdown:" in ans.computed
+    assert "R²=" in ans.computed
+    assert "rank correlation=" in ans.computed
+    assert "winter" in ans.computed and "summer" in ans.computed
+
+
+def test_ask_correlation_without_breakdown_trigger_has_no_breakdown_text(year_df):
+    # plain correlation questions must be unaffected -- no trigger phrase, no breakdown section.
+    ans = interface.Interface(year_df).ask("what is the correlation between temperature and wind speed?")
+    assert "Breakdown:" not in ans.computed
 
 
 def test_missing_sensor():

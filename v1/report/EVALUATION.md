@@ -3,14 +3,15 @@
 Evaluation of the **core (computational) pipeline** on the Jena Climate dataset
 (2009–2016, 70,129 hourly rows after preprocessing). RAG + LLM and the interface
 are intentionally out of scope for v1. Full reproducible workings: `notebooks/02_methods_and_evaluation.ipynb`.
-> **Superseded (15 July 2026): current, actively-maintained evaluation methodology and numbers now live
-> in [`v1/docs/evaluation/`](../docs/evaluation/README.md)** — one page per method (truth layer, anomaly
-> detection, forecasting, retrieval, LLM faithfulness, query-routing coverage), each with the exact
-> command that reproduces its numbers, regenerated on 15 July 2026 directly from the code. This file is
-> kept as a historical narrative snapshot; where it disagrees with `docs/evaluation/`, the latter is
-> correct. Known stale points below: the check counts ("17/17", "29 independent checks") are outdated —
-> `verify_results.py` currently runs **31/31** independent checks (added: query-routing coverage, then
-> a held-out generalisation check).
+> **Superseded (15 July 2026, updated 16 July 2026): current, actively-maintained evaluation methodology
+> and numbers now live in [`v1/docs/evaluation/`](../docs/evaluation/README.md)** — one page per method
+> (truth layer, anomaly detection, forecasting, retrieval, LLM faithfulness, query-routing coverage,
+> `recommend`/correlation explainability), each with the exact command that reproduces its numbers,
+> regenerated on 15–16 July 2026 directly from the code. This file is kept as a historical narrative
+> snapshot; where it disagrees with `docs/evaluation/`, the latter is correct. Known stale points below:
+> the check counts ("17/17", "29 independent checks") are outdated — `verify_results.py` currently runs
+> **35/35** independent checks (added: query-routing coverage, a held-out generalisation check, then
+> four checks covering the `recommend` intent and correlation explainability added 16 July 2026).
 >
 > **Note (this file predates the 9→5 notebook consolidation and a later detector/reporting refresh):**
 > the exact figures below in "Labeled evaluation" and "Quantitative rigor" were produced by an earlier
@@ -196,7 +197,7 @@ sensor); template mode shows every figure, so nothing is actually lost. The seri
 ## Verdict
 
 The computational core is **correct, sensible, and fully offline**, and now **machine-verified**
-(`verify_results.py`, 31/31 as of 15 July 2026 — see `docs/evaluation/`) and **quantitatively evaluated**
+(`verify_results.py`, **35/35** as of 16 July 2026 — see `docs/evaluation/`) and **quantitatively evaluated**
 (multi-seed anomaly benchmark, parameter sensitivity, forecast backtest with MASE < 1, LLM faithfulness
 with 0 invented numbers, and a query-routing coverage benchmark at 100%).
 Exact figures are hard ground truth (== pandas); anomaly accuracy is measured on synthetic labels

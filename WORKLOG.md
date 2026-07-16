@@ -5,6 +5,514 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-16
+
+### v1: today's `recommend`/correlation work folded into `docs/evaluation/` as citable evidence (4 of 4)
+Last of the 4 remaining self-review suggestions. Everything built today (`recommend` intent,
+correlation strength/breakdown) was verified extensively during development — live HTTP calls
+against the real Flask app, manual pandas cross-checks — but all of that evidence only existed in
+this conversation and the day's WORKLOG entries. This folds it into the same structure the rest
+of the project's evaluation already uses: a new numbered page in `docs/evaluation/`, backed by
+new checks in `verify_results.py` that anyone can rerun.
+
+**New independent checks added to `verify_results.py` (#19–22)**, each recomputing something a
+*different* way rather than re-asking the system to confirm its own answer — the same discipline
+every other check in that file already follows:
+1. **Analog restriction correctness** — every candidate from a scoped `recommend` question is
+   independently confirmed to fall inside the named month by filtering the raw column directly.
+2. **Directional honesty threshold** — the "isn't genuinely hot" threshold is recomputed from raw
+   pandas (`.resample("1D").mean().quantile(0.75)`) and checked against what the system reported.
+3. **Correlation breakdown** — R² and the summer-season split recomputed from a fresh pandas
+   filter, not by calling `correlation_breakdown` a second time (which would only prove the
+   function agrees with itself).
+4. **The `is_causal_query` fix** (item 3 of this batch, same day) — the exact reported bug
+   pattern run through the real `Interface.ask()`, confirming the fix reaches actual user-facing
+   behaviour, not just the isolated parsing function.
+
+All four pass, all four counted toward the pass/fail total (not advisory, since they're fully
+deterministic): **`verify_results.py` now runs 35/35** (up from 31/31).
+
+**New doc:** `docs/evaluation/07-recommend-and-explainability.md` — same structure as the other
+six pages (what's evaluated, method, real reproduced evidence, honest caveats), plus an explicit
+write-up of the `is_causal_query` bug this evaluation work re-surfaced (found by testing a
+concrete case before writing the check, not by writing the check first and hoping) and a
+by-construction description of the two "honesty by design" properties (multi-sensor caveat,
+forward-looking mode) that can't be reduced to a single "is this number right" claim the way the
+other six pages' subjects can.
+
+**Docs synced project-wide** (matching this project's established discipline of not leaving
+stale counts behind — see the very first WORKLOG entry from earlier today): `docs/evaluation/
+README.md` (6→7 methods, 31/31→35/35), `report/EVALUATION.md`, `report/DATA_QUALITY.md`,
+`report/REPORT.md` (296→354 tests, 31/31→35/35 checks in 3 places), `docs/evaluation/
+05-llm-faithfulness.md` (its own "not a gate on the 31/31 count" caveat updated to 35/35).
+
+**Honest scope note, stated in the new doc itself:** not every feature built today has a
+dedicated independent-recomputation check — `split_target_clause`, the forward-looking window
+default, and the correlation strength-label boundaries are thoroughly covered at the unit-test
+level (which is the right tool for pure deterministic parsing/labelling logic) but weren't
+duplicated into `verify_results.py`, since that file's specific value-add is real-dataset,
+independently-recomputed claims — not everything needs that treatment, only the claims that
+depend on the actual data's distribution.
+
+**Files:** `verify_results.py` (4 new checks) · `docs/evaluation/07-recommend-and-explainability.md`
+(new) · `docs/evaluation/README.md`, `docs/evaluation/05-llm-faithfulness.md`, `report/EVALUATION.md`,
+`report/DATA_QUALITY.md`, `report/REPORT.md` (count sync). Reran `verify_results.py` clean twice
+(35/35 both times) as the actual evidence for this entry, not just code review.
+
+### v1: `is_causal_query` word-boundary fix — a real hijacking bug, not just a style issue (3 of 4)
+Flagged earlier as a minor style inconsistency ("substring matching instead of `\b`-bounded, like
+the rest of the parser"), same class of thing that caused today's "thin"/"within" sensor bug. Checked
+for a concrete, reproducible instance before fixing on principle alone — found one immediately.
+
+**The bug:** "cause" is a literal substring of "because". The old `is_causal_query` did plain
+`w in question.lower()` matching, so ANY question containing the word "because" — even with no
+"of", not making any causal claim at all — got flagged as a causal question. That's not cosmetic:
+`_answer()` force-overrides the intent to `"correlation"` whenever `is_causal_query` fires, so a
+completely unrelated question got silently hijacked.
+
+**Reproduced live before fixing:** *"I stayed in because it was cold, what was the average
+temperature in 2013?"* → `intent: correlation`, answer: *"This system measures correlation... not
+causation... Ask 'how does X relate to Y?'"* — never answering the actual question asked at all.
+
+**Fix:** `\b`-bounded regex matching, same convention the rest of `interface_parsing.py` already
+uses. Deliberately did NOT add bare "because" as an explicit causal-word entry to preserve the
+old (accidental) behavior — the bug reproduction above shows that behavior was actively wrong,
+not a feature worth keeping; "because of" (already an explicit phrase) is the right minimal
+marker for a genuine causal claim.
+
+**Verified fixed, real dataset:** *"I went out because the weather was nice, what was the average
+temperature in 2013?"* → now correctly `intent: mean`, `"T (degC) in 2013 mean=9.09, std=8.61,
+range=48.04."` Genuine causal questions unaffected: *"does humidity cause temperature to
+change?"* → still `intent: correlation` with the causation caveat, exactly as before.
+
+**One honest side-finding, not fixed (out of scope for this item):** my first attempt at a repro
+sentence ("I stayed in **because it was cold**...") accidentally also contains "cold" — a
+pre-existing, separate `min`-intent keyword, unrelated to the causal-word bug. Even after this
+fix, that sentence still doesn't answer "average" (routes to `min` instead of `mean`), because
+`detect_intent` matches whichever intent's keyword appears anywhere in the question, scanned in a
+fixed dict order — not the most prominent one. Real, but a different, pre-existing design
+limitation of the whole intent-detection approach, not something this fix touches or claims to
+solve.
+
+**Files:** `src/interface_parsing.py` (`is_causal_query` word-boundary fix). 3 new tests in
+`test_interface_intent.py` (boundary-check unit test; the exact hijacking-bug regression, now
+fixed; the existing causal-caveat test re-confirmed unaffected). 354 tests collected; full
+regression suite (interface/agent/apps/query_engine + clustering/anomaly/preprocess/rag/
+retrieval_eval) re-run clean; `ruff check` clean; re-verified live against the real Flask app
+over HTTP for both the fixed bug and the still-working legitimate case.
+
+### v1: "why is that correlation only moderate?" is now a real feature (2 of 4)
+Turned the manual seasonal-breakdown analysis done earlier today (explaining live, on request,
+why T-vs-rh correlates at exactly -0.572) into an actual, always-available system capability
+rather than a one-off piece of ad-hoc analysis that only existed in that conversation.
+
+**Trigger:** new `is_correlation_breakdown_query()` — phrases like "why is that only moderate?",
+"explain that correlation", "break down the correlation" — distinct from the existing
+`is_causal_query()` ("why does X cause Y", answered with a causation caveat). The two aren't
+mutually exclusive and both can fire on the same question; they answer genuinely different things
+(is this causal? vs. why is the number this size?), so both appear when both apply.
+
+**Computation:** new `query_engine.correlation_breakdown(df, a, b)` — real, deterministic numbers,
+nothing invented or LLM-generated:
+- **R²** (Pearson² ) — how much of one sensor's variance a straight line through the other
+  actually explains; the rest is "other factors", which is the honest answer to "why isn't it
+  stronger".
+- **Spearman rank correlation** — checked against Pearson to catch a case where the linear
+  number undersells a real but curved (monotonic) relationship.
+- **Per-season correlation** (winter/spring/summer/autumn) — reveals whether the relationship
+  holds steady year-round or is really driven by one part of the year, which whole-record
+  pooling would otherwise average into one middling number without showing why.
+
+**Verified it reproduces exactly the earlier manual analysis**, now as a real answer instead of a
+one-off explanation: *"correlation(T (degC), rh (%)) = -0.572 (moderate negative correlation)...
+Breakdown: R²=0.33 (T (degC) 'explains' about 33% of rh (%)'s variance in a straight line — the
+rest is other factors); rank correlation=-0.538, close to the Pearson value, so this is genuinely
+close to linear, not a stronger pattern being missed; by season: winter -0.33; spring -0.58;
+summer -0.71; autumn -0.63 — the strength varies a lot across the year, so the whole-record number
+is an average of quite different regimes, not one steady relationship."* — the exact same
+-0.33/-0.58/-0.71/-0.63 seasonal figures found manually earlier. Also checked it generalizes
+correctly to other pairs: temperature-vs-air-density comes back "fairly steady across the year"
+(R²=0.93, near-identical Pearson/Spearman) — a genuinely different, correctly-characterized
+relationship, not a copy-pasted explanation.
+
+**Files:** `src/query_engine.py` (`correlation_breakdown`) · `src/interface_parsing.py`
+(`is_correlation_breakdown_query`) · `src/interface.py` (correlation branch: breakdown text
+appended when triggered). 5 new tests: `test_query_engine.py` (R²/Spearman match pandas exactly;
+a synthetic summer-only relationship correctly isolated by the seasonal split), `test_interface_intent.py`
+(trigger detection; breakdown present when asked; absent when not asked — a real-data regression
+check, not just a synthetic one). 352 tests collected; full regression suite re-run clean;
+`ruff check` clean; re-verified live against the real Flask app over HTTP for both the
+breakdown-triggered and plain-correlation (unaffected) cases.
+
+### v1: "when next" support extended to directional recommend mode (1 of 4 remaining suggestions)
+User asked for all 4 remaining self-review suggestions, done one at a time with explanation +
+evidence for each. This is #1 of that batch (originally listed as suggestion #2).
+
+**The gap:** analog mode ("recommend a day similar to X") understood "when next do we get
+conditions like this?" (built earlier today), but directional mode ("recommend the hottest
+days" / "recommend hot days in June") had no forward-looking awareness at all — "when next
+will it be really hot?" would just rank the whole 8-year record and return July 2015's hottest
+day, ignoring "when next" entirely.
+
+**Why this couldn't just reuse the analog-mode mechanism:** analog mode's "when next" has a
+real user-named target date (e.g. "13 February 2013") with years of real data *after* it to
+search — a genuine forward window. Directional mode has no such anchor; the only candidate is
+`self._anchor = df.index.max()` (the dataset's own "now" — its last row). Restricting to a
+window *after* that would always be empty, since this is a fixed historical record (2009–2016),
+not a live feed. Building a fake "forward window" here would have produced either an empty
+answer or, worse, a plausible-looking date that doesn't actually exist past the data.
+
+**What it does instead:** answers honestly. `is_forward_looking_query()` (already built for
+analog mode) is now also checked in the directional branch; when it fires, the answer explicitly
+states there's no real "next" to point to (naming the record's actual end date), then reframes
+the question as the *recurring* pattern instead — which months this quality actually shows up in,
+across the whole record — rather than silently ignoring "when next" or fabricating a fake future
+date.
+
+**Examples, real dataset:**
+- *"when next will it be really hot?"* → `"This is a historical record (ends 01 Jan 2017), so
+  there's no real 'next' to point to — but going by the pattern, hot days in the whole record
+  happen most around July, August. The hottest on record: 4 Jul 2015 (29.4); 5 Jul 2015 (28.2);
+  11 Jul 2010 (27.6); 20 Aug 2012 (27.6); 3 Jul 2015 (27.3)."`
+- *"how soon will conditions be hot in December?"* → combines correctly with the existing
+  honesty-threshold caveat: `"...happen most around December. The hottest on record: 26 Dec 2015
+  (12.1); ... Note: December (every year, 2009–2016) never gets genuinely hot in this record
+  (record-wide hot threshold 15.4) — 26 Dec 2015 (12.1) is the closest it gets."`
+
+**Known minor rough edge, not fixed:** when the scope is already a single recurring month (e.g.
+"hot days in June"), the "happen most around June" line is tautological — obviously every result
+is in June once the search is restricted to June days. Harmless (still accurate), just less
+informative in that one case than the unrestricted "whole record" case where it's genuinely
+telling you something new.
+
+**Files:** `src/interface.py` (directional branch: forward-looking check + recurring-pattern
+phrasing, reusing `is_forward_looking_query` and `calendar.month_name` already imported). 2 new
+tests in `test_interface_recommend.py` (recurring-pattern phrasing; combination with the
+honesty caveat). Verified live against the real Flask app over HTTP. Full regression suite
+(interface/agent/apps/query_engine) re-run clean; `ruff check` clean.
+
+### v1: multi-sensor honesty caveat + qualitative correlation strength labels
+Two of the improvement suggestions from a self-review of today's work, picked by the user as the
+highest-value/lowest-risk pair to build.
+
+**1. The "recommend" honesty caveat only ever checked the FIRST requested sensor.** For the
+default 5-sensor comparison (T, rh, Tdew, p, wv), that meant a restriction could be badly
+mismatched on pressure or humidity while temperature happened to look fine, and the caveat would
+silently say nothing. Rewritten to check every sensor in `wanted` against the record's own spread
+for that sensor, name the worst offender(s) (sorted by how many multiples of the record's typical
+spread the gap is), and only fire if at least one genuinely crosses the bar. Verified on the real
+dataset that this actually catches things the old single-sensor check missed: "January 2013
+similar to June 2013" with the default 5-sensor set flagged **pressure** as the worst mismatch (a
+1.43x-of-spread gap) even though temperature itself was a reasonable match that day (0.81x) —
+the old code, checking temperature alone, would have said nothing. Also added a dedicated test
+with a synthetic fixture where the *first* sensor (T) has no seasonal signal at all and the
+*second* (p) carries the whole mismatch, to lock in that this isn't accidentally still
+first-sensor-only.
+
+**2. Correlation answers were a bare number** (`correlation(T, rh) = -0.572`) with no indication
+of whether that's a strong or weak relationship — reasonable for a domain expert, not for the
+"explainable to a non-technical user" half of the thesis. New `correlation_strength()` maps |r|
+to a plain-English label (very weak / weak / moderate / strong / very strong) using the commonly-
+cited Evans (1996) convention, applied to both the standard Pearson correlation intent and the
+circular-linear (wind direction) variant. `correlation(T, rh) = -0.572` now reads `-0.572
+(moderate negative correlation)`; `correlation(T, rho) = -0.963` reads `(very strong negative
+correlation)`. Composes correctly with the existing correlation-not-causation caveat (verified
+live: "...(moderate negative correlation). Note: this is correlation, not causation...").
+
+**Files:** `src/interface_parsing.py` (`correlation_strength`) · `src/interface.py` (correlation
+branch: strength+sign label on both Pearson and circular-linear paths; recommend branch: honesty
+caveat rewritten to check all `wanted` sensors) · 4 new tests across `test_interface_intent.py`
+(`correlation_strength` boundaries, strength label present in the real answer) and
+`test_interface_recommend.py` (multi-sensor mismatch detection with a fixture engineered so the
+first sensor is clean and the second isn't). 345 tests collected; full regression suite re-run
+clean (interface/agent/apps/query_engine + clustering/anomaly/preprocess/rag/retrieval_eval);
+`ruff check` clean; re-verified live against the real Flask app over HTTP for both features,
+including the causation-caveat + strength-label combination and a genuinely-close case that
+correctly stays silent.
+
+### v1: "recommend" understands "when next do we get similar conditions?" (forward-only, near-term)
+User's exact test: "I liked the weather on 13th february 2013, when next do we get similar
+conditions?" — a natural way a person actually asks this, and explicitly NOT how the system's
+`recommend` intent worked so far (which finds the single closest match *anywhere* in the record,
+any direction in time — including years earlier). Two problems, the first more basic than
+expected: this phrasing didn't even reach the `recommend` intent at all (fell through to
+`weather`, since "similar conditions" — without "to" — and "when next"/"how soon"/"next time"
+weren't in its keyword list); and even once routed correctly, a plain analog search would happily
+answer "the closest match was three years ago in January," which isn't what "when next" means.
+
+**Intent routing:** added "similar conditions", "similar weather", "when next", "when again",
+"next time", "when will we", "when do we get", "how soon" to the `recommend` intent's keywords.
+
+**Forward-only, near-term by default:** new `is_forward_looking_query` detects this phrasing.
+When it fires: candidates are constrained to strictly after the target date, and — per the user's
+own framing ("within the month or next 2-3 months... this is how a human will ask... sometimes
+they will not suggest the months but they want closest to it") — default to a 3-month forward
+window when no explicit scope was named, or make a named scope forward-only if one was (e.g.
+"when next **in November** will conditions be similar to 5 September?" still only searches
+November, but only the days after September 5th within it). The existing honesty-caveat
+mechanism (real computed values vs. the record's own spread) applies unchanged to this window —
+verified it stays silent when the near-term future genuinely resembles the target, and the
+phrasing itself changes to "The next time conditions look like X is likely around Y" rather than
+the plain-analog "Closest match: Y — that's the day to go with."
+
+**Verified live** (real Flask app, HTTP, full dataset): the exact reported question; forward-only
++ explicit-restriction combined; a target near the very end of the record (window truncated by
+the data boundary, handled gracefully, no crash); non-forward-looking questions unaffected
+(still search the whole record, any direction). Noted but not fixed: a forward-looking question
+that also contains a directional word ("the hottest day of July 2015") routes to the separate
+directional-mode code path instead, which doesn't understand "when next" at all — a real,
+pre-existing gap, but a different intent branch than the one asked about today.
+
+**Files:** `src/interface_parsing.py` (`recommend` keywords extended; `is_forward_looking_query`)
+· `src/interface.py` (forward-only window logic in the analog branch; phrasing branch for
+forward-looking answers). 5 new tests across `test_interface_intent.py` (routing,
+`is_forward_looking_query`) and `test_interface_recommend.py` (default window, explicit-scope
+combination, non-forward-looking regression). 342 tests collected; full regression suite re-run
+clean; `ruff check` clean.
+
+### v1: `resolve_sensors` word-boundary bug — found by generalizing today's "recommend" work
+User asked whether today's fixes ("recommend" target/restriction, honesty caveat) genuinely
+generalize across any month/year/date and any sensor, not just the worked temperature example.
+Testing that systematically (real dataset, humidity/pressure/wind/dew-point/air-density, several
+months and years) surfaced a real, pre-existing bug: `resolve_sensors` matched aliases with plain
+substring search (`q.find(word)`), no word boundaries. "thin" (-> air density, `rho (g/m**3)`) is
+a literal substring of "within" — and "within" is one of the `recommend` intent's OWN restriction
+keywords ("staying **within** that month"), so every such question was silently ranking on air
+density alone instead of the intended default sensor set. ("window" containing "wind" has the
+same risk.) This had been silently passing every existing test all day, since none of them
+asserted which sensor was actually used — only that the resulting dates were in the right period.
+
+**Fix:** `resolve_sensors`'s alias loop now matches with `\b...\b` word boundaries (`re.finditer`
+instead of `str.find`), preserving the existing longest-alias-first + span-consumption behaviour
+exactly — verified "wind direction" still beats "wind speed", "vapour pressure" still beats plain
+"pressure", etc. Re-verified "staying within that month" now correctly resolves to the default
+5-sensor set again, and "how thin is the air" / "wind speed today" still correctly resolve their
+real aliases.
+
+**Verified the generalization claim properly** afterward, live on the real dataset: humidity,
+pressure, wind speed, dew point, and air density all work as the comparison sensor (not just
+temperature); months/years/specific dates all work as target and restriction in both directions;
+the honesty caveat correctly stays silent for genuinely close pairs (Jan/June humidity, pressure,
+wind speed were all close enough not to trigger it — checked the real numbers, not just the
+absence of the caveat text) and correctly fires for genuinely mismatched pairs on non-temperature
+sensors too (dew point Aug-vs-Jan, air density Jul-vs-Dec, wind speed calmest-vs-windiest month).
+
+**Files:** `src/interface_parsing.py` (`resolve_sensors` word-boundary fix) · 2 new tests
+(`test_interface_aliases.py`: the within/thin and window/wind collisions, plus real-word
+regression; `test_interface_recommend.py`: asserts the actual sensor list for the
+previously-silently-wrong case). 337 tests collected; full regression suite re-run clean since
+`resolve_sensors` is used by nearly every intent; `ruff check` clean.
+
+### v1: analog "recommend" now understands "X similar to Y" as (restriction, TARGET) + honesty caveat
+Follow-up, same day: user tested "recommend a day to go out in January 2010 similar to June
+2010" and got an answer entirely about January, with June silently discarded — the same class of
+bug fixed twice already that day, but in a new shape: neither month had a day number, so
+`resolve_day` couldn't disambiguate by day-adjacency at all, and the fallback (`resolve_period`
+on the whole text) picked January purely because "january" sorts before "june" in `MONTHS`' dict
+order — even though "similar to June" makes June unambiguously the thing being matched, not
+January. User confirmed the intended semantics (June = target, January = restriction) and asked
+for a further honesty check: don't just quietly return the least-bad January day when January
+never actually gets close to June's weather — say so, with the real numbers.
+
+**Target/restriction reversal:** new `split_target_clause` finds a "similar to"/"comparable
+to"/... marker and returns the text after it; when present, the target is parsed from THAT
+clause specifically (not the whole question), and the existing `resolve_secondary_period`
+mechanism finds the OTHER named period (January) as the restriction. Deliberately excludes bare
+"like" from the marker list — "like" is too common a word ("a day I'd **like** to go out") to
+safely split a clause on, even though it stays a valid `recommend`-intent trigger elsewhere.
+
+**Mixed granularity:** "a day to go out in January 2010" asks for a specific DAY, but the named
+target (June 2010) and restriction (January 2010) are both bare months. Solved without changing
+`find_analog_periods` at all — call it with `freq="D"` whenever a restriction is present
+(regardless of the target's own granularity); the target's masked mean over ~30 June day-buckets
+is mathematically its month-level average anyway, and the restriction's day-buckets are exactly
+what's wanted for "a day."
+
+**Honesty caveat, new:** compares the target's and best candidate's real value for the primary
+sensor against the whole record's own standard deviation for that sensor (a data-derived bar, not
+an invented one) — if the gap exceeds it, the answer now says e.g. *"Honest caveat: don't count
+on January 2010 for June 2010-like T (degC) — June 2010 averaged 16.9, but the best January 2010
+offers is 2.2 (a 14.6 gap, more than the record's typical 8.4 spread for T (degC))."* Verified on
+the real dataset that adjacent, genuinely-similar months (January vs February) do NOT trigger the
+caveat, only seasonally-opposite ones do.
+
+**One bug caught and fixed mid-build** (not by the user, by testing my own draft before shipping
+it): the anaphoric-restriction fallback path ("staying within that month") broke, because it used
+to reuse the whole-question's parsed period as the restriction bound, but that variable now holds
+the TARGET's bounds after the target/restriction rework (and is `None` whenever the target came
+from a specific day). Fixed by deriving "the month containing the target's own date" fresh,
+rather than reusing a variable whose meaning had changed underneath it — caught by the existing
+regression test for that exact case failing immediately on the first full test run.
+
+**Files:** `src/interface_parsing.py` (`split_target_clause`) · `src/interface.py` (target
+resolution now tries the marker clause first; restriction detection now also covers month-only,
+day-less targets; search always goes day-level once a restriction is set; new honesty-caveat
+block) · 6 new tests across `test_interface_intent.py` (`split_target_clause`) and
+`test_interface_recommend.py` (target/restriction swap, caveat-fires and caveat-doesn't-fire
+cases). 336 tests collected; full interface/agent/apps/clustering/anomaly/preprocess/rag/
+retrieval_eval suites re-run clean; `ruff check` clean; re-verified live against the real Flask
+app over HTTP (not just in-process) for the reported question, both earlier restriction cases,
+and the adjacent-months no-caveat case.
+
+### v1: analog "recommend" restriction now handles a DIFFERENT month (and year) than the target
+Follow-up to the scope-restriction fix below, same day: user reported "recommend a day to go out
+in 5 September 2012 in November 2012" was not restricting to November — and asked for it to work
+"even if the year changes too, like June 2016". Two bugs, found by testing the exact phrasing
+live before touching code (per the verify skill, against the real Flask app over HTTP, not
+just `Interface.ask()` in-process).
+
+1. **`resolve_secondary_period` (new that same day) only found a RESTATED period** — it worked
+   for "6 April 2013 in the month of April 2013" (same month twice) but the new report names a
+   genuinely different month, so nothing was repeated for it to detect. Rebuilt on a simpler,
+   more general idea: strip ONE occurrence of the target's own month name and year from the
+   question, then run the existing `resolve_period` on what's left — whatever period (if any)
+   remains named there is the restriction, found by *value*, so it works regardless of whether
+   it repeats the target's month, names a different month, or even a different year.
+2. **A real, separate bug in `resolve_day` surfaced immediately** while testing case 1: for "5
+   September 2012 in June 2016", `resolve_day` returned `None` — no day at all, not even
+   September's. Root cause: its month-matching loop iterates `MONTHS` in calendar order
+   (jan..dec) rather than the order words appear in the text; "june" (month 6) sorts before
+   "september" (month 9), so the loop hits "june" first, finds no day number next to it, and
+   used to `break` immediately — never reaching "september", which *does* have "5" next to it.
+   Fixed by changing that `break` to `continue`, so the loop keeps searching for a month that
+   actually has a day attached instead of giving up on the first month it happens to check.
+   This is shared parsing logic used by nearly every intent (weather report, threshold,
+   day-type, ...), not just `recommend`, so it was re-verified across the full test suite.
+
+**Verified live** via the real Flask app (`POST /api/ask` over HTTP, full 70k-row dataset):
+the reported question now restricts to November 2012; the explicit different-year case
+restricts to June 2016; the previously-fixed same-month-repeat and bare-date cases are
+unaffected. One adversarial probe (three months in one question, with an explicit negation —
+"...restricted to November 2012, not October") picked the wrong one (October, by the same
+underlying `resolve_period` dict-order tendency, now one layer removed) — noted as a real,
+narrower limitation but out of scope for what was actually asked (two dates: a target and one
+restriction), not fixed.
+
+**Files:** `src/interface_parsing.py` (`resolve_secondary_period` rewritten;
+`resolve_day`'s `break`→`continue` fix) · `src/interface.py` (analog branch now tries
+`resolve_secondary_period` first, falls back to the phrase-based check for anaphoric restrictions
+like "staying within that month") · 5 new tests across `test_interface_scope.py` (`resolve_day`
+regression), `test_interface_intent.py` (`resolve_secondary_period`), `test_interface_recommend.py`
+(different-month and different-month-and-year routing). Full interface/agent/apps/clustering/
+anomaly/preprocess/rag/retrieval_eval suites re-run clean; `ruff check` clean.
+
+### v1: analog "recommend" now honors an explicitly restated scope — plus a real `resolve_period` bug
+User reported: "recommend days similar to 6 April 2013 in the month of April 2013" returned
+candidates from outside April 2013, when they'd explicitly said to stay within it. Two separate
+bugs, found by testing the exact phrasing against the real parser before touching anything:
+
+1. **`resolve_period` bug (pre-existing, unrelated to `recommend`):** the "6 April 2013 ... in
+   the month of April 2013" phrasing names the year "2013" TWICE (once in the date, once in the
+   restated scope). `resolve_period`'s year-range branch fires on `len(years) >= 2` unconditionally
+   — it didn't check whether the two mentions were actually *different* years — so this collapsed
+   to the whole year 2013 instead of April 2013, discarding the month entirely. Fixed by deduping
+   identical year mentions before the range check (`list(dict.fromkeys(...))`); a genuine range
+   ("between 2012 and 2014") is unaffected since those years are different values.
+2. **Analog search never used any scope at all**, even a correctly-parsed one — `find_analog_periods`
+   always searched the *entire* record for candidates. Fixed with new optional `search_start`/
+   `search_end` params that filter the candidate pool (z-scoring still uses the whole record, so
+   distances stay on a consistent scale).
+
+**Design decision:** a bare date ("recommend dates similar to 13 February 2013") must keep
+searching the whole 8-year record — that's the originally-requested and already-verified
+behaviour, and every fully-specified date implicitly resolves a containing month via
+`resolve_period` regardless of user intent, so "a period was parsed" can't be the restriction
+signal. New `resolve_explicit_scope_restriction` instead looks for the user's own tell: a month
+name mentioned a **second** time, or an explicit phrase ("within", "staying within", "same month",
+"that month", ...). Verified both paths on the real dataset: the restated-scope phrasing now
+returns only April 2013 days ("searched within April 2013 only" in the answer, for transparency);
+the bare-date phrasing still returns analogs spanning multiple years, unchanged.
+
+**Files:** `src/interface_parsing.py` (years-dedup fix in `resolve_period`;
+`resolve_explicit_scope_restriction`) · `src/query_engine.py` (`find_analog_periods` gains
+`search_start`/`search_end`) · `src/interface.py` (wires the restriction check into the analog
+branch, adds the "(searched within X only)" transparency note) · 7 new tests across
+`test_query_engine.py`, `test_interface_scope.py` (the dedup-bug regression), `test_interface_intent.py`,
+`test_interface_recommend.py` (restricted vs. unrestricted vs. phrase-only routing). 327 tests
+collected (up from 320); `ruff check` clean; full interface/agent/apps/clustering/anomaly/
+preprocess/rag/retrieval_eval suites re-run clean since the `resolve_period` fix touches shared
+parsing logic used by every intent, not just `recommend`.
+
+### v1: "recommend" intent extended — all 14 sensors + an explicit "go with this one" verdict
+Follow-up to the "recommend" intent below, same day: user asked for two more things. (1) The
+directional mode only understood hot/cold/humid/dry/windy/calm — three sensors (T, rh, wv) out
+of 14; "recommend the highest pressure days" or "days with the lowest dew point" fell through to
+the generic fallback. (2) The answer just listed candidates; the user wanted it to actually name
+one and say to go with it ("go on this date... better go on the other day").
+
+**All 14 sensors:** new `resolve_generic_direction` (`interface_parsing.py`) — any sensor
+`resolve_sensors` can name, paired with a generic high/low word ("highest", "lowest", "most",
+"least", "max", "min", ...), resolves to a direction. Tried only after the six known adjectives
+fail, so "hot"/"cold" etc. keep their natural phrasing ("hottest") and only the other 11 sensors
+(pressure, dew point, wind direction, specific humidity, vapour pressures, air density, potential
+temperature) fall back to generic "highest/lowest `<sensor>`" phrasing.
+
+**Verdict line:** both modes now name the single best candidate explicitly instead of leaving the
+user to pick from a list — directional mode: "Best pick: 19 Jun 2013 (27.3) — go with that one.";
+analog mode: "Closest match: 15 Jan 2010 — ... that's the day to go with." The honest-caveat case
+(question isn't genuinely hot/cold/etc.) still names a best-of-the-worst pick but keeps the "don't
+expect real X weather" framing rather than a plain recommendation — verified: "recommend hot days
+in December" still reads as an honest non-recommendation, not a disguised one, while "highest
+pressure days in 2013" and "lowest dew point in march" now work end-to-end on the real dataset
+where they previously had no path to an answer at all.
+
+**Files:** `src/interface_parsing.py` (`GENERIC_DIRECTION_WORDS`, `resolve_generic_direction`) ·
+`src/interface.py` (recommend branch: generic-direction fallback, generic word/superlative
+phrasing for the 11 uncovered sensors, verdict clause in both modes) · 5 new tests
+(`test_interface_intent.py`: `resolve_generic_direction` x2; `test_interface_recommend.py`:
+generic-sensor routing, both verdict-line cases). 320 tests collected (up from 315); `ruff check`
+clean; re-verified via direct `Interface.ask()` calls on the real Jena dataset for pressure/
+dew-point/hot/cold/analog cases.
+
+### v1: new "recommend" intent — analog date-finder + directional day-ranking
+User asked the web app "can you recommend other dates of the weather of february 13 2013" and
+got a plain day report back, no recommendation. Root cause: no "recommend" concept existed
+anywhere in the system — the question matched the `weather` intent purely because it contains
+the word "weather"; there was no keyword, no query-engine function, nothing in `clustering.py`'s
+day-type K-means that finds analog *dates* for an arbitrary reference day.
+
+**Design (agreed with user before building, via brainstorming):** one new intent, two modes,
+chosen by whether the question names a directional quality (hot/cold/humid/dry/windy/calm):
+- **Analog mode** (no directional word, e.g. "dates similar to 13 Feb 2013" or "a similar year
+  to 2013"): buckets the record at day/month/year granularity (whichever the question names),
+  z-scores each sensor across all buckets so °C and mbar don't distort distance, and ranks other
+  buckets by Euclidean distance to the target in that normalized space. New
+  `query_engine.find_analog_periods`.
+- **Directional/ranking mode** (e.g. "recommend hot days in June"): ranks calendar days within a
+  scope by one sensor's daily mean. The scope is either an explicit month+year, a **recurring**
+  bare month with no year ("in June" = every June across all 8 record-years — new
+  `resolve_recurring_month`), or the whole record. New `query_engine.rank_calendar_days`.
+
+**Honesty fix added mid-build, at the user's own follow-up ("but if the temperature is not valid
+in that month eg december when its cold... should give closest but not recommend"):** a
+directional query's top candidate is checked against a **whole-record** quantile (75th for
+hot/humid/windy, 25th for cold/dry/calm) for that sensor. "Hot days in December" now returns the
+closest December gets to hot, but the phrasing honestly says December "isn't genuinely hot in
+this record" rather than presenting mediocre December days as a real hot recommendation. Verified
+directly: on the real Jena dataset, June's hottest days (up to 27.3°C) clear the record-wide hot
+threshold (15.4°C) and get a real recommendation; December's do not (best 12.1°C vs the same
+15.4°C bar) and get the honest caveat instead.
+
+**Bugs caught by actually running the interface against the real dataset before writing tests**
+(driving the app first, per the verify skill, rather than trusting the code read-through):
+- "hotest days" (missing a 't') — English superlatives aren't `word + "est"` (hot→hottest,
+  windy→windiest); fixed with a small `DIRECTION_SUPERLATIVES` map instead of string concatenation.
+- Year-granularity analog results printed as "1 Jan 2009" instead of "2009" — `fmt_when` isn't
+  granularity-aware, it always formats a full date. Fixed with a small `_label()` helper in the
+  interface branch that renders year/month/day buckets differently.
+
+**Files:** `src/interface_parsing.py` (`DIRECTION_WORDS`, `DIRECTION_LABELS`,
+`DIRECTION_SUPERLATIVES`, `resolve_direction`, `resolve_recurring_month`, `recommend` added to
+`INTENTS` — placed *first* in the dict so "recommend the hottest days" doesn't fall through to
+`max` on the shared "hottest" keyword) · `src/query_engine.py` (`rank_calendar_days`,
+`find_analog_periods`) · `src/interface.py` (`_analog_scope` helper, the `recommend` intent
+branch in `_answer`) · `CLAUDE.md` / `README.md` (intent lists) · tests: 8 new in
+`test_query_engine.py`, a new `test_interface_recommend.py` (7 tests: analog day/year modes, the
+no-scope fallback, directional month+year and recurring-month modes, the honest-caveat case, the
+superlative-spelling regression), 3 new in `test_interface_intent.py` (recommend-vs-max/weather
+keyword priority, `resolve_direction`, `resolve_recurring_month`). 315 tests collected
+(`pytest --collect-only`, up from 296); `ruff check` clean.
+
 ## 2026-07-15
 
 ### v1: extended audit (`tests/`, `apps/`, `notebooks/`, `docs/`, `report/`) — 8 findings, 6 fixed

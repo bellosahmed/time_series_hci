@@ -51,6 +51,15 @@ SENSOR_ALIASES = {
 }
 
 INTENTS = {
+    # recommend is BEFORE max/min/trend so "recommend the hottest days" routes here, not to
+    # max (they share vocabulary like "hottest"/"warmer" since recommending IS a kind of ranking)
+    "recommend": ["recommend", "recommendation", "recommends", "suggest", "suggestion",
+                  "suggests", "similar to", "similar day", "similar days", "similar date",
+                  "similar dates", "similar month", "similar months", "similar year",
+                  "similar years", "similar conditions", "similar weather", "analogous",
+                  "other dates", "other days like", "like this day", "like this month",
+                  "like this year", "closest to", "when next", "when again", "next time",
+                  "when will we", "when do we get", "how soon"],
     "max": ["max", "maximum", "highest", "hottest", "peak", "warmest", "top", "biggest", "most",
             "hot", "record high"],
     "min": ["min", "minimum", "lowest", "coldest", "smallest", "least", "cold", "record low"],
@@ -96,14 +105,16 @@ def resolve_sensors(question: str, columns) -> list[str]:
         col = SENSOR_ALIASES[word]
         if col not in columns:
             continue
-        start = q.find(word)
-        while start != -1:
-            if not any(consumed[start:start + len(word)]):
-                for i in range(start, start + len(word)):
+        # \b word boundaries -- plain substring search let short aliases fire inside unrelated
+        # words, e.g. "thin" (-> air density) matching inside "within" ("staying WITHIN April"),
+        # corrupting sensor detection on any "recommend" restriction phrase that used the word.
+        for m in re.finditer(rf"\b{re.escape(word)}\b", q):
+            start, end = m.start(), m.end()
+            if not any(consumed[start:end]):
+                for i in range(start, end):
                     consumed[i] = True
                 hits.append((start, col))
                 break
-            start = q.find(word, start + 1)
     found: list[str] = []
     for _, col in sorted(hits):  # order by appearance in the question
         if col not in found:
@@ -112,6 +123,176 @@ def resolve_sensors(question: str, columns) -> list[str]:
         if col.lower() in q and col not in found:
             found.append(col)
     return found
+
+
+# Directional adjectives for the "recommend" intent's ranking mode ("recommend hot days in
+# June") -> (sensor, ascending). ascending=False means rank for the HIGHEST values (hot,
+# humid, windy); ascending=True means rank for the LOWEST (cold, dry, calm).
+DIRECTION_WORDS = {
+    "hot": ("T (degC)", False), "hottest": ("T (degC)", False), "warm": ("T (degC)", False),
+    "warmest": ("T (degC)", False), "warmer": ("T (degC)", False),
+    "cold": ("T (degC)", True), "coldest": ("T (degC)", True), "cool": ("T (degC)", True),
+    "coolest": ("T (degC)", True), "cooler": ("T (degC)", True), "chilly": ("T (degC)", True),
+    "humid": ("rh (%)", False), "muggy": ("rh (%)", False), "clammy": ("rh (%)", False),
+    "sticky": ("rh (%)", False), "damp": ("rh (%)", False),
+    "dry": ("rh (%)", True), "driest": ("rh (%)", True),
+    "windy": ("wv (m/s)", False), "gusty": ("wv (m/s)", False), "breezy": ("wv (m/s)", False),
+    "blowy": ("wv (m/s)", False),
+    "calm": ("wv (m/s)", True), "calmest": ("wv (m/s)", True), "still": ("wv (m/s)", True),
+}
+
+# The canonical word to describe each (sensor, ascending) pair back to the user, regardless of
+# which specific synonym ("warmest"/"hot"/"warmer") they actually typed.
+DIRECTION_LABELS = {
+    ("T (degC)", False): "hot", ("T (degC)", True): "cold",
+    ("rh (%)", False): "humid", ("rh (%)", True): "dry",
+    ("wv (m/s)", False): "windy", ("wv (m/s)", True): "calm",
+}
+
+# Superlative phrasing for each label — English irregulars ("hot"->"hottest", not "hotest")
+# mean this can't be built by string concatenation.
+DIRECTION_SUPERLATIVES = {
+    "hot": "hottest", "cold": "coldest", "humid": "most humid", "dry": "driest",
+    "windy": "windiest", "calm": "calmest",
+}
+
+
+def resolve_direction(question: str) -> tuple[str, bool] | None:
+    """A directional adjective ("hot", "driest", "calm"...) -> (sensor, ascending), else None."""
+    q = question.lower()
+    for word, pair in DIRECTION_WORDS.items():
+        if re.search(rf"\b{word}\b", q):
+            return pair
+    return None
+
+
+# Generic direction words that work with ANY named sensor, not just the T/rh/wv adjectives
+# above -- covers the other 11 sensors (pressure, dew point, wind direction, specific humidity,
+# vapour pressures, air density, potential temperature) which have no natural colloquial
+# adjective ("recommend the highest-pressure days", "days with the lowest dew point").
+GENERIC_DIRECTION_WORDS = {
+    "highest": False, "greatest": False, "most": False, "max": False, "maximum": False,
+    "top": False, "biggest": False, "largest": False,
+    "lowest": True, "least": True, "min": True, "minimum": True, "smallest": True,
+}
+
+
+_FORWARD_LOOKING_PHRASES = ("when next", "when again", "next time", "when will", "when do we",
+                            "how soon", "when's the next", "when is the next", "when do we get")
+
+
+def is_forward_looking_query(question: str) -> bool:
+    """True for "when next do we get conditions like X?" style questions.
+
+    A human asking this means "soon" -- not "sometime in the next 8 years, possibly a
+    different season entirely" -- so the "recommend" intent's analog mode restricts to a
+    near-term forward window by default when this fires (see `interface.py`), rather than the
+    plain "closest match anywhere in the record, any direction in time" analog search.
+    """
+    q = question.lower()
+    return any(p in q for p in _FORWARD_LOOKING_PHRASES)
+
+
+_TARGET_CLAUSE_MARKERS = ("similar to", "similar weather to", "similar conditions to",
+                          "comparable to", "resembling", "resembles")
+
+
+def split_target_clause(question: str) -> str | None:
+    """The substring right after a "similar to"/"comparable to"/... marker, else None.
+
+    Needed for the "recommend" intent's analog mode when NEITHER named period has a day number
+    attached, so `resolve_day` can't tell them apart by day-adjacency -- "a day to go out in
+    January 2010 similar to June 2010": `resolve_period` on the whole text would pick January by
+    dict order (jan sorts before jun), even though the user's own "similar to June" phrasing
+    makes June unambiguously the target, not January. Deliberately narrower than the "like"
+    keyword also used to detect the `recommend` intent -- "like" alone is too common a word
+    ("a day I'd **like** to go out") to safely mark a comparison clause.
+    """
+    q = question.lower()
+    matches = [(q.find(m), len(m)) for m in _TARGET_CLAUSE_MARKERS if m in q]
+    if not matches:
+        return None
+    start, mlen = min(matches)
+    return question[start + mlen:]
+
+
+_SCOPE_RESTRICT_PHRASES = ("within", "during", "throughout", "stay within", "staying within",
+                           "restrict", "restricted", "only in", "only during", "same month",
+                           "that month", "same year", "that year", "no further than")
+
+
+def resolve_explicit_scope_restriction(question: str) -> bool:
+    """True if the question explicitly names a bounding period as a restriction, distinct from
+    just stating a specific day's own date -- for the "recommend" intent's analog mode.
+
+    "recommend days similar to 6 April 2013 **in the month of** April 2013" names "April" TWICE:
+    once as part of the date, once as an explicit "search only within this month" scope -- so
+    analog candidates should be restricted to April 2013. A bare "similar to 13 February 2013"
+    names February once and means search the *whole record* for analogs, not just February.
+    Detected via either an explicit restriction phrase ("within", "same month", ...) or a month
+    name repeated in the question (the same tell as the worked example above).
+    """
+    q = question.lower()
+    if any(p in q for p in _SCOPE_RESTRICT_PHRASES):
+        return True
+    return any(len(re.findall(rf"\b{name}\b", q)) >= 2 for name in MONTHS)
+
+
+def resolve_secondary_period(question: str, target_month: int, target_year: int):
+    """A period named in `question` OTHER than the target day's own month/year, else None.
+
+    For the "recommend" intent's analog mode: "recommend a day like 5 September 2012 in
+    November 2012" names a SECOND, different period (November 2012) as an explicit search
+    restriction -- and it doesn't have to share the target's month OR year ("...in June 2016"
+    works the same way). `resolve_period` itself can't see this: given two different month
+    names it always returns whichever comes first by dict order (jan..dec), not by where it
+    actually appears in the text, so it silently drops "November" here.
+
+    Works by stripping ONE occurrence of the target's own month name and year, then running
+    `resolve_period` on what's left -- whatever period (if any) is still named there is the
+    restriction, found by value (not text position), so it works regardless of word order.
+    """
+    q = question.lower()
+    stripped = q
+    for name, num in MONTHS.items():
+        if int(num) == target_month and re.search(rf"\b{name}\b", stripped):
+            stripped = re.sub(rf"\b{name}\b", " ", stripped, count=1)
+            break
+    stripped = re.sub(rf"\b{target_year}\b", " ", stripped, count=1)
+    start, end, label = resolve_period(stripped)
+    return (start, end, label) if start or end else None
+
+
+def resolve_generic_direction(question: str, columns) -> tuple[str, bool] | None:
+    """A named sensor + a generic high/low word -> (sensor, ascending), else None.
+
+    Fallback for `resolve_direction` when the sensor isn't one of the six adjective-covered
+    ones -- e.g. "recommend the highest pressure days" (no natural adjective for "pressure").
+    """
+    sensors = resolve_sensors(question, columns)
+    if not sensors:
+        return None
+    q = question.lower()
+    for word, ascending in GENERIC_DIRECTION_WORDS.items():
+        if re.search(rf"\b{word}\b", q):
+            return sensors[0], ascending
+    return None
+
+
+def resolve_recurring_month(question: str) -> int | None:
+    """A bare month name with **no year** -> its number (1-12), else None.
+
+    Used by the "recommend" intent's ranking mode: "hot days in June" (no year) means every
+    June across the whole record, not a single month+year slice -- `resolve_period` already
+    handles the year-given case ("June 2015"), so this only fires when it wouldn't.
+    """
+    q = question.lower()
+    if re.search(r"\b(?:19|20)\d{2}\b", q):
+        return None
+    for name, num in MONTHS.items():
+        if re.search(rf"\b{name}\b", q):
+            return int(num)
+    return None
 
 
 # Fixed explanations of the chart markers — facts the system knows, so answering a
@@ -171,8 +352,60 @@ def is_causal_query(question: str) -> bool:
 
     The system measures correlation, not causation, so these are answered with an explicit
     correlation-not-causation caveat rather than silently treated as a relationship query.
+
+    Uses \\b word boundaries (not plain substring search) -- "cause" is a literal substring of
+    "because", so a bare `w in question` check flagged ANY question containing "because" (even
+    with no "of", e.g. "I stayed in because it was cold, what was the average temperature?") as
+    causal, hijacking it into the correlation branch and answering a question the user never
+    asked instead of the one they did.
     """
-    return any(w in question.lower() for w in _CAUSAL_WORDS)
+    q = question.lower()
+    return any(re.search(rf"\b{re.escape(w)}\b", q) for w in _CAUSAL_WORDS)
+
+
+_CORRELATION_BREAKDOWN_PHRASES = (
+    "why is it only", "why is that only", "why is it so", "why is that so",
+    "why isn't it stronger", "why is it not stronger", "why not stronger", "why so weak",
+    "why so strong", "break down", "breakdown", "explain the relationship",
+    "explain that correlation", "explain this correlation", "why is the correlation",
+    "why is that correlation",
+)
+
+
+def is_correlation_breakdown_query(question: str) -> bool:
+    """True for "why is that correlation only moderate?" style follow-ups.
+
+    Distinct from `is_causal_query`: that flags "why does X cause Y" (a claim about causation,
+    answered with a caveat), this flags "why is the NUMBER the strength it is" (a request to
+    explain the correlation's own magnitude -- R², rank correlation, seasonal breakdown). The
+    two aren't mutually exclusive ("why is it only moderate" can trip both), and that's fine --
+    each answers a genuinely different question the phrasing raised.
+    """
+    q = question.lower()
+    return any(p in q for p in _CORRELATION_BREAKDOWN_PHRASES)
+
+
+# Qualitative strength bins for |r| (Pearson or the 0-1 unsigned circular-linear measure) --
+# the common convention (e.g. Evans 1996): checked high-to-low, first threshold met wins.
+_CORRELATION_STRENGTH_BINS = (
+    (0.80, "very strong"), (0.60, "strong"), (0.40, "moderate"), (0.20, "weak"),
+)
+
+
+def correlation_strength(r: float) -> str:
+    """A plain-English strength label for a correlation coefficient's magnitude.
+
+    Turns a bare number ("-0.572") into something a non-technical reader can act on ("a
+    moderate negative correlation") without doing the interpretation themselves -- the
+    "explainable" half of a trust-chain answer, not just the raw statistic. Only labels
+    magnitude; sign (positive/negative) is the caller's job, since this also serves the
+    0-1 unsigned circular-linear measure, which has no sign at all.
+    """
+    a = abs(r)
+    for threshold, label in _CORRELATION_STRENGTH_BINS:
+        if a >= threshold:
+            return label
+    return "very weak"
 
 
 def detect_intent(question: str) -> str | None:
@@ -225,7 +458,10 @@ def resolve_period(question: str):
     looser phrasing.
     """
     q = question.lower()
-    years = re.findall(r"\b((?:19|20)\d{2})\b", q)
+    # Dedupe repeated mentions of the SAME year (e.g. "6 April 2013 in the month of April
+    # 2013" says "2013" twice but means one period, not a range) -- only genuinely different
+    # year numbers count as a range.
+    years = list(dict.fromkeys(re.findall(r"\b((?:19|20)\d{2})\b", q)))
 
     if len(years) >= 2:                                   # year range
         y0, y1 = sorted(int(y) for y in years[:2])
@@ -294,7 +530,12 @@ def resolve_day(question: str):
             if dm and 1 <= int(dm.group(1)) <= 31:
                 d = int(dm.group(1))
                 return int(mon), d, year, _day_label(int(mon), d, year)
-            break  # a month was named but no day -> not a specific-day question
+            # This month was named with no adjacent day ("...in June 2016") -- keep looking
+            # rather than giving up, since a SECOND month elsewhere in the text (dict order is
+            # calendar order, not text order) may be the one that actually has a day attached,
+            # e.g. "5 September 2012 in June 2016": "june" sorts before "september" in MONTHS
+            # but has no day next to it, while "september" does.
+            continue
     return None
 
 

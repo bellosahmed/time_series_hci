@@ -203,6 +203,46 @@ check("query-routing coverage generalises to a held-out question set (>= 90%)",
       cov_ho["overall_pct"] >= 90.0,
       f"overall={cov_ho['overall_pct']:.1f}% (n={cov_ho['n']})")
 
+# 19. recommend intent, analog restriction: candidates for an explicitly-scoped analog search
+# stay INSIDE the named month, recomputed a different way -- directly filtering the raw column
+# by calendar month, not trusting the interface's own restriction logic. See docs/evaluation/
+# 07-recommend-and-explainability.md.
+a_apr = iface.ask("recommend days similar to 6 April 2013 in the month of April 2013")
+apr_dates = [c["when"] for c in a_apr.value["candidates"]]
+check("recommend analog restriction: every candidate independently confirmed inside April 2013",
+      bool(apr_dates) and all(d.year == 2013 and d.month == 4 for d in apr_dates),
+      f"{[d.date().isoformat() for d in apr_dates]}")
+
+# 20. recommend intent, directional honesty threshold: the reported "not genuinely hot" threshold
+# is independently recomputed from the raw column (75th percentile of daily means), not read back
+# from the system's own stored value.
+a_dec = iface.ask("recommend hot days in December")
+raw_daily = df[S].resample("1D").mean().dropna()
+expected_threshold = float(raw_daily.quantile(0.75))
+check("recommend honesty threshold == independently-recomputed 75th percentile of daily means",
+      not a_dec.value["meets_threshold"]
+      and np.isclose(a_dec.value["threshold"], expected_threshold, atol=0.05),
+      f"reported={a_dec.value['threshold']:.2f} recomputed={expected_threshold:.2f}")
+
+# 21. correlation breakdown: R² and the seasonal split are recomputed independently from raw
+# pandas groupby, not by calling the same query_engine function again (which would just prove
+# the function agrees with itself).
+bd = qe.correlation_breakdown(df, S, "rh (%)")
+r_expected = df[S].corr(df["rh (%)"])
+summer_mask = df.index.month.isin((6, 7, 8))
+summer_expected = df[S][summer_mask].corr(df["rh (%)"][summer_mask])
+check("correlation breakdown R² and summer split == independent pandas recomputation",
+      np.isclose(bd["r_squared"], r_expected ** 2)
+      and np.isclose(bd["by_season"]["summer"], summer_expected),
+      f"R²={bd['r_squared']:.3f} summer_r={bd['by_season']['summer']:.3f}")
+
+# 22. is_causal_query word-boundary fix: a bare "because" (no causal claim) must NOT hijack a
+# real question into the correlation branch -- run against the real interface, not just the
+# parsing function in isolation, so this proves the fix actually reaches user-facing behaviour.
+a_because = iface.ask("I went out because the weather was nice, what was the average temperature in 2013?")
+check("bare 'because' no longer hijacks an unrelated question into the correlation intent",
+      a_because.intent == "mean", f"intent={a_because.intent!r}")
+
 # 17. LLM faithfulness — ADVISORY + majority-of-3. The 3B model is stochastic, so we vote
 # over 3 runs per question and REPORT the result without letting it flip the headline count
 # (previously this check made the total flap between 19/20 and 20/20 run to run).

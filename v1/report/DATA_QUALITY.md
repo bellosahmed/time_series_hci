@@ -144,10 +144,10 @@ and no single hour is a 3σ angular outlier — rather than the previous linear 
 ## 7. Ground-truth control (the algorithm gives the right answer)
 
 `verify_results.py` re-derives results a different way and asserts agreement (20/20 checks as of
-3 July 2026, when this section was written; **31/31** as of 15 July 2026 — see `docs/evaluation/`
-for the current, actively-maintained numbers), including query-engine == pandas and the
-data-quality functions == pandas. The query engine is the exact truth layer; the LLM only
-explains its numbers.
+3 July 2026, when this section was written; 31/31 as of 15 July 2026; **35/35** as of 16 July
+2026 — see `docs/evaluation/` for the current, actively-maintained numbers), including
+query-engine == pandas and the data-quality functions == pandas. The query engine is the exact
+truth layer; the LLM only explains its numbers.
 
 ## 8. Verification results (3 July 2026)
 

@@ -122,6 +122,16 @@ def test_resolve_period():
     assert interface.resolve_period("hottest ever")[0] is None
 
 
+def test_resolve_period_repeated_identical_year_is_not_treated_as_a_range():
+    # "6 April 2013 in the month of April 2013" names 2013 TWICE (once in the date, once in the
+    # restated scope) -- before the fix this hit the >=2-years "range" branch and returned the
+    # whole year 2013 instead of just April, silently discarding the month.
+    q = "similar to 6 april 2013 in the month of april 2013"
+    assert interface.resolve_period(q)[:2] == ("2013-04-01", "2013-04-30")
+    # a genuine range of two DIFFERENT years must still work
+    assert interface.resolve_period("compare 2012 to 2014")[:2] == ("2012-01-01", "2014-12-31")
+
+
 def test_resolve_period_seasons():
     # summer = Jun–Aug of the year
     assert interface.resolve_period("hottest in summer 2012")[:2] == ("2012-06-01", "2012-08-31")
@@ -169,6 +179,17 @@ def test_resolve_day():
     assert interface.resolve_day("weather on 5 july 2015")[:3] == (7, 5, 2015)
     assert interface.resolve_day("conditions on 2015-01-26")[:3] == (1, 26, 2015)
     assert interface.resolve_day("what was the average?") is None
+
+
+def test_resolve_day_finds_the_dated_month_even_when_a_second_dayless_month_sorts_earlier():
+    # "5 September 2012 in June 2016": MONTHS iterates in calendar order, so "june" (month 6)
+    # is checked before "september" (month 9) -- before the fix, finding "june" with no day
+    # attached made the whole function give up (`break`) instead of continuing on to find
+    # "september", which DOES have a day next to it. Must still find September 5, 2012, not None.
+    q = "recommend a day to go out in 5 september 2012 in june 2016"
+    assert interface.resolve_day(q)[:3] == (9, 5, 2012)
+    # a bare month with genuinely no day anywhere must still correctly return None
+    assert interface.resolve_day("tell me about march") is None
 
 
 def test_ask_weather_report():

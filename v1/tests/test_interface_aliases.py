@@ -61,3 +61,16 @@ def test_specific_alias_beats_generic():
     assert interface.resolve_sensors("wind direction", cols)[0] == "wd (deg)"      # not wind speed
     assert interface.resolve_sensors("vapour pressure", cols)[0] == "VPact (mbar)"  # not pressure
     assert interface.resolve_sensors("specific humidity", cols)[0] == "sh (g/kg)"   # not humidity
+
+
+def test_short_aliases_need_a_word_boundary_not_just_a_substring():
+    # "thin" (-> air density) used to fire on plain substring search inside completely unrelated
+    # words -- most importantly "within" ("staying within April"), one of the "recommend"
+    # intent's own restriction-phrase keywords, which silently corrupted sensor detection on
+    # every such question. "wind" (-> wind speed) has the same risk inside "window".
+    cols = JENA_COLUMNS
+    assert interface.resolve_sensors("staying within that month", cols) == []
+    assert interface.resolve_sensors("show it in a time window", cols) == []
+    # the real words must still resolve correctly
+    assert interface.resolve_sensors("how thin is the air", cols) == ["rho (g/m**3)"]
+    assert interface.resolve_sensors("wind speed today", cols) == ["wv (m/s)"]
