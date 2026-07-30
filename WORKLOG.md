@@ -7,6 +7,38 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: system-wide bug sweep — 3 bugs found, 2 fixed (chart clipping + threshold follow-up hijack)
+
+Broad "any bugs?" pass over v1. Read the truth layer (`query_engine.py`) — clean — and ran an
+**independent offline correctness probe**: for a battery of queries, recomputed the expected
+answer/scope directly from the raw 10-min frame with pandas and compared to the interface. All scope
+checks passed, including the tricky ones (winter-2013 = Dec 2012–Feb 2013; spring/summer/autumn
+boundaries; year range "between 2012 and 2014"; the "may" month vs modal-verb case). Two real bugs
+surfaced (one reported by the user mid-sweep, one by the probe):
+
+1. **Chart marker clipped off the top (user-reported).** For "hottest temperature", the drawn line is
+   the daily/monthly **mean** (peaks ~29°C) while the **max marker** is the true peak (~37°C).
+   `drawChart` (web `chart.js`) computed the y-axis extent from the line + forecast + 2nd series but
+   **not from `c.marks`**, so the marker landed above the top of the plot and was clipped (its cy came
+   out at **−905** in the repro). Fix: fold finite marker y-values into the y-extent before scaling,
+   so the axis always expands to include max/min/anomaly markers. TDD test in `chart.test.js` asserts
+   the max marker's cy stays inside the plot band `[P, H−P]` and a y-label reaches the marker value.
+   (Verified against the real app payload: line max 29.38, marker 37.28 — now in range.)
+
+2. **Self-contained threshold question hijacked by history.** "how many times was the temperature
+   above 30 in 2015" is complete, but its intent is derived from `resolve_threshold`, **not**
+   `detect_intent` (which returns None for it). `_needs_context` only checked `detect_intent`, so with
+   any prior turn in history the question was judged *elliptical* and the follow-up resolver rewrote it
+   into the **previous** turn's intent — "after a mean question" it answered `mean T (degC) in 2015`,
+   dropping the threshold entirely. Root cause via `_needs_context` reading only `detect_intent`; fix:
+   treat a resolved `resolve_threshold` as a present intent too. Now routes to `threshold` (count=124,
+   == pandas) regardless of prior history. TDD regression test added.
+
+3. **(Noted, not a bug)** `compare` also derives partly outside `detect_intent`, but `detect_intent`
+   still returns non-None ("trend") for those, so it is not hijacked — verified, left as-is.
+
+Gates: **499 passed, 1 skipped**; ruff + mypy clean; `chart.test.js` passes; `verify_results.py` 35/35.
+
 ### v1: verification round 2 — manual probe found (and fixed) a false-scope label on summaries
 
 Re-ran a full **manual** LLM-on probe across the categories the user named — random/off-topic →

@@ -126,4 +126,26 @@ const gridlineCount = (yAxisSvg.match(/<line[^>]*class="grid"/g) || []).length;
 assert.strictEqual(gridlineCount, yLabels.length,
   `expected one gridline per y-tick (${yLabels.length}), got ${gridlineCount}`);
 
+// --- drawChart: a marker ABOVE the line's own range must not be clipped off the top. The line is
+// often a daily/monthly MEAN (e.g. tops out ~20) while a max marker sits at the true peak (~37);
+// the y-axis must expand to include marker values so the dot stays inside the plot area.
+const H = 170, P = 30;   // must match drawChart's constants
+const clipped = {
+  label: 'T (degC)',
+  x: Array.from({ length: 5 }, (_, i) => new Date(2015, 6, i + 1).toISOString()),
+  y: [18, 19, 20, 19, 18],                                   // mean line, peaks at 20
+  marks: [{ x: new Date(2015, 6, 3).toISOString(), y: 37, kind: 'max' }],  // true max well above
+};
+const clippedSvg = drawChart(clipped);
+// the orange max marker's cy must land within the plotting band [P, H-P]
+const maxMark = [...clippedSvg.matchAll(/<circle cx="[^"]+" cy="([^"]+)" r="[^"]+" fill="#ea580c"/g)]
+  .map(m => Number(m[1]));
+assert.strictEqual(maxMark.length, 1, 'expected one max marker drawn');
+assert.ok(maxMark[0] >= P && maxMark[0] <= H - P,
+  `max marker cy=${maxMark[0]} must be inside the plot band [${P}, ${H - P}] (not clipped)`);
+// and a y-axis label must now reach the marker value
+const clipYLabels = [...clippedSvg.matchAll(/x="3" y="[^"]+" class="ax">([^<]+)</g)].map(m => Number(m[1]));
+assert.ok(Math.max(...clipYLabels) >= 37,
+  `expected the y-axis to reach the max marker (37), top label was ${Math.max(...clipYLabels)}`);
+
 console.log('chart.test.js: all assertions passed');

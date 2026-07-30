@@ -260,7 +260,12 @@ class Interface:
         has_scope = bool(resolve_sensors(question, cols) or start or end
                          or resolve_day(question) is not None
                          or resolve_hour(question)[0] is not None)
-        return not (detect_intent(question) is not None and has_scope)
+        # A threshold question ("how many times above 30 in 2015") is self-contained, but its intent
+        # comes from resolve_threshold, not detect_intent -- so check both, else a complete threshold
+        # query is judged elliptical and gets hijacked into the previous turn's intent when history
+        # exists (dropping its own threshold entirely).
+        has_intent = detect_intent(question) is not None or resolve_threshold(question) is not None
+        return not (has_intent and has_scope)
 
     def _context_for(self, sensor: str) -> str | None:
         snip = self.retriever.for_sensor(sensor)

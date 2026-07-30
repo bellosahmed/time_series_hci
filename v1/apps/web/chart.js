@@ -14,6 +14,11 @@ function drawChart(c){
   const s2=c.series2;  // optional second line (used to overlay two years for a comparison)
   let s2x=null;
   if(s2){ s2x=s2.x.map(Date.parse); times=times.concat(s2x); ys=ys.concat(s2.y); }
+  // Fold marker values into the y-extent too: a max/min/anomaly marker often sits well outside the
+  // plotted line's own range (the line is a daily/monthly MEAN peaking ~20 while the true max is
+  // ~37), so scaling to the line alone would draw the marker off the top/bottom and clip it.
+  const markYs=(c.marks||[]).map(m=>m.y).filter(v=>typeof v==='number' && isFinite(v));
+  if(markYs.length){ ys=ys.concat(markYs); }
   const tMin=Math.min(...times), tMax=Math.max(...times);
   const yMin=Math.min(...ys), yMax=Math.max(...ys);
   const sx=t=> P + (W-2*P)*((t-tMin)/((tMax-tMin)||1));

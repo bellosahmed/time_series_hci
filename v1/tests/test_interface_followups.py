@@ -40,6 +40,28 @@ def test_standalone_question_is_not_rewritten(df, monkeypatch):
     assert ans.intent == "max"
 
 
+def test_selfcontained_threshold_not_hijacked_by_history(df, monkeypatch):
+    # A threshold question ("how many times ... above 12") is self-contained but its intent is
+    # derived from resolve_threshold, not detect_intent -- so _needs_context must still treat it as
+    # complete. With prior history present it must NOT be rewritten into the previous turn's intent.
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)   # deterministic follow-up path
+    calls = {"n": 0}
+
+    def spy(q, h, cols):
+        calls["n"] += 1
+        return "mean temperature"
+
+    monkeypatch.setattr(interface, "resolve_followup", spy)
+    iface = interface.Interface(df, use_llm=False)
+    iface.history = [{"question": "average temperature", "resolved": "average temperature",
+                      "computed": "mean T (degC) was 10.00"}]
+    ans = iface.ask("how many times was the temperature above 12")
+    assert calls["n"] == 0            # self-contained => deterministic follow-up never consulted
+    assert ans.intent == "threshold"  # not inherited "mean" from the prior turn
+    assert isinstance(ans.value, dict) and "count" in ans.value
+
+
 def test_unroutable_rewrite_is_rejected(df, monkeypatch):
     from src import llm
     monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
