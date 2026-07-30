@@ -7,6 +7,23 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: dissertation notes updated — three agentic-layer findings cited back into the report
+
+Fed the sub-project 1–3 findings into the dissertation-facing notes (the report is written separately;
+codebase work only produces findings to cite). Matched each file's existing style and honesty discipline:
+- `report/notes/RESULTS_DATA.md` — new dated section with full numbers + reproduce pointers for all three
+  findings (Understanding agent 5/8 with 3 mis-routes; orchestrator coverage 2/3→3/3 + role/critic caveats;
+  COSMA harness result-preserving across 1/2/4/8 shards + 15/19 single-driver run); gate count refreshed to
+  **483 passed, 1 skipped**; header dated 30 July 2026.
+- `final_report/03_results_and_findings.md` — new "Agentic / HCI trust layer" subsection under v1 condensing
+  the three findings for the cross-version synthesis; "Gates after this work: 483 tests".
+- `final_report/04_limitations_and_future_work.md` — v1 limitation bullet ("agentic layer is bounded by the
+  3B model — numbers are not") woven into the validity-threats framing, plus a prioritised future-work item
+  (run the harness on DiRAC + re-measure decomposition/critic quality with a stronger model).
+
+Throughout, the trust invariant is reaffirmed (numbers = code; the LLM rephrases/decomposes/critiques/
+schedules only) and the "cluster run not yet executed" caveat kept explicit.
+
 ### v1: COSMA/DiRAC batch harness — SLURM array fan-out of the evaluations (sub-project 3 of 3)
 
 **Motive (user asked).** Use the DiRAC/COSMA cluster for the parallelisable work. The project's
