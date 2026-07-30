@@ -44,3 +44,9 @@ v1/notebooks/saved_models_05/
 .openrouter_key
 **/.openrouter_key
 *.key
+
+# COSMA batch-harness runtime outputs (the jena_eval.slurm artifact IS tracked)
+v1/hpc/jobs.jsonl
+v1/hpc/shard_*.jsonl
+v1/hpc/slurm_*.out
+v1/hpc/results*.csv

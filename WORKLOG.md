@@ -7,6 +7,40 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: COSMA/DiRAC batch harness — SLURM array fan-out of the evaluations (sub-project 3 of 3)
+
+**Motive (user asked).** Use the DiRAC/COSMA cluster for the parallelisable work. The project's
+evaluations (external-LLM benchmark, orchestrator multi-part eval, understanding eval) are
+embarrassingly parallel — each job is an independent, LLM-dominated call — so they are the textbook HPC
+array-job fit, and the same shape as the orchestrator's parallel `dispatch` (sub-project 2). Chose the
+**eval/benchmark fan-out** over a GPU training sweep (more reusable, offline-testable) or a bare generic
+runner (too thin).
+
+**Design.** New `src/batch_harness.py`: `JobSpec(id, kind, payload)`; deterministic **round-robin
+sharding** (`assign`/`shard` — balanced, disjoint, complete); `run_shard` (per-job error captured as an
+`ok=False` row, JSONL out); `aggregate` (merge, sort by id, **dedup by id** so a re-run shard is safe) +
+`summarise` + `write_csv`; `render_sbatch` (`#SBATCH --array=0-(N-1)`, nothing site-specific baked in —
+account/partition/time/out-dir are inputs); `build_jobs` (enumerates the existing corpora), a
+`default_runner` that dispatches by kind to the **real** evaluators, and `run_local` (runs all shards
+in-process — the SLURM-free dev path *and* the correctness oracle). CLI: `plan | run-shard | aggregate |
+local`. The harness only **schedules and collects**; every number still comes from the deterministic
+evaluators (trust invariant intact).
+
+**Result (real, 30 July 2026).** (1) **Result-preserving property proven** on the real 19-job corpus:
+identical aggregated output for 1/2/4/8 shards (the claim that makes fan-out trustworthy). (2) First
+**single-driver, single-table** run of all three evaluations: 19 jobs in 52 s (`local`, 4 shards) →
+benchmark 8/8, orchestrator 2/3, understanding 5/8 (overall 15/19). *Honest findings:* the faithfulness
+gate visibly rejected 4 invented LLM numbers mid-run (gate working); orchestrator scored 2/3 here vs
+**3/3 earlier** — the 3B decomposer is non-deterministic, and cheap cluster fan-out is exactly how you'd
+quantify that variance. (3) **Cluster run not executed here** — the Python core (11 offline tests) and
+the committed `hpc/jena_eval.slurm` are verified; DiRAC submission is the reproducible next step, gated
+on an allocation + Ollama/API on the nodes. Write-up: `docs/evaluation/11-cosma-batch-harness.md`.
+
+**Process.** Brainstorm → spec (`docs/superpowers/specs/2026-07-30-cosma-batch-harness-design.md`) → plan
+(`docs/superpowers/plans/2026-07-30-cosma-batch-harness.md`) → TDD on branch `feat/cosma-batch-harness`.
+Tests: `test_batch_harness.py` (11); ruff + mypy clean. Committed artifact: `v1/hpc/jena_eval.slurm`
+(runtime outputs gitignored).
+
 ### v1: Multi-agent orchestrator — decompose / dispatch / critique / combine (sub-project 2 of 3)
 
 **Motive (user asked).** Answer hard, multi-part questions ("the coldest temperature ever **and** the
