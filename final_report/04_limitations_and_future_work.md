@@ -13,6 +13,16 @@ then a prioritised roadmap.
   framing) rely on prompting and can still be imperfect.
 - **No human evaluation.** For an "HCI interface", usability/trust are argued from design, not measured
   with users (a deliberately de-scoped item).
+- **Agentic layer is bounded by the 3B model (numbers are not).** The added Understanding agent,
+  multi-agent orchestrator, and their critics are all **model-bound in quality**: the 3B model produces
+  the occasional plausible-but-wrong query rewrite, mis-assigns a sub-question's role, and runs a
+  **noisy LLM-critic that over-flags**; the orchestrator's multi-part coverage is even **non-deterministic
+  run-to-run** (2/3 vs 3/3). None of this touches correctness — every number is still computed by the
+  truth layer, mis-routes surface a *correct number under a visible interpretation*, and the trustworthy
+  gate is the **deterministic** critic (the LLM-critic is advisory). The honest reading: the agentic layer
+  widens *understanding and coverage*, but its language-level judgments are the weakest link and scale
+  with model strength. The **COSMA harness cluster run was not executed** — its core and generated
+  `sbatch` are verified offline; DiRAC submission remains an untested (if reproducible) step.
 
 ### v2 — Trade
 - **Coarse real labels.** Ground truth is crisis *windows* (~14 anomaly months), so per-point precision is
@@ -77,6 +87,13 @@ conclusions wrong*, and why we judge the headline claims to survive.
    the one residual the numeric gate can't catch — while staying fully local.
 3. **Strengthen the faithfulness gate** to close the small-integer gap (e.g. entity-aware checking of
    counts and IPs), and add *qualifier* faithfulness (not just numeric).
+4. **Run the agentic layer on DiRAC/COSMA and re-measure with a stronger model.** The batch harness
+   (`batch_harness.py`) already fans the evaluations out as a SLURM array job and is proven
+   *result-preserving* across shard counts; the untested step is the cluster submission itself. Doing so
+   would (a) quantify the 3B **non-determinism** cheaply by fanning the same jobs out many times, and
+   (b) let a larger local model be benchmarked at scale on the decomposition/critic quality that is the
+   agentic layer's weakest link — directly attacking limitation "agentic layer is bounded by the 3B
+   model" above, while the trust gates stay model-independent.
 
 ### Detection / evaluation
 4. **Real-time / streaming detection** — move from retrospective batch to an operational monitor (all three

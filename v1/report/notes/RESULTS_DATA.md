@@ -4,7 +4,7 @@ Concrete numbers measured from the implemented system, to be cited in `REPORT.md
 how it was produced so it is reproducible. Newest results appended as the limitation-hardening work
 proceeds. Seeds are fixed; rerun with `reproduce.sh` / `verify_results.py`.
 
-_Last updated: 4 July 2026._
+_Last updated: 30 July 2026._
 
 ---
 
@@ -103,3 +103,51 @@ _Last updated: 4 July 2026._
 
 ## Forecasting
 - ARIMA 14-day forecast: ordered bounds, future dates; backtest **MASE < 1.5**.
+
+---
+
+## Agentic / multi-agent layer (added 30 July 2026) — three findings to cite
+
+_Full workings + reproduce commands: `docs/evaluation/09-understanding-agent.md`,
+`10-multi-agent-orchestrator.md`, `11-cosma-batch-harness.md`. Model = local Ollama `llama3.2:3b`._
+
+### Finding 1 — Understanding/Clarifier agent (malformed-query recovery)
+- Corpus: 8 malformed/paraphrased/scrambled queries (`understanding_eval.MALFORMED_CASES`).
+- LLM **off**: 5 answered / 4 correct / 3 declined. LLM **on**: 8 answered / **5 correct** / 0 declined.
+- **Trade-off (honest):** coverage up (turned all 3 declines into answers, +1 correct) but the 3B model
+  produced **3 plausible-but-wrong routable rewrites** (e.g. "umidty tocber 2012" → a weather report,
+  not humidity). Crucially these are **mis-routings, not mis-arithmetic** — every number is still exact,
+  and the interpretation is shown to the user ("I read this as: …"), so a wrong reading is visible, not
+  silent. Acceptance is gated on the deterministic parser being able to route the rewrite (`_routable`);
+  offline the agent is skipped and behaviour is identical to the deterministic baseline.
+
+### Finding 2 — Multi-agent orchestrator (decompose → dispatch → critique → combine)
+- Corpus: 3 genuinely multi-part questions (`orchestrator_eval.MULTIPART_CASES`); metric = coverage
+  (both parts addressed with the right sensor/scope), numbers verified exactly elsewhere.
+- Coverage **off 2/3 → on 3/3** (the win is a true two-way LLM decomposition where the offline compound
+  splitter surfaces only one sensor). Strict superset of the single-agent path (offline == `agent.py`,
+  regression-tested).
+- **Findings (honest):** (a) the 3B **decomposer mis-assigns roles** (routed a threshold/max sub-question
+  to the `anomaly` role) — coverage survived only because the per-role tool restriction + interface
+  fallback recovered a correct-sensor answer; routing quality is model-bound, the trust gates are not.
+  (b) **Two critics, different reliability:** the deterministic Critic is the trustworthy gate; the 3B
+  **LLM-critic over-flags** (raised concerns on parts that were in fact answered), so it is surfaced as
+  advisory "⚠ Critic notes", never a blocker. (c) A real bug this surfaced and fixed: the Critic first
+  flagged "no usable result" whenever `facts` was empty, but a sub-agent that falls back to the interface
+  yields a valid exact `computed` with empty `facts` — fixed to treat a non-empty `computed` as usable.
+
+### Finding 3 — COSMA/DiRAC batch harness (SLURM array fan-out of the evaluations)
+- The three evaluations are embarrassingly parallel; `batch_harness.py` shards them, runs each shard as a
+  SLURM array task, and aggregates. Harness **schedules and collects only** — no new numbers.
+- **Result-preserving property (the trust claim for fan-out):** identical aggregated output for
+  **1 / 2 / 4 / 8 shards** on the real 19-job corpus (`{'n':19,'ok':19,'correct':9}` every time).
+- **First single-driver, single-table run** of all three evals: **19 jobs in 52 s** (`local`, 4 shards) →
+  benchmark **8/8**, orchestrator **2/3**, understanding **5/8** (overall **15/19**). Two honest notes:
+  the faithfulness gate visibly rejected **4 invented LLM numbers** mid-run (gate working); orchestrator
+  scored **2/3 here vs 3/3 earlier** — the 3B decomposer is **non-deterministic**, and cheap cluster
+  fan-out is exactly how that variance would be quantified. **Cluster submission itself was not executed**
+  — the Python core (11 offline tests) + committed `hpc/jena_eval.slurm` are verified; DiRAC run is the
+  reproducible next step.
+
+### Gates after this work
+- Unit tests **483 passed, 1 skipped**; ruff clean; mypy clean (23 source files). Commits user-authored.

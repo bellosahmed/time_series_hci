@@ -26,6 +26,30 @@ keyword methods tie on in-vocabulary queries — *document quality dominates ret
 
 **Gates:** 193 tests (1 skipped) · verify **29/29** · ruff + mypy clean · coverage 92 %.
 
+**Agentic / HCI trust layer (added 30 July 2026).** Three additions, each keeping the invariant that the
+LLM never computes a number — it only rephrases, decomposes, critiques, and schedules:
+
+- **Understanding/Clarifier agent.** On 8 malformed queries, coverage rises (LLM off 4 correct / 3
+  declined → on **5 correct / 0 declined**), but the 3B model also yields **3 plausible-but-wrong
+  routable rewrites**. The key point: these are **mis-routings, not mis-arithmetic** — numbers stay
+  exact, the interpretation is shown to the user, and acceptance is gated on the deterministic parser
+  being able to route the rewrite. *More questions answered, a minority under the wrong reading — a
+  genuine trade-off, not a clean win.*
+- **Multi-agent orchestrator** (decompose → parallel role-agents → Critic → combine). Multi-part
+  coverage **2/3 → 3/3**; a strict superset of the single-agent path (offline ≡ `agent.py`). Two honest
+  findings: the 3B **decomposer mis-assigns roles** (tool-restriction + fallback recover the answer;
+  routing is model-bound, the trust gates are not), and the **LLM-critic over-flags**, so it is advisory
+  while the **deterministic critic is the gate**.
+- **COSMA/DiRAC batch harness.** The evaluations are embarrassingly parallel; a SLURM array harness
+  shards → runs → aggregates them, **schedules/collects only** (no new numbers). **Sharding is
+  result-preserving** (identical aggregate for 1/2/4/8 shards); a single-driver local run over all three
+  evals gives **15/19** (benchmark 8/8, orchestrator 2/3, understanding 5/8) in 52 s, during which the
+  faithfulness gate rejected 4 invented numbers. Orchestrator **2/3 vs 3/3 across runs** exposes 3B
+  **non-determinism** — which cheap cluster fan-out is built to quantify. *Cluster submission itself was
+  not run; the core + generated `sbatch` are verified.*
+
+**Gates after this work:** **483 tests** (1 skipped) · ruff + mypy clean.
+
 ## v2 — Trade
 
 **Anomaly detection** (ground truth = real crisis windows 2008-09→2009-04 and 2020-03→2020-08):
