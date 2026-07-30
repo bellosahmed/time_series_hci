@@ -7,6 +7,37 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: LIMITATION — contamination/quantile anomaly detection can never report "no anomalies"
+
+**What.** The interface's anomaly detectors (portfolio/mahalanobis/isolation_forest/lof/ocsvm) are
+*unsupervised, contamination-priored* detectors: each flags a fixed fraction of the rows it is given
+(default `contamination = 0.01`, i.e. the top 1% by anomaly score; the `portfolio` default flags
+~1.8% as the union of Mahalanobis ∪ flat-line). The detector is re-fit on the **in-scope** slice, so
+"anomalies in 2015" ranks 2015's own rows and flags the top ~1% of them — **by construction, not
+because 2015 is unusual**.
+
+**Consequence.** The system can never answer "there are no anomalies" for a scope: a perfectly normal
+year, month, or even a single calm day still returns a non-zero count (a day of 24 rows still yields
+`max(1, round(0.01·24)) = 1` flagged reading). The count is therefore best read as *"the most unusual
+~1% within this scope"*, a **relative** ranking, not an **absolute** "is anything actually wrong"
+verdict. It also means the count scales with the size of the scope rather than with any true event
+rate.
+
+**Why it's left as-is (not a code bug).** This is inherent to top-quantile unsupervised detection and
+is a deliberate, documented design choice (`anomaly.py` docstrings; the `contamination`/threshold
+parameters are exposed and swept in `contamination_sensitivity`/`threshold_sensitivity`). Changing it
+would be a modelling decision, not a fix — e.g. switching to an **absolute** criterion (a fixed
+Mahalanobis-distance or z-score cutoff calibrated on a clean reference window) so that "none" becomes
+a possible answer, at the cost of needing a trusted normal baseline and a calibrated threshold. The
+v1 anomaly labels are also synthetic (see the existing labelled-evaluation limitation), so there is no
+ground-truth event rate to calibrate an absolute threshold against within v1; v3 (DAD, real attack
+labels) is where an absolute-threshold study would belong.
+
+**For the write-up.** Cite under Limitations (anomaly detection): *unsupervised contamination-based
+detection reports a relative top-fraction per scope, so a non-zero anomaly count does not imply a
+genuine event, and the interface cannot assert "no anomalies"; an absolute, baseline-calibrated
+threshold is future work, best evaluated on the real-labelled v3 dataset.*
+
 ### v1: anomaly + forecast internals audit — 1 bug fixed (window count mislabel)
 
 Dug into `anomaly.py` and `forecasting.py` and their interface wiring.
@@ -23,10 +54,9 @@ Dug into `anomaly.py` and `forecasting.py` and their interface wiring.
   1, so not significantly; an honest result, not a bug). CI columns map correctly (lower=col0).
 - **All 5 selectable detectors** (portfolio/mahalanobis/isolation_forest/lof/ocsvm) — deterministic
   (identical answer on repeat) and crash-free on scoped slices, including a single day.
-- **Modelling limitation noted (not a code bug):** the contamination/quantile detectors flag ~1% of
-  *whatever scope* by construction (the portfolio ~1.8% as a union of two), so "are there anomalies
-  in <period>?" always returns a non-zero count — the system never reports "none". Inherent to
-  top-quantile unsupervised detection; a documented design choice, left as-is.
+- **Modelling limitation surfaced (not a code bug):** the contamination/quantile detectors flag ~1%
+  of *whatever scope* by construction, so the system never reports "none" — written up in full in the
+  dedicated LIMITATION entry above.
 
 Gates: 506 passed, 1 skipped; ruff + mypy clean.
 
