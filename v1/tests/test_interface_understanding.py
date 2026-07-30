@@ -111,3 +111,20 @@ def test_understand_exception_is_caught_and_falls_back(monkeypatch, caplog):
         ans = iface.ask("flibber the wobbertron")
     assert ans.value is None
     assert any("understanding" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_grayzone_word_recovered_by_understanding(monkeypatch):
+    # "avarge" is a gray-zone near-miss the deterministic guardrail would block; the LLM recovers it.
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "understand", lambda *a, **k: "average temperature")
+    iface = interface.Interface(_df(), use_llm=True)
+    ans = iface.ask("avarge tempratur")
+    assert ans.intent == "mean" and ans.value is not None
+    assert "I read this as" in ans.text
+
+
+def test_grayzone_without_llm_still_asks(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: False)
+    iface = interface.Interface(_df(), use_llm=True)
+    ans = iface.ask("avarge tempratur")
+    assert ans.value is None                            # asks to clarify, as today

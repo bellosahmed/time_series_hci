@@ -550,20 +550,38 @@ class Interface:
         # hint. Answering with a silent-wrong scope would break the verifiable-answers premise.
         # Ordinary words far from any term ("because", "degrees") are excluded, so normal questions
         # are never blocked.
+        # The Understanding agent (below) may rewrite the query in two places -- when the guardrail
+        # would block on a near-miss word, and when the core intent/sensor is unknown. Declared here
+        # so both paths can record the interpretation shown to the user.
+        interpretation: str | None = None
+        cols = list(self.df.columns)
+
         clarify_words = clarifications_needed(resolved, tuple(self.df.columns))
         if clarify_words:
-            clar = self._clarify(original, spell_fixes, clarify_words)
-            self.history.append({"question": original, "resolved": resolved, "computed": ""})
-            self.history = self.history[-6:]
-            return clar
+            # Before blocking on a near-miss word, let the LLM try to recover the intended query;
+            # accept only a routable rewrite, else ask to clarify exactly as before.
+            recovered = None
+            if self.use_llm and llm.is_available():
+                try:
+                    rw = llm.understand(resolved, cols, list(INTENTS.keys()), model=self.model)
+                except Exception as exc:  # noqa: BLE001 - degrade to asking, never crash
+                    logger.warning("understanding rewrite failed (%s); asking to clarify.", exc)
+                    rw = None
+                if rw and self._routable(rw) and rw.strip().lower() != resolved.strip().lower():
+                    recovered = rw.strip()
+            if recovered is None:
+                clar = self._clarify(original, spell_fixes, clarify_words)
+                self.history.append({"question": original, "resolved": resolved, "computed": ""})
+                self.history = self.history[-6:]
+                return clar
+            interpretation = recovered
+            resolved = interpretation
 
         # UNDERSTANDING AGENT: if the deterministic parser found NEITHER an intent NOR a sensor, the
         # core of the query is unknown (heavy typos, paraphrase, word order) even if a stray year makes
         # it "routable". Ask the LLM to rewrite it into a clear question; accept ONLY a rewrite the
         # parser can route -- the LLM never gains routing authority and never emits a number. Offline
         # or on failure, the deterministic path below is unchanged (no regression).
-        interpretation: str | None = None
-        cols = list(self.df.columns)
         if (self.use_llm and llm.is_available()
                 and detect_intent(resolved) is None and not resolve_sensors(resolved, cols)):
             try:
