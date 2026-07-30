@@ -26,10 +26,12 @@ def df():
 
 # --- Bug A: named sensor is not downgraded to the "weather" report -------------------------
 
-def test_named_sensor_not_downgraded_to_weather(monkeypatch, df):
+@pytest.mark.parametrize("bad_intent", ["weather", "missing", "trend", "max"])
+def test_named_sensor_not_downgraded_by_planner(monkeypatch, df, bad_intent):
+    # A bare per-sensor question resolves the sensor but no statistic; the small planner then guesses
+    # a specific intent the user never asked for. That guess must NOT override the honest summary.
     monkeypatch.setattr(interface.llm, "is_available", lambda *a, **k: True)
-    # planner mis-parses a bare per-sensor question as the temperature "weather" report
-    monkeypatch.setattr(interface.llm, "plan", lambda *a, **k: {"intent": "weather", "sensors": []})
+    monkeypatch.setattr(interface.llm, "plan", lambda *a, **k: {"intent": bad_intent, "sensors": []})
     iface = interface.Interface(df, use_llm=True)
     iface.history = []
     ans = iface.ask("what is the specific humidity")
@@ -63,6 +65,19 @@ def test_offtopic_followup_not_fused_with_prior_context(monkeypatch, df):
     ans = iface.ask("what is the name of my dog")
     assert ans.value is None            # not fused into a temperature answer
     assert ans.intent != "max"
+
+
+def test_offtopic_followup_with_cue_is_declined(monkeypatch, df):
+    # "what about my dog" carries a follow-up cue but no data signal -> must NOT reuse prior context.
+    monkeypatch.setattr(interface.llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(interface.llm, "rewrite_followup", lambda *a, **k: "max temperature in 2015")
+    monkeypatch.setattr(interface.llm, "plan", lambda *a, **k: None)
+    monkeypatch.setattr(interface.llm, "understand", lambda *a, **k: None)
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = [{"question": "max temperature in 2015",
+                      "resolved": "max temperature in 2015", "computed": "max T (degC) was 39.00"}]
+    ans = iface.ask("what about my dog")
+    assert ans.value is None
 
 
 # --- Regression: legitimate follow-ups and sensor questions still work ---------------------

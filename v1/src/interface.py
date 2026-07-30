@@ -30,6 +30,8 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
     DIRECTION_SUPERLATIVES,
     INTENTS,
     LEGEND_EXPLANATIONS,
+    MONTHS,
+    SEASONS,
     SENSOR_ALIASES,
     _coerce_date,
     clarifications_needed,
@@ -61,6 +63,39 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
 )
 
 logger = logging.getLogger(__name__)
+
+# Vocabulary of concrete domain nouns (sensor-alias words, month and season names), used to tell a
+# *garbled* domain query ("higist tempreture 2015", "umidty tocber 2012") from off-topic text that
+# merely carries a stray year ("my cat in 2015"): the former has a token that fuzzily matches this
+# vocabulary, the latter does not. Intent keywords are deliberately excluded — their filler words
+# ("tell", "about" from "tell me about") are generic English and cause false matches ("tell me a
+# joke", "what about my dog"); a genuinely garbled query still matches on its sensor/month word.
+# Only whole words of length >= 3 (short tokens fuzzy-match too easily).
+_DOMAIN_VOCAB: frozenset[str] = frozenset(
+    w for w in (
+        {word for alias in SENSOR_ALIASES for word in alias.split()}
+        | set(MONTHS) | set(SEASONS)
+    ) if len(w) >= 3
+)
+# Common non-domain words to ignore before fuzzy-matching, so their accidental similarity to a
+# vocabulary word can't make an off-topic sentence look domain-relevant.
+_STOPWORDS: frozenset[str] = frozenset(
+    "the what is was in of my a an it did get how for to and me give that this are were on at do "
+    "we you your his her their its there here with without".split())
+
+
+def _looks_like_garbled_domain(question: str, threshold: float = 0.72) -> bool:
+    """True if some non-stopword token fuzzily matches a real domain word — evidence the message is a
+    misspelled/garbled weather question rather than off-topic text with a stray year. Deterministic,
+    LLM-free; used to gate the Understanding agent so it can't fabricate a query from 'my cat in 2015'.
+    """
+    import difflib
+    for tok in re.findall(r"[a-z]+", question.lower()):
+        if len(tok) < 3 or tok in _STOPWORDS:
+            continue
+        if any(difflib.SequenceMatcher(None, tok, w).ratio() >= threshold for w in _DOMAIN_VOCAB):
+            return True
+    return False
 
 
 @dataclass
@@ -189,11 +224,29 @@ class Interface:
         data — the LLM planner/rewriter must not be consulted, and we decline deterministically.
         """
         cols = list(self.df.columns)
+        q = question.lower()
         start, end, _ = resolve_any_period(question, self._anchor)
+        # A bare month/season name ("what about July?", "and spring?") is a genuine time signal even
+        # without a year, and is what distinguishes a real follow-up from an off-topic one ("what
+        # about my cat?"). resolve_any_period only fires with a year, so check the names directly.
+        month_or_season = any(re.search(rf"\b{re.escape(w)}\b", q)
+                              for w in (*MONTHS, *SEASONS))
         return bool(detect_intent(question) or resolve_sensors(question, cols)
-                    or resolve_direction(question) is not None
+                    or resolve_direction(question) is not None or month_or_season
                     or start or end or resolve_day(question) is not None
                     or resolve_hour(question)[0] is not None or resolve_legend_query(question))
+
+    def _should_llm_construct(self, question: str) -> bool:
+        """Whether the LLM planner/understanding agent may build a query from this text — only when it
+        plausibly names or *garbles* a weather concept (a sensor, an intent keyword, a directional
+        word, or a fuzzy-matched domain word). A bare time period or off-topic text with a stray year
+        ("my cat in 2015") is deliberately NOT enough, so the LLM can't fabricate a weather query from
+        it. (Follow-ups are handled separately, where a period alone is legitimate with prior context.)
+        """
+        cols = list(self.df.columns)
+        return bool(resolve_sensors(question, cols) or detect_intent(question)
+                    or resolve_direction(question) is not None
+                    or _looks_like_garbled_domain(question))
 
     def _needs_context(self, question: str) -> bool:
         """True if `question` looks elliptical — i.e. not already a self-contained query.
@@ -409,19 +462,17 @@ class Interface:
         # never overrides a confident keyword/explicit-date match (a small model is
         # error-prone, e.g. flipping "typical"->mean into max). It is consulted only when the
         # question carries some data signal, so it can't invent a query from off-topic text.
-        if self.use_llm and llm.is_available() and self._mentions_domain(question):
+        if self.use_llm and llm.is_available() and self._should_llm_construct(question):
             plan = llm.plan(question, list(INTENTS.keys()), list(self.df.columns),
                             model=self.model)
             if plan:
-                if intent is None:
-                    plan_intent = plan.get("intent")
-                    # A bare per-sensor question ("what is the specific humidity") resolves the
-                    # sensor but no statistic; don't let the planner reclassify it as the
-                    # temperature-centric "weather" day-report (which ignores the named sensor).
-                    # Summarise the sensor the user actually named instead.
-                    if plan_intent == "weather" and sensors:
-                        plan_intent = "summary"
-                    intent = plan_intent
+                # Only let the planner choose the intent when the user named NO sensor. A bare
+                # per-sensor question ("what is the specific humidity", "what is the air density")
+                # resolves the sensor but no statistic keyword; the small planner then guesses a
+                # specific intent the user never asked for (weather/missing/trend/max). Leaving
+                # intent None here makes `_answer` default to an honest per-sensor summary instead.
+                if intent is None and not sensors:
+                    intent = plan.get("intent")
                 for s in plan.get("sensors", []):
                     if s not in sensors:
                         sensors.append(s)
@@ -550,7 +601,7 @@ class Interface:
         # intent/sensor (e.g. "and the coldest?" -> the coldest *in the year we were discussing*).
         if (resolve_legend_query(question) is None and self.history
                 and (self._needs_context(question) or is_followup_cue(question))
-                and (is_followup_cue(question) or self._mentions_domain(question))):
+                and self._mentions_domain(question)):
             used = False
             # Richer path first: with the LLM on, let it rewrite free-form ellipsis.
             if self.use_llm and llm.is_available():
@@ -607,7 +658,7 @@ class Interface:
         # it "routable". Ask the LLM to rewrite it into a clear question; accept ONLY a rewrite the
         # parser can route -- the LLM never gains routing authority and never emits a number. Offline
         # or on failure, the deterministic path below is unchanged (no regression).
-        if (self.use_llm and llm.is_available() and self._mentions_domain(resolved)
+        if (self.use_llm and llm.is_available() and self._should_llm_construct(resolved)
                 and detect_intent(resolved) is None and not resolve_sensors(resolved, cols)):
             try:
                 rw = llm.understand(resolved, cols, list(INTENTS.keys()), model=self.model)
