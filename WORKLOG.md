@@ -7,6 +7,38 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: verification round 2 — manual probe found (and fixed) a false-scope label on summaries
+
+Re-ran a full **manual** LLM-on probe across the categories the user named — random/off-topic →
+in-dataset → duplicate → follow-up → every sensor. Everything held (off-topic all declined; 14/14
+sensors resolve to their own column; duplicate answers byte-identical; follow-ups re-scope; garbled
+recovery works) **except** one faithfulness leak the unit tests had missed:
+
+- **Bug C — bare-sensor summaries carried a *fabricated* scope.** For a period-less "what is the
+  potential temperature / wind speed / air pressure", the small planner echoes the **whole dataset
+  span** plus a **random season word** (`start=2009-01-01, end=2016-12-31, period="winter"`). In
+  `_understand` the code adopted the (harmless) full-record window but used the free-text `period`
+  word as the label — so the answer computed **"Tpot (K) in winter: …"** while the data was actually
+  all-years, all-seasons. The transparency line lied about the scope (nondeterministic: "winter" one
+  run, "year" the next), which for an explainable-trust system is exactly the wrong failure.
+
+**Root cause (systematic-debugging, evidence-gathered by instrumenting `llm.plan`).** The interface
+trusted an inconsistent `(start, end, period)` triple from the LLM. Fix (two parts, both in
+`_understand`): (1) treat a planner window that spans the **whole record** as *no period* (so the
+honest "covering the whole 2009–2016 record" note carries the scope, matching the offline path); and
+(2) derive the window label from the **resolved dates**, never the planner's free-text season word,
+so a label can never contradict the data. The whole-record test also had to survive the hourly-resample
+**lone Jan-1 00:00 bucket** (the effective last day is Dec 31), mirroring `_assumption_notes` — a
+real-data artifact the first fixture missed and only the live probe exposed.
+
+**Verified (real `llama3.2:3b`).** All 14 bare-sensor summaries now render clean ("Tpot (K): min=…")
+with the honest whole-record note and **no** fabricated season/period; genuine periods ("summer 2015",
+"in 2014", "winter 2013") still render their real scope; off-topic still declines; duplicates identical.
+New TDD tests: `test_named_sensor_summary_gets_no_false_scope` (×3 season words),
+`test_whole_record_guard_survives_lone_jan1_bucket`, `test_planner_genuine_subwindow_labelled_from_dates`.
+Gates: **498 passed, 1 skipped**; ruff + mypy clean; `verify_results.py` 35/35 (truth layer untouched —
+this was a labelling fix, not a numeric one).
+
 ### v1: verification round — manual end-to-end probing found (and fixed) 3 residual bugs
 
 After the first off-topic/sensor fix, ran a **manual** LLM-on probe (not just the unit tests) across all

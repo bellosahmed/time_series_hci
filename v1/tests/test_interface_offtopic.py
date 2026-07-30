@@ -39,6 +39,63 @@ def test_named_sensor_not_downgraded_by_planner(monkeypatch, df, bad_intent):
     assert "sh (g/kg)" in ans.sensors
 
 
+# --- Bug C: the planner must not stamp a FALSE scope on a period-less bare-sensor summary ----
+
+@pytest.mark.parametrize("bad_period", ["winter", "summer", "year"])
+def test_named_sensor_summary_gets_no_false_scope(monkeypatch, df, bad_period):
+    # The small planner routinely echoes the WHOLE dataset span plus a random season word for a
+    # period-less bare-sensor question (start=2014-01-01, end=2015-12-31, period="winter"). The
+    # window is the entire record, so the transparency line must NOT claim a scope ("in winter")
+    # that contradicts the all-years, all-seasons data actually summarised.
+    monkeypatch.setattr(interface.llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(interface.llm, "plan", lambda *a, **k: {
+        "intent": "anomaly", "sensors": [],
+        "start": "2014-01-01", "end": "2015-12-31", "period": bad_period})
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = []
+    ans = iface.ask("what is the specific humidity")
+    assert ans.intent == "summary"
+    assert "sh (g/kg)" in ans.sensors
+    assert f" in {bad_period}" not in ans.computed     # no fabricated season/period scope
+    # and the honest "whole record" note is still surfaced instead
+    assert any("whole" in n for n in ans.assumptions)
+
+
+def test_whole_record_guard_survives_lone_jan1_bucket(monkeypatch):
+    # An hourly resample leaves a lone Jan-1 00:00 bucket in the year after the data ends. The
+    # whole-record guard must still recognise the planner's "...to <Dec 31>" span as whole-record
+    # (collapsing to the honest note), not fall through to a redundant date-range scope label.
+    idx = pd.date_range("2014-01-01", "2016-01-01 00:00", freq="6h")  # trailing 2016-01-01 00:00
+    n = len(idx)
+    df2 = pd.DataFrame({"T (degC)": [float(i % 40) for i in range(n)],
+                        "sh (g/kg)": [5.0 + (i % 10) for i in range(n)]}, index=idx)
+    monkeypatch.setattr(interface.llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(interface.llm, "plan", lambda *a, **k: {
+        "intent": "anomaly", "sensors": [],
+        "start": "2014-01-01", "end": "2015-12-31", "period": "winter"})
+    iface = interface.Interface(df2, use_llm=True)
+    iface.history = []
+    ans = iface.ask("what is the specific humidity")
+    assert ans.intent == "summary"
+    assert " in 2014-01-01 to 2015-12-31" not in ans.computed  # collapsed, not a redundant scope
+    assert " in winter" not in ans.computed
+    assert any("whole" in n for n in ans.assumptions)
+
+
+def test_planner_genuine_subwindow_labelled_from_dates(monkeypatch, df):
+    # When the planner proposes a genuine sub-window (not the whole record), the label is derived
+    # from the resolved dates, never the free-text period word — so it can't disagree with the data.
+    monkeypatch.setattr(interface.llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(interface.llm, "plan", lambda *a, **k: {
+        "intent": None, "sensors": [],
+        "start": "2015-06-01", "end": "2015-08-31", "period": "winter"})  # season word is wrong
+    iface = interface.Interface(df, use_llm=True)
+    iface.history = []
+    ans = iface.ask("what is the specific humidity")
+    assert "winter" not in ans.computed                # the wrong season word is not trusted
+    assert "2015-06-01 to 2015-08-31" in ans.computed  # label reflects the actual window
+
+
 # --- Bug B: off-topic questions are declined even with the LLM on --------------------------
 
 def test_offtopic_question_declined_cold(monkeypatch, df):

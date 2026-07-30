@@ -478,14 +478,30 @@ class Interface:
                         sensors.append(s)
                 if start is None and end is None:           # no explicit period found
                     s2, e2 = _coerce_date(plan.get("start")), _coerce_date(plan.get("end"))
-                    if s2 or e2:
+                    # The small planner routinely echoes the ENTIRE dataset span plus a random
+                    # season word (start=2009-01-01, end=2016-12-31, period="winter") for a
+                    # question that named no period at all. That is not a real time filter:
+                    # adopting it stamps a scope label ("in winter") that contradicts the
+                    # all-years window. Treat a whole-record span as "no period" so the honest
+                    # "covering the whole record" note carries the scope instead.
+                    # An hourly resample can leave a lone Jan-1 00:00 bucket in the year AFTER the
+                    # real data ends, so use the effective last day (mirrors _assumption_notes) --
+                    # otherwise the planner's honest "...to 2016-12-31" never counts as whole-record.
+                    hi_ts = self.df.index.max()
+                    eff_hi = (hi_ts - pd.Timedelta(days=1) if (hi_ts.month == 1 and hi_ts.day == 1
+                                                               and hi_ts.hour == 0) else hi_ts)
+                    rec_lo, rec_hi = str(self.df.index.min().date()), str(eff_hi.date())
+                    whole = (s2 is not None and e2 is not None and s2 <= rec_lo and e2 >= rec_hi)
+                    if (s2 or e2) and not whole:
                         # A one-sided bound (only start or only end) must stay open-ended --
                         # collapsing both to the one supplied date would silently turn "from
                         # June onward" into a single-day window instead of an open range.
                         start, end = s2, e2
-                        label = plan.get("period") or (
-                            f"{start} to {end}" if start and end
-                            else f"from {start}" if start else f"up to {end}")
+                        # Derive the label from the resolved dates, NOT the planner's free-text
+                        # `period` word: the small model's season word can disagree with the
+                        # window it emitted, so trusting it risks a scope that lies about the data.
+                        label = (f"{start} to {end}" if start and end
+                                 else f"from {start}" if start else f"up to {end}")
                 if thr is None and plan.get("op") in (">", "<") and plan.get("value") is not None:
                     thr = (plan["op"], float(plan["value"]))
         return intent, sensors, start, end, label, thr, day, hour
