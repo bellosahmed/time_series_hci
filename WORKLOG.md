@@ -7,6 +7,29 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: anomaly + forecast internals audit — 1 bug fixed (window count mislabel)
+
+Dug into `anomaly.py` and `forecasting.py` and their interface wiring.
+
+- **BUG (fixed): the anomaly answer reported the flagged-POINT count under the word "windows".**
+  `computed` used `flags.sum()` (anomalous rows) but called them "cross-sensor anomaly windows",
+  while `ans.value`/`ans.network` correctly held the *grouped* windows. On "anomalies in 2015" it
+  said **"161 windows"** when there were **57** (161 flagged readings in 57 consecutive runs). Now
+  reports both correctly: "57 cross-sensor anomaly windows (161 flagged readings) across 14 sensors".
+  TDD test asserts the reported window number == `len(ans.network)`.
+- **Forecast internals — verified sound.** Band ordering `lower<=mean<=upper` holds on every row,
+  the 80% interval widens with horizon (5.7→12.9°C), no NaN, deterministic, and the rolling-origin
+  backtest runs (5 folds, MASE 0.83, 95% CI [0.58, 1.04] — beats naive persistence but the CI crosses
+  1, so not significantly; an honest result, not a bug). CI columns map correctly (lower=col0).
+- **All 5 selectable detectors** (portfolio/mahalanobis/isolation_forest/lof/ocsvm) — deterministic
+  (identical answer on repeat) and crash-free on scoped slices, including a single day.
+- **Modelling limitation noted (not a code bug):** the contamination/quantile detectors flag ~1% of
+  *whatever scope* by construction (the portfolio ~1.8% as a union of two), so "are there anomalies
+  in <period>?" always returns a non-zero count — the system never reports "none". Inherent to
+  top-quantile unsupervised detection; a documented design choice, left as-is.
+
+Gates: 506 passed, 1 skipped; ruff + mypy clean.
+
 ### v1: intent sweep cont. — compare used hourly extrema (fixed); bare-month scope dropped (open)
 
 Continued the sweep across the remaining intents (trend, compare, weather, anomaly, day-type,

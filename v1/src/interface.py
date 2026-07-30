@@ -1424,10 +1424,17 @@ class Interface:
                     inferred = None
                 culprit = anomaly.network_culprit(data, windows[0]["start"])
             n_sensors = data.shape[1]
+            # Report the true WINDOW count (consecutive flagged runs, == len(windows)) and the
+            # flagged-READING count separately -- flags.sum() counts points, which group into fewer
+            # windows, so labelling the point count as "windows" overstated it (e.g. 161 points in 57
+            # windows was reported as "161 windows").
+            n_windows, n_points = len(windows), int(flags.sum())
             first = (f"First cross-sensor anomaly on {qe.fmt_when(windows[0]['start'])}"
                      f"{f' (driven by {culprit})' if culprit else ''}." if windows else None)
             ans = self._reply(question, intent, windows, [sensor],
-                              computed=f"{int(flags.sum())} cross-sensor anomaly windows{where} "
+                              computed=f"{n_windows} cross-sensor anomaly "
+                                       f"window{'s' if n_windows != 1 else ''}{where} "
+                                       f"({n_points} flagged reading{'s' if n_points != 1 else ''}) "
                                        f"across {n_sensors} sensors (detector: {det}).",
                               context=first or ctx, inferred=inferred)
             ans.network = windows

@@ -51,6 +51,20 @@ def _cross_sensor_df(seed=1):
     return pd.DataFrame({"T (degC)": t, "rh (%)": h})
 
 
+def test_anomaly_window_count_matches_window_list():
+    # The reported "N anomaly windows" must equal the actual number of windows (len(ans.network)),
+    # not the number of flagged POINTS (flags.sum(), which groups into fewer windows). Reporting the
+    # point count under the word "windows" overstates the window count.
+    import re
+    df = _cross_sensor_df()
+    iface = interface.Interface(df)
+    ans = iface.ask("any anomalies?")
+    m = re.search(r"(\d+)\s+cross-sensor anomaly window", ans.computed)
+    assert m, f"expected a 'N cross-sensor anomaly window(s)' phrase, got: {ans.computed!r}"
+    assert int(m.group(1)) == len(ans.network), \
+        f"text says {m.group(1)} windows but there are {len(ans.network)} windows: {ans.computed!r}"
+
+
 def test_default_detector_is_portfolio_and_answer_is_network_level():
     df = _cross_sensor_df()
     iface = interface.Interface(df)
