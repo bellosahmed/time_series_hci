@@ -194,6 +194,61 @@ def understand(question: str, columns: list[str], intents: list[str],
     return out.splitlines()[0].strip()
 
 
+DECOMPOSE_SYSTEM = (
+    "You split a user's question about a weather time-series into the SMALLEST number of independent "
+    "sub-questions, each answerable on its own. Assign each a role from the allowed list. Do NOT "
+    "answer them and NEVER output any number, statistic, or measurement. If the question is already "
+    "single-topic, return it unchanged as one sub-task. Respond with ONLY compact JSON, no prose."
+)
+
+
+def decompose(question: str, roles: list[str], columns: list[str],
+              model: str = DEFAULT_MODEL) -> list[tuple[str, str]] | None:
+    """Split a question into ordered (role, sub_question) pairs the orchestrator dispatches in
+    parallel. The model only partitions language; it never computes a value. Returns None if Ollama
+    is unavailable or the reply cannot be parsed (caller then treats the whole question as one task).
+    """
+    if not is_available():
+        return None
+    prompt = (f"Allowed roles: {roles}\nAvailable sensors: {columns}\n\n"
+              f"Question: {question}\n\n"
+              'Return JSON ONLY: {"subtasks": [{"role": <role>, "question": <sub-question>}, ...]}')
+    data = _generate_json(prompt, DECOMPOSE_SYSTEM, model, 45.0)
+    if not isinstance(data, dict) or not isinstance(data.get("subtasks"), list):
+        return None
+    pairs: list[tuple[str, str]] = []
+    for st in data["subtasks"]:
+        if isinstance(st, dict) and isinstance(st.get("question"), str) and st["question"].strip():
+            role = st.get("role")
+            pairs.append((role if isinstance(role, str) else "", st["question"].strip()))
+    return pairs or None
+
+
+CRITIC_SYSTEM = (
+    "You are a careful reviewer. Given a question and the sub-answers a system produced (each already "
+    "containing exact computed numbers you must treat as ground truth), list any concerns: a "
+    "sub-answer that does not address its part of the question, a missing part, or an inconsistency. "
+    "NEVER change, add, or recompute a number. Reply with ONLY a JSON list of short concern strings; "
+    "[] if none."
+)
+
+
+def critique(question: str, role_facts: list[tuple[str, str]],
+             model: str = DEFAULT_MODEL) -> list[str]:
+    """Ask the LLM to flag (not fix) concerns about the assembled sub-answers. Returns a list of short
+    strings ([] if Ollama is unavailable, the reply is unparseable, or there are no concerns). The
+    critic never touches numbers -- it is a second trust gate, not a computer."""
+    if not is_available():
+        return []
+    joined = "\n".join(f"- [{role}] {facts}" for role, facts in role_facts)
+    prompt = (f"Question: {question}\n\nSub-answers:\n{joined}\n\n"
+              'Return JSON ONLY: {"concerns": [<short string>, ...]}')
+    data = _generate_json(prompt, CRITIC_SYSTEM, model, 30.0)
+    if not isinstance(data, dict) or not isinstance(data.get("concerns"), list):
+        return []
+    return [c.strip() for c in data["concerns"] if isinstance(c, str) and c.strip()]
+
+
 PLAN_SYSTEM = (
     "You translate a user's question about a weather time-series into a STRUCTURED query plan. "
     "You DO NOT answer the question and you must NEVER output any data value, statistic, "
