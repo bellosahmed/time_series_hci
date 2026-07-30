@@ -557,8 +557,29 @@ class Interface:
             self.history = self.history[-6:]
             return clar
 
+        # UNDERSTANDING AGENT: if the deterministic parser found NEITHER an intent NOR a sensor, the
+        # core of the query is unknown (heavy typos, paraphrase, word order) even if a stray year makes
+        # it "routable". Ask the LLM to rewrite it into a clear question; accept ONLY a rewrite the
+        # parser can route -- the LLM never gains routing authority and never emits a number. Offline
+        # or on failure, the deterministic path below is unchanged (no regression).
+        interpretation: str | None = None
+        cols = list(self.df.columns)
+        if (self.use_llm and llm.is_available()
+                and detect_intent(resolved) is None and not resolve_sensors(resolved, cols)):
+            try:
+                rw = llm.understand(resolved, cols, list(INTENTS.keys()), model=self.model)
+            except Exception as exc:  # noqa: BLE001 - any LLM failure must degrade, not crash
+                logger.warning("understanding rewrite failed (%s); using deterministic fallback.", exc)
+                rw = None
+            if rw and self._routable(rw) and rw.strip().lower() != resolved.strip().lower():
+                interpretation = rw.strip()
+                resolved = interpretation
+
         ans = self._answer(resolved)
         ans.question = original                 # keep the user's own wording for display
+        if interpretation is not None:
+            ans.text = f"(I read this as: '{interpretation}'.) {ans.text}"
+            ans.resolved = interpretation       # transparency: the interpretation we computed on
         if spell_fixes:
             ans.spelling = spell_fixes          # transparency: which typos were corrected
             fixes = ", ".join(f"'{o}' as '{f}'" for o, f in spell_fixes)
