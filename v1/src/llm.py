@@ -165,6 +165,35 @@ def rewrite_followup(question: str, history: list[dict], model: str = DEFAULT_MO
     return out.splitlines()[0].strip() if out else None
 
 
+UNDERSTAND_SYSTEM = (
+    "You rewrite a user's messy question about a weather time-series into ONE clear, standalone "
+    "question. Fix spelling and word order. Use only the sensors and operations the user is given. "
+    "You DO NOT answer the question and must NEVER output any data value, number, statistic, or "
+    "measurement. If the message is not a question about this weather data, reply with exactly: NONE."
+)
+
+
+def understand(question: str, columns: list[str], intents: list[str],
+               model: str = DEFAULT_MODEL) -> str | None:
+    """Rewrite a malformed/paraphrased question into one clear standalone question the deterministic
+    parser can route. Fixes spelling and phrasing only -- never emits a number; the caller must still
+    verify the rewrite is routable before using it. Returns None if Ollama is unavailable, the reply
+    is empty, or the model judges the message off-topic (``NONE``)."""
+    if not is_available():
+        return None
+    prompt = (f"Available sensors: {columns}\nAvailable operations: {intents}\n\n"
+              f"User's message: {question}\n\n"
+              "Rewrite it as one clear standalone question, or reply NONE.")
+    try:
+        out = generate(prompt, model=model, system=UNDERSTAND_SYSTEM, timeout=30.0)
+    except (urllib.error.URLError, OSError):
+        return None
+    out = (out or "").strip().strip('"').strip()
+    if not out or out.strip().upper() == "NONE":
+        return None
+    return out.splitlines()[0].strip()
+
+
 PLAN_SYSTEM = (
     "You translate a user's question about a weather time-series into a STRUCTURED query plan. "
     "You DO NOT answer the question and you must NEVER output any data value, statistic, "
