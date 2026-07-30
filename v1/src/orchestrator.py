@@ -27,6 +27,15 @@ ROLES: dict[str, tuple[str, ...]] = {
 _DEFAULT_ROLE = "statistician"
 
 
+def _template(results: list[RoleResult]) -> str:
+    """Deterministic multi-agent answer (offline / LLM-off path), grouped by role."""
+    lines = ["🔢 Computed (multi-agent):"]
+    for r in results:
+        label = r.computed or r.text or "(no result)"
+        lines.append(f"  • [{r.role}] {label}")
+    return "\n".join(lines)
+
+
 @dataclass
 class SubTask:
     """One independent piece of a decomposed question, tagged with the role that should answer it."""
@@ -103,3 +112,52 @@ class Orchestrator:
         workers = min(self.max_workers, len(subtasks))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             return list(pool.map(self._run_one, subtasks))
+
+    def critique(self, question: str, results: list[RoleResult]) -> list[str]:
+        """Second trust gate. Deterministic checks always run; an optional LLM critic (Ollama on) may
+        append natural-language concerns. The critic only flags -- it never recomputes a number."""
+        flags: list[str] = []
+        for r in results:
+            oks = [f for f in r.facts if getattr(f, "ok", True)]
+            errs = [f for f in r.facts if not getattr(f, "ok", True) and getattr(f, "error", None)]
+            for f in errs:
+                flags.append(f"{r.role} ('{r.question}'): {f.error}")
+            # A sub-task is usable if it produced ok facts OR an exact computed string -- the latter
+            # covers a sub-agent that fell back to the interface (empty `facts`, but a real, exact
+            # answer, e.g. the interface's own compound splitter). Only a genuinely empty result
+            # (no facts, no computed number) is flagged.
+            if not oks and not errs and not (r.computed or "").strip():
+                flags.append(f"{r.role} ('{r.question}'): no usable result")
+        if self.use_llm and llm.is_available():
+            role_facts = [(r.role, r.computed or r.text) for r in results if (r.computed or r.text)]
+            try:
+                flags.extend(llm.critique(question, role_facts, model=self.model))
+            except Exception:  # noqa: BLE001 - a critic failure must never block the answer
+                pass
+        return flags
+
+    def combine(self, question: str, results: list[RoleResult],
+                flags: list[str]) -> tuple[str, bool]:
+        """Weave verified role-facts into one answer. Reuses agent.Agent.compose so an LLM synthesis
+        is accepted only if faithfulness finds no invented number; otherwise a deterministic
+        template. Any Critic flags are appended so a wrong reading is visible, not silent."""
+        facts: list = []
+        for r in results:
+            facts.extend(f for f in r.facts if getattr(f, "ok", True))
+        if facts:
+            text, used = agent.Agent(self.df, use_llm=self.use_llm, model=self.model).compose(
+                question, facts)
+        else:
+            text, used = _template(results), False
+        if flags:
+            text = f"{text}\n⚠ Critic notes: " + "; ".join(flags)
+        return text, used
+
+    def run(self, question: str) -> OrchestratedAnswer:
+        """Full pipeline: decompose -> dispatch (parallel) -> critique -> combine."""
+        subtasks = self.decompose(question)
+        results = self.dispatch(subtasks)
+        flags = self.critique(question, results)
+        text, used = self.combine(question, results, flags)
+        computed = " ".join(r.computed for r in results if r.computed)
+        return OrchestratedAnswer(question, subtasks, results, text, flags, computed, used)
