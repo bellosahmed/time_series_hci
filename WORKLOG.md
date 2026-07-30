@@ -7,6 +7,40 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: Multi-agent orchestrator — decompose / dispatch / critique / combine (sub-project 2 of 3)
+
+**Motive (user asked).** Answer hard, multi-part questions ("the coldest temperature ever **and** the
+windiest reading") by coordinating several agents, and use the parallel sub-tasks as the seam that
+sub-project 3 (COSMA) later fans out. Chose **Roles + Critic** over debate/ensemble (novelty is out of
+scope) and over a thin parallel wrapper (adds nothing over the existing compound feature).
+
+**Design.** New `src/orchestrator.py` wraps the existing `agent.Agent`. A **Planner** (`llm.decompose`,
+numberless, offline-safe) splits a question into `SubTask(role, question)` — conservative: never splits
+a correlation/compare/"between X and Y" question, and offline/single-topic collapses to one sub-task
+(== today's `agent.py`, regression-guarded). **Role-agents** (`statistician`/`correlator`/`anomaly`)
+are `agent.Agent` restricted to a **tool subset** (new backwards-compatible `tools=` arg on `Agent`),
+run in a `ThreadPoolExecutor` with **order preserved**. A **Critic** (`llm.critique` + deterministic
+checks) flags problems but never recomputes. A **Combiner** reuses `agent.compose` (faithfulness-gated;
+template fallback). Trust invariant intact: LLM only decomposes/critiques/writes prose; numbers ==
+pandas via `agent.execute_step`.
+
+**Result (real, local `llama3.2:3b`).** Multi-part coverage off = 2/3, on = 3/3. *Honest findings:*
+(1) offline the interface compound splitter already answers 2/3; the LLM's win is the third, via a
+genuine two-way decomposition. (2) The 3B **decomposer mis-assigns roles** (put a threshold/max
+question under `anomaly`) — coverage survived only because the tool-restriction + interface fallback
+recovered the answer; routing is model-bound. (3) **Two critics, different reliability:** the
+deterministic critic is the trustworthy gate; the 3B **LLM critic over-flags** (raised concerns on
+parts that were answered), so it's advisory ("⚠ Critic notes"), never a blocker. (4) A real bug the
+experiment surfaced: the deterministic critic first flagged "no usable result" whenever `facts` was
+empty, but a sub-agent that falls back to the interface yields a valid *computed* string with empty
+`facts` — fixed to treat a non-empty exact `computed` as usable. Write-up:
+`docs/evaluation/10-multi-agent-orchestrator.md`. CLI: `chat.py --orchestrate`.
+
+**Process.** Brainstorm → spec (`docs/superpowers/specs/2026-07-30-multi-agent-orchestrator-design.md`)
+→ plan (`docs/superpowers/plans/2026-07-30-multi-agent-orchestrator.md`) → TDD on branch
+`feat/multi-agent-orchestrator`. New tests: `test_llm_orchestrator.py` (3), `test_orchestrator.py` (11),
+`test_orchestrator_eval.py` (1), plus 2 in `test_agent.py`; ruff + mypy clean.
+
 ### v1: Understanding/Clarifier agent — LLM self-correction of malformed queries (sub-project 1 of 3)
 
 **Motive (user asked).** How can the system understand a query that's misspelled beyond the

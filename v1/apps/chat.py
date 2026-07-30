@@ -23,7 +23,7 @@ HERE = Path(__file__).resolve().parent          # .../v1/apps
 V1 = HERE.parent                                 # .../v1
 sys.path.insert(0, str(V1))                      # make `src` importable from anywhere
 
-from src import agent, interface, llm, preprocess
+from src import agent, interface, llm, orchestrator, preprocess
 
 DEFAULT_DATA = V1 / "data" / "jena_climate_2009_2016.csv"
 
@@ -41,12 +41,14 @@ def main() -> None:
     p.add_argument("--model", default=None, help="Ollama model name (default: auto, largest pulled)")
     p.add_argument("--agent", action="store_true",
                    help="agentic multi-step mode (plan+execute several tools; implies --llm)")
+    p.add_argument("--orchestrate", action="store_true",
+                   help="multi-agent mode (decompose+dispatch+critic+combine; implies --llm)")
     p.add_argument("--detector", default=interface.DEFAULT_DETECTOR,
                    choices=list(interface.NETWORK_DETECTORS),
                    help="network anomaly detector for 'anomaly' questions (default: portfolio)")
     p.add_argument("question", nargs="*", help="ask once and exit; omit for interactive mode")
     args = p.parse_args()
-    if args.agent:
+    if args.agent or args.orchestrate:
         args.llm = True
 
     print("Loading + preprocessing data...")
@@ -68,8 +70,11 @@ def main() -> None:
     iface = interface.Interface(df, use_llm=use_llm, model=model, detector=args.detector, raw=raw)
     print(f"Anomaly detector: {args.detector}")
     ag = agent.Agent(df, use_llm=use_llm, model=model) if args.agent else None
+    orc = orchestrator.Orchestrator(df, use_llm=use_llm, model=model) if args.orchestrate else None
 
     def answer(q: str) -> str:
+        if orc:
+            return orc.run(q).text
         if ag:
             return ag.run(q).text
         ans = iface.ask(q)
@@ -80,7 +85,11 @@ def main() -> None:
         print("\n" + answer(" ".join(args.question)))
         return
 
-    mode = ("agent:" + model if args.agent else f"LLM:{model}") if use_llm else "template"
+    if use_llm:
+        mode = ("orchestrate:" + model if args.orchestrate
+                else "agent:" + model if args.agent else f"LLM:{model}")
+    else:
+        mode = "template"
     print(f"\nReady ({mode}). Ask e.g. 'max temperature?', 'correlation of temperature and density',")
     if args.agent:
         print("Multi-step ok, e.g. 'compare the hottest of 2013, 2014 and 2015'.")

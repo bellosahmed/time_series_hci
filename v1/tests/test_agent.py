@@ -158,3 +158,18 @@ def test_run_falls_back_to_single_step(df):
     # use_llm off -> no plan -> delegates to the deterministic single-step interface
     res = agent.Agent(df, use_llm=False).run("what was the hottest temperature?")
     assert res.steps == [] and isinstance(res.text, str) and res.text
+
+
+def test_agent_tool_subset_limits_catalogue():
+    df = pd.DataFrame({"T (degC)": [1.0, 2.0]},
+                      index=pd.date_range("2015-01-01", periods=2, freq="h"))
+    ag = agent.Agent(df, use_llm=False, tools=("correlation",))
+    names = {t["name"] for t in ag.tool_specs()}
+    assert names == {"correlation"}
+
+
+def test_agent_default_tools_unchanged():
+    df = pd.DataFrame({"T (degC)": [1.0, 2.0]},
+                      index=pd.date_range("2015-01-01", periods=2, freq="h"))
+    ag = agent.Agent(df, use_llm=False)
+    assert {t["name"] for t in ag.tool_specs()} == set(agent.TOOLS)

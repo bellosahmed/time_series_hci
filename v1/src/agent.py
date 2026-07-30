@@ -212,15 +212,19 @@ class Agent:
     ``execute_plan`` and get exact facts, and ``compose`` returns the trust-labelled template.
     """
 
-    def __init__(self, df: pd.DataFrame, use_llm: bool = True, model: str | None = None):
+    def __init__(self, df: pd.DataFrame, use_llm: bool = True, model: str | None = None,
+                 tools: tuple[str, ...] | None = None):
         self.df = df
         self.use_llm = use_llm
         self.model = model or llm.DEFAULT_MODEL
+        # None => all tools; otherwise restrict the catalogue offered to the planner (a role-agent
+        # sees only its tools). Unknown names are ignored so a bad restriction can't empty everything.
+        self.tool_names = tuple(TOOLS) if tools is None else tuple(t for t in tools if t in TOOLS)
 
     def tool_specs(self) -> list[dict]:
-        """The tool catalogue passed to the LLM planner."""
-        return [{"name": n, "description": t["description"], "params": t["params"]}
-                for n, t in TOOLS.items()]
+        """The tool catalogue passed to the LLM planner (restricted to ``self.tool_names``)."""
+        return [{"name": n, "description": TOOLS[n]["description"], "params": TOOLS[n]["params"]}
+                for n in self.tool_names]
 
     def plan(self, question: str) -> list[dict] | None:
         """Ask the LLM for an ordered list of tool calls (None if LLM is off/unavailable)."""
