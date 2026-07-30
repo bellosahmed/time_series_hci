@@ -244,6 +244,54 @@ def test_compare_uses_raw_extrema_like_max_intent():
     assert ans.value["a"] != hourly.loc["2013", "T (degC)"].max()
 
 
+def _multiyear_df():
+    idx = pd.date_range("2014-01-01", "2015-12-31 23:00", freq="h")
+    n = len(idx)
+    return pd.DataFrame({"T (degC)": [float(i % 40) for i in range(n)],
+                         "rh (%)": [40.0 + (i % 50) for i in range(n)]}, index=idx)
+
+
+def test_bare_month_no_year_asks_for_year():
+    # A month with no year is under-specified: without a year it would silently use the whole record
+    # (June's max would show the all-time July peak). Ask which year instead of guessing.
+    iface = interface.Interface(_multiyear_df())
+    for q in ["hottest temperature in June", "average humidity in June",
+              "how many hours was the temperature above 30 in June"]:
+        ans = iface.ask(q)
+        iface.history = []
+        assert ans.value is None, f"{q!r} should not be answered on a guessed scope"
+        assert "which year" in ans.text.lower() and "June" in ans.text
+
+
+def test_month_with_year_still_answers():
+    iface = interface.Interface(_multiyear_df())
+    ans = iface.ask("hottest temperature in June 2015")
+    assert ans.value is not None                      # a real scope -> answered
+    assert "2015" in str(ans.understood) or "June 2015" in str(ans.understood)
+
+
+def test_bare_day_still_resolves_across_years():
+    # A bare DAY ("26 January") already means that day across all years -> must NOT ask for a year.
+    iface = interface.Interface(_multiyear_df())
+    ans = iface.ask("temperature on 26 January")
+    assert "which year" not in ans.text.lower()
+
+
+def test_offtopic_with_month_is_not_asked_for_year():
+    # "my cat in June" names no sensor/intent -> it must decline, not ask which year's June.
+    iface = interface.Interface(_multiyear_df())
+    ans = iface.ask("what is the name of my cat in June")
+    assert "which year" not in ans.text.lower()
+
+
+def test_recommend_bare_month_still_ranks_across_years():
+    # The recommend intent deliberately ranks a bare month across all years -> not redirected.
+    iface = interface.Interface(_multiyear_df())
+    ans = iface.ask("recommend the hottest days in June")
+    assert ans.intent == "recommend"
+    assert "which year" not in ans.text.lower()
+
+
 def test_ask_trend_rising():
     idx = pd.date_range("2014-01-01", periods=24 * 60, freq="h")
     df = pd.DataFrame({"T (degC)": np.linspace(0, 10, len(idx))}, index=idx)  # steadily up

@@ -555,6 +555,23 @@ class Interface:
             rd = rd[hour_mask(rd.index, hour[0], hour[1])]
         return rd
 
+    def _bare_month_needs_year(self, question: str) -> str | None:
+        """A month named with **no year, no specific day, and no other resolvable period** -> its
+        name, else None. Such a query ("hottest temperature in June") is under-specified: without a
+        year it would silently fall back to the whole record (June's max would show the all-time
+        July peak). We ask which year instead of guessing -- the user's chosen behaviour. A bare DAY
+        ("26 January") and a month WITH a year ("June 2015") both resolve to a real scope and are
+        unaffected; the recommend intent (handled by the caller) ranks a bare month across all years
+        on purpose, so it is excluded there.
+        """
+        m = resolve_recurring_month(question)
+        if m is None or resolve_day(question) is not None:
+            return None
+        start, end, _ = resolve_any_period(question, self._anchor)
+        if start or end:
+            return None
+        return calendar.month_name[m]
+
     def _missing_concept(self, question: str):
         """If the user named a sensor concept this dataset doesn't have, return the word."""
         q = question.lower()
@@ -693,6 +710,28 @@ class Interface:
             if rw and self._routable(rw) and rw.strip().lower() != resolved.strip().lower():
                 interpretation = rw.strip()
                 resolved = interpretation
+
+        # A bare month with no year is under-specified: it would otherwise silently use the whole
+        # record. Ask which year instead -- but only for a genuine data question (one that named an
+        # intent, a sensor, or a threshold), so off-topic text that merely contains a month word
+        # ("my cat in June") still declines rather than asking for a year. The recommend intent is
+        # excluded because it deliberately ranks a bare month across every year.
+        month_name = self._bare_month_needs_year(resolved)
+        if (month_name and detect_intent(resolved) != "recommend"
+                and (detect_intent(resolved) is not None or resolve_sensors(resolved, cols)
+                     or resolve_threshold(resolved) is not None)):
+            lo = self.df.index.min().year
+            hi_ts = self.df.index.max()
+            hi = hi_ts.year - 1 if (hi_ts.month == 1 and hi_ts.day == 1) else hi_ts.year
+            ask = Answer(original, detect_intent(resolved),
+                         f"Which year's {month_name}? The record covers {lo}–{hi}, so a bare "
+                         f"'{month_name}' is ambiguous — name a year (e.g. '{month_name} 2015') and "
+                         f"I'll answer exactly. (For every {month_name} across all years, ask me to "
+                         f"'recommend' them.)", None, resolve_sensors(resolved, cols))
+            ask.understood = self._describe_understanding(resolved)
+            self.history.append({"question": original, "resolved": resolved, "computed": ""})
+            self.history = self.history[-6:]
+            return ask
 
         ans = self._answer(resolved)
         ans.question = original                 # keep the user's own wording for display

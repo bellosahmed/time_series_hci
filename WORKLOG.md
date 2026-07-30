@@ -21,15 +21,19 @@ forecast, missing, correlation, recommend) with independent numeric + determinis
   So "was 2013 hotter than 2014" reported 2013=34.93 while "hottest temperature in 2013" reports
   35.48 — the same fact, two numbers. `_year_stat` now reads `self.raw` (matching the documented
   raw/df split in `__init__`). Now 35.48/33.74, consistent with the direct intents. TDD test added.
-- **BUG (open, needs a call): a bare month with no year is silently dropped as a scope.** "hottest
-  temperature in June" answers the all-time max (37.28 on 4 Jul) instead of June's max (34.36);
-  "average temperature in June" gives the whole-record mean (9.44) not June's (16.41). The parser
-  (`resolve_period`/`resolve_any_period`) only resolves a month WITH a year, so a bare month falls
-  through to whole-record — and the assumption note even says "name a month" though one was named.
-  Note: a bare *day* ("26 January") already resolves across all years, but a bare *season* requires a
-  year, so the desired semantics for a bare month is a genuine design choice — deferred to the user.
+- **BUG (fixed): a bare month with no year was silently dropped as a scope.** "hottest temperature
+  in June" answered the all-time max (37.28 on 4 Jul) instead of June's max (34.36); "average
+  temperature in June" gave the whole-record mean (9.44) not June's (16.41). Root cause:
+  `resolve_period`/`resolve_any_period` only resolve a month WITH a year, so a bare month fell
+  through to whole-record. **User decision: ask for the year** (rather than resolve across all years
+  or silently answer). Added `_bare_month_needs_year` + a guard in `ask()` that, for a genuine data
+  question (intent/sensor/threshold present) naming a bare month, returns "Which year's June? …name a
+  year (e.g. 'June 2015')". Excluded: month+year, bare *day* ("26 January", already across-years),
+  off-topic text merely containing a month ("my cat in June" still declines), and the `recommend`
+  intent (its across-years ranking of a bare month is intentional — pointed to in the ask message).
+  TDD tests cover all six branches. Verified live on the real dataset.
 
-Gates after the compare fix: 500 passed, 1 skipped; ruff + mypy clean.
+Gates: 505 passed, 1 skipped; ruff + mypy clean; verify_results.py 35/35.
 
 ### v1: system-wide bug sweep — 3 bugs found, 2 fixed (chart clipping + threshold follow-up hijack)
 
