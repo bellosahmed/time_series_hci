@@ -225,6 +225,25 @@ def test_ask_compare():
     assert "2014" in ans.text and "2013" in ans.text
 
 
+def test_compare_uses_raw_extrema_like_max_intent():
+    # 'was 2013 hotter than 2014' must report the SAME peak the max intent would (computed on the
+    # native-resolution `raw` frame), not the hourly-mean max -- otherwise the same fact ("2013's
+    # highest temperature") gets two different numbers depending on how it's asked.
+    raw_idx = pd.date_range("2013-01-01", "2014-12-31 23:00", freq="h")
+    base = np.where(raw_idx.year == 2013, 20.0, 10.0)
+    raw = pd.DataFrame({"T (degC)": base}, index=raw_idx)
+    # a single sub-hourly-looking spike only present in the raw frame (survives no averaging here,
+    # but we simulate the smoothing gap by giving the hourly frame a lower peak explicitly)
+    raw.iloc[100, 0] = 35.0            # true 2013 peak lives in raw
+    hourly = raw.resample("2h").mean()  # coarser grid -> its max is the averaged-down value
+    iface = interface.Interface(hourly, raw=raw)
+    ans = iface.ask("was 2013 hotter than 2014?")
+    assert ans.intent == "compare"
+    # 2013's reported peak must equal the RAW max (35.0), not the coarser frame's smoothed peak
+    assert ans.value["a"] == raw.loc["2013", "T (degC)"].max() == 35.0
+    assert ans.value["a"] != hourly.loc["2013", "T (degC)"].max()
+
+
 def test_ask_trend_rising():
     idx = pd.date_range("2014-01-01", periods=24 * 60, freq="h")
     df = pd.DataFrame({"T (degC)": np.linspace(0, 10, len(idx))}, index=idx)  # steadily up

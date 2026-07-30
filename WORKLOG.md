@@ -7,6 +7,30 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: intent sweep cont. — compare used hourly extrema (fixed); bare-month scope dropped (open)
+
+Continued the sweep across the remaining intents (trend, compare, weather, anomaly, day-type,
+forecast, missing, correlation, recommend) with independent numeric + determinism checks.
+
+- **trend** — verified: interface `+0.40°C/yr` == independent hourly OLS `+0.40`; my first probe's
+  negative slope was the lone Jan-2017 resample bucket contaminating an annual-mean fit. False alarm.
+- **weather / correlation / missing** — numbers match pandas.
+- **anomaly / day-type / forecast / recommend-analog** — deterministic (same question → identical
+  answer twice), which matters for a verifiable system.
+- **BUG (fixed): `compare` computed extrema on the hourly frame, the max/min intents use `raw`.**
+  So "was 2013 hotter than 2014" reported 2013=34.93 while "hottest temperature in 2013" reports
+  35.48 — the same fact, two numbers. `_year_stat` now reads `self.raw` (matching the documented
+  raw/df split in `__init__`). Now 35.48/33.74, consistent with the direct intents. TDD test added.
+- **BUG (open, needs a call): a bare month with no year is silently dropped as a scope.** "hottest
+  temperature in June" answers the all-time max (37.28 on 4 Jul) instead of June's max (34.36);
+  "average temperature in June" gives the whole-record mean (9.44) not June's (16.41). The parser
+  (`resolve_period`/`resolve_any_period`) only resolves a month WITH a year, so a bare month falls
+  through to whole-record — and the assumption note even says "name a month" though one was named.
+  Note: a bare *day* ("26 January") already resolves across all years, but a bare *season* requires a
+  year, so the desired semantics for a bare month is a genuine design choice — deferred to the user.
+
+Gates after the compare fix: 500 passed, 1 skipped; ruff + mypy clean.
+
 ### v1: system-wide bug sweep — 3 bugs found, 2 fixed (chart clipping + threshold follow-up hijack)
 
 Broad "any bugs?" pass over v1. Read the truth layer (`query_engine.py`) — clean — and ran an

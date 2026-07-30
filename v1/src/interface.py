@@ -564,8 +564,12 @@ class Interface:
         return None
 
     def _year_stat(self, year: int, sensor: str, stat: str):
-        sub = self.df[self.df.index.year == year]
-        if not len(sub):
+        # Point statistics (max/min/mean) must come from the native-resolution `raw` frame, exactly
+        # like the max/min/mean intents -- computing them on the hourly-mean `df` would report a
+        # smoothed-down peak, so "2013's highest temperature" would differ between a direct max
+        # question and this comparison. See the raw/df note in __init__.
+        sub = self.raw[self.raw.index.year == year]
+        if not len(sub) or sensor not in sub.columns:
             return None
         col = sub[sensor]
         return float(col.max() if stat == "max" else col.min() if stat == "min" else col.mean())
