@@ -7,6 +7,28 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: verification round — manual end-to-end probing found (and fixed) 3 residual bugs
+
+After the first off-topic/sensor fix, ran a **manual** LLM-on probe (not just the unit tests) across all
+14 sensors, off-topic phrasings (plain / with a follow-up cue / with a stray year), and follow-ups.
+Found three leaks the tests had missed, and fixed them:
+1. **Bare non-temp sensors still mis-routed.** "what is the air density/potential temperature" → the
+   planner injected `missing`/`trend` (not just `weather`). Fix: the planner never sets the intent when
+   a sensor is named — a bare per-sensor question defaults to an honest `summary` of THAT sensor.
+2. **Follow-up cue + off-topic still fabricated.** "what about my dog" reused the prior turn. Fix:
+   follow-ups now require a real data signal (`_mentions_domain`), with **month/season names**
+   recognised so "what about July?"/"what about spring?" still resolve.
+3. **Off-topic + stray year still fabricated.** "my cat in 2015" → "max temperature 2015". Fix: the LLM
+   may construct a query only when the text names or *garbles* a weather concept
+   (`_should_llm_construct` + a fuzzy `_looks_like_garbled_domain` over sensor/month/season words), so
+   "my cat in 2015" declines while "higist tempreture 2015" still recovers. (Vocabulary excludes intent
+   filler words like "tell"/"about" that caused false matches on "tell me a joke"/"what about my dog".)
+
+**Verified (real `llama3.2:3b`).** All 14 bare sensors → correct per-sensor summary; cat/dog/joke/
+"my cat in 2015"/"how was 2015" all decline; legit follow-ups + garbled-domain queries still resolve;
+`understanding_eval` **improved 5 → 7 correct** (stricter gating removed bad rewrites). Gates: **493
+passed, 1 skipped**; ruff + mypy clean; independent `verify_results.py` 35/35 (truth layer untouched).
+
 ### v1: bugfix — off-topic questions declined + named sensors kept on the LLM path
 
 **Reported (user testing with the LLM on).** (A) Asking about non-temp/wind sensors ("what is the
