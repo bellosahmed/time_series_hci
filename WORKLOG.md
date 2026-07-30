@@ -7,6 +7,31 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: bugfix — off-topic questions declined + named sensors kept on the LLM path
+
+**Reported (user testing with the LLM on).** (A) Asking about non-temp/wind sensors ("what is the
+specific humidity / dew point / vapour pressure deficit") gave a temperature-ish answer. (B) An
+off-topic message ("what is the name of my cat/dog") was answered with a bogus analytics result —
+worst as a follow-up after a valid question, where it reused the prior turn's context.
+
+**Root causes (systematic-debugging; both on the LLM path — offline was already correct).** (A) In
+`_understand`, `llm.plan` filled `intent="weather"` for a bare per-sensor question, and the "weather"
+day-report ignores the named sensor. (B) `llm.plan` / `llm.understand` / `llm.rewrite_followup` all
+fabricate a *routable* query from off-topic text, and `_routable` alone can't tell that apart from a
+real question — so nonsense became "maximum temperature in 2015".
+
+**Fix.** New `Interface._mentions_domain(q)` — true only if the question carries a real data signal
+(sensor/intent/period/day/hour/direction/legend). The LLM planner, understanding agent, and follow-up
+rewriter are now **consulted only when that signal is present**, so a signalless message is declined
+deterministically instead of hallucinated into a weather query. Separately, the planner's "weather"
+intent no longer overrides a **named sensor** (a bare "what is the specific humidity" now summarises
+that sensor). Note this corrected the sub-project-1 contract: pure nonsense ("flibber the wobbertron",
+no year) is no longer rewritten — a data signal (e.g. a year) is required — which the tests now encode.
+
+**Verified (LLM on).** specific humidity/dew point/VPD → per-sensor summary; cat/dog → declined; legit
+follow-up "what about 2014?" still resolves. Tests: new `test_interface_offtopic.py` (4) + updated
+understanding tests; **488 passed, 1 skipped**; ruff + mypy clean.
+
 ### v1: dissertation notes updated — three agentic-layer findings cited back into the report
 
 Fed the sub-project 1–3 findings into the dissertation-facing notes (the report is written separately;
