@@ -5,6 +5,421 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-30
+
+### v1: comparative benchmark — our app vs general-purpose LLMs (external tools as the baseline)
+
+**Motive.** The truth layer proves we equal pandas, but not that we beat the obvious alternative:
+"just paste the data into a chatbot and ask." Built a like-for-like contest to measure the *value
+added* by the deterministic engine, using other AI tools as the benchmark.
+
+**Design (fairness first).** 8 NL questions (max/min/mean over 5 sensors), each scoped to a single
+day whose 144 raw 10-min readings are **embedded in the prompt** — so no contestant guesses blind;
+the only variable is whether it computes correctly. Same prompt string for every contestant. Ground
+truth = the oracle (dedup duplicate timestamps, −9999→missing, native 10-min grid). Score = exact
+within ±0.01. Harness: `src/benchmark_external.py`; runners in `docs/evaluation/benchmark/`.
+
+**Reachability.** No API keys for ChatGPT/Claude/Kimi/GLM in this environment (and web tools can't
+drive their login-gated chat UIs), so: local Ollama models run automatically; commercial tools get a
+generated **manual pack** (upload CSV + ask, their real code-interpreter path) scored by
+`score_manual.py`.
+
+**Result (local leg, real).** our app **8/8 (100%)**; Gemma-4-E4B (7 GB) **6/8** — got every
+*extremum* right but **missed both means**; llama3.2:3b **1/8**; Gemma-3-1B "thinking" **0/8**
+(incoherent: −1.00, 23.49…). Raw replies saved to `results_local.csv`.
+
+**Result (hosted leg via OpenRouter free tier, real).** Same 8 questions, data in-prompt.
+our app **8/8**; nemotron-3-super-120b **8/8**; ling-3.0-flash **8/8** (fastest, 1–41s);
+nemotron-3-ultra-550b **7/8** (one malformed-API-response, not a reasoning miss); gpt-oss-20b
+**6/8** (missed both near-aggregate cases; one call took 477s); gemma-4-31b **1/8** (rate-limited
+429 on 6/8 — infra, not capability). Runner: `run_openrouter.py` (stdlib, OpenAI-compatible; key in
+gitignored `.openrouter_key`). Raw replies: `results_openrouter.csv`.
+*Trade-off/finding:* against strong hosted models the app's edge shifts from "only one that can
+compute" (true vs tiny local models) to "exact **and** instant **and** reliable **and** offline" —
+the hosted runs showed a malformed response, a 477s latency spike, and rate-limit wipeouts that a
+local deterministic engine never suffers.
+
+**Result (routing / understanding leg, real).** Different axis: map a question to (intent, sensor,
+scope), scored vs the hand-labelled `query_coverage.GROUND_TRUTH` (n=49; the blind
+`worksheet.csv`). our app **100%** overall (intent/sensors/scope all 100%); ling-3.0-flash **53%**
+overall (intent 59%, sensors 73%, scope 78%). Runner: `run_openrouter_routing.py`; detail in
+`results_routing.csv`. *Finding:* the same hosted model that scored 8/8 on *computation* gets only
+~half the *routing* right — systematically collapsing single-sensor "summary" questions into the
+whole-day "weather" intent. General LLMs compute over handed-in data well but are weak at deciding
+what a messy question asks. *Honest caveat:* the app's 100% is flattered by parser/ground-truth
+co-evolution (self-authored labels, per `06-query-routing-coverage.md`); the LLM judge is
+independent, so the gap is the real signal, not the absolute 100%.
+A second hosted model (nemotron-120b) routing run was **excluded**: the OpenRouter free-tier
+*daily* request cap was exhausted, so all 49 calls 429'd (quota artifact, not a 0% score) —
+re-runnable free after reset. Decision: no paid credit, stay on the free tier.
+
+### v1: answer two questions at once (compound-question handling)
+
+**Bug found while extending the benchmark.** "max temperature in 2015 **and** min humidity in 2013"
+was silently answered as *only* the first part — and worse, the two scopes were merged into a wrong
+"2013–2015" window. A silent wrong answer, against the project's own never-guess principle.
+
+**Fix.** `Interface._split_questions` + `_answer_compound`: detect a genuinely compound question and
+answer each part independently through the deterministic engine, then combine. Conservative by
+design — it will **not** split the legitimate single-question uses of "and": correlation between two
+sensors, `compare 2012 and 2015`, or `mean pressure between 2012 and 2014` (guarded by
+`detect_intent ∈ {correlation, compare}`, `resolve_compare`, and a rule that ≥2 split parts must
+*each* carry their own intent keyword). Each sub-answer is still computed by the query engine, so the
+numbers stay exact (max T 2015 = 37.28, min rh 2013 = 27.10, each with its own correct scope).
+
+**Result.** New `tests/test_interface_compound.py` (6 tests); full suite **443 passing, 1 skipped**;
+ruff + mypy clean. *Trade-off:* the splitter is deliberately conservative — it only fires when both
+parts are unambiguously separate questions, preferring to fall back to single-answer over
+mis-splitting a real one. *Relevance:* decompose → dispatch-each → combine is exactly the
+plan-and-execute primitive a multi-agent/agentic layer is built on (cf. `agent.py`), done here in the
+deterministic layer so the trust guarantee is preserved.
+
+### v1: verify the benchmark with the app itself (app as confirmed reference)
+
+Because every leg scores contestants against the app/oracle, that reference had to be proven right.
+`verify_benchmark.py` (local, no API cost) confirms three things: (1) the app's answer **equals the
+independent pandas oracle** on all 8 gold questions — 37.28 / 20.15 / 29.38 °C, 96.20 %, 982.34
+mbar, 9.90 m/s, 12.61 °C, 71.98 % — each recomputed straight from the raw CSV; (2) re-grading every
+contestant against the *app's* value instead of the oracle reproduces the same verdicts with **zero
+disagreements** across all 9 contestants, so no ✓/✗ depended on which reference we used; (3) app
+routing == hand-labelled truth (100% intent/sensors/scope, n=49). *Finding:* the app is a
+confirmed-correct reference for the whole comparison — its numbers match the dataset, it grades
+others identically to the independent oracle, and it routes the labelled questions correctly.
+Written up in `docs/evaluation/08-external-llm-benchmark.md`.
+
+**Findings / trade-offs.**
+- Data-in-prompt is *not* enough — general LLMs still misread/miscompute; code can't.
+- **Aggregation is the sharp failure mode**: the best local model nailed max/min but failed both
+  means (picking a max is easy for an LLM; averaging 144 numbers is not). Clean illustration of why
+  the numbers must be computed in code.
+- Small local models (the realistic offline-privacy case) are exactly where a truth layer matters
+  most — the 1B model was unusable.
+- Honest scope: 8 questions, single-day windows, small local models; commercial code-interpreter
+  tools are the harder baseline (manual leg). The point isn't "who hits 100%" but whether a general
+  tool silently averages to hourly or keeps the duplicate timestamps — the two decisions the oracle
+  had to pin down. Write-up: `docs/evaluation/08-external-llm-benchmark.md`.
+
+---
+
+## 2026-07-29
+
+### v1: exact max/min — compute extrema on the native 10-min grid, not the hourly mean
+
+**Bug (found while testing the app).** "Highest temperature in July 2015" returned **37.04 °C**,
+but the raw dataset (checked in Excel) shows **37.28 °C** on the same day/hour (2015-07-04 16:00).
+
+**Root cause (confirmed against the data, not guessed).** The pipeline resamples the 10-minute
+readings to an **hourly mean** (`preprocess.align(freq="1h", agg="mean")`) *before* the query engine
+runs. Averaging the six readings inside 16:00 smooths the peak from 37.28 down to 37.04. The `max`
+code is correct — it was being handed a pre-smoothed series. The bias is one-directional: hourly
+means always lower maxima and raise minima, so *every* extremum query was slightly conservative.
+The "4 July **2014**" in the bug report was a misread — the system scoped to 2015 correctly (July
+2014's max is only 33.56, nowhere near 37); the sole discrepancy was the 0.24 °C from averaging.
+
+**Fix.** `Interface` now takes an optional native-resolution `raw` frame (the cleaned-but-not-
+aligned 10-min grid) and routes the point-statistic intents — **max/min/mean/spread/summary/
+weather** — through a raw slice of the same window (`_scope_raw`), while analysis/anomaly/forecast/
+trend keep the regular hourly grid they need. `raw` defaults to `df`, so every existing caller
+(tests, `verify_results`) is byte-for-byte unchanged; the two apps (`chat.py`, `web/app.py`) opt in
+by passing the un-`align`ed frame. On the real data the temperature query now returns **37.28**, and
+it generalises: min → −4.35 (was −4.15), pressure peak → 998.21 (was 998.11).
+
+**Trade-off documented.** Extrema are now exact against the source; `mean`/`std` also shift slightly
+because they include intra-hour variation (the *true* spread of the readings, which is what "spread"
+should mean). `threshold` counts were deliberately left on the hourly grid — their "number of hours
+above X" semantics depend on hourly buckets; moving them to 10-min would silently change the meaning
+of the count. That's a noted, bounded follow-on, not part of this fix.
+
+**Verification.** New `tests/test_interface_raw_resolution.py` (5 tests, synthetic 10-min frame with
+a known intra-hour spike/trough — no dependency on the gitignored CSV) asserts the hourly-only path
+stays smoothed and the raw-wired path recovers the exact peak/trough. Full suite **360 passed, 1
+skipped**; `verify_results` **35/35**; ruff + mypy clean.
+
+**Fact-check (oracle/differential).** For all 13 linear sensors, the interface's max AND min —
+whole-record and scoped to July 2015 — match an independent `pandas` computation on the raw frame
+on **both value and timestamp** (39 checks, all exact). The circular sensor `wd (deg)` is correctly
+excluded (routed to circular statistics, not a naive max). Anchored the oracle to the raw CSV bytes:
+`grep` on `04.07.2015 16:*` shows the physical 37.28 reading and that the six-reading mean is 37.038
+→ 37.04 (the old answer).
+
+### v1: typo tolerance — misspelled sensor/intent words now resolve, transparently
+
+**Gap.** The router matches intent/sensor keywords *exactly*, so any misspelling
+("higest tempreature") found no intent/sensor and fell through to the semantic-fallback
+"did you mean…" path (or, with the LLM on, was rescued by the model). Offline, a typo = no answer.
+
+**Fix.** New `spell_normalize` (`interface_parsing.py`) repairs typos of domain words *before*
+routing, hooked at the top of `Interface.ask`. It is deliberately conservative so it can never
+silently change a question's meaning: only words ≥5 chars are corrected, and only onto vocabulary
+words ≥5 chars (so the short, easily-confused keywords `max/min/hot/cold/top/vs` stay exact-only —
+fuzzy-mapping a typo to "max" vs "min" could flip the answer); the vocabulary is derived
+automatically from `SENSOR_ALIASES` + `INTENTS`; matching uses `difflib` at a **0.85** cutoff.
+Every correction is returned and surfaced on the answer ("(Reading 'higest' as 'highest'.)") and in
+a new `Answer.spelling` field — the guess is shown, never hidden, keeping routing auditable.
+
+**Cutoff set from measured ratios, not guessed.** Single-char typos of the domain words all score
+≥ 0.857 (`maximun`→`maximum`, `avearge`→`average`, `anomoly`→`anomaly`); the nearest false positive
+(`monthly`→`month`, where "month" leaks into the vocab from the "next month" intent phrase) sits at
+0.833 and is correctly rejected. A 21-word safety sweep (seasons, months, "during", "weather",
+"rainfall"…) yields **zero** false corrections.
+
+**Verification.** New `tests/test_interface_spelling.py` (correction table, the
+legitimate-word safety sweep, numbers untouched, end-to-end routing + surfaced note). End-to-end on
+real data: "higest tempreature / lowest humidty / maximun presure in July 2015" all route correctly
+and return the exact raw extrema (37.28 / 27.53 / 998.21).
+
+**Extended after testing a heavily-garbled query** ("waht si umidty tocber 2012"): three additions.
+(1) **Month/season names added to the spell vocab**, so a misspelled *period* is repaired and the
+scope still resolves ("octber"→october, "septmber"→september, "wnter"→winter) — previously only the
+sensor/intent word was fixed and the month was silently lost. (2) A **clarification guardrail**: when
+a word looks like a misspelled sensor/period/intent term but is too uncertain to auto-correct, the
+system **stops and asks** ("I read 'umidty' as 'humidity', but I couldn't understand 'tocber' (did
+you mean 'october'?). Could you check the spelling and ask again?") — returning a no-answer response
+(`intent=None`, `value=None`) rather than computing on a guessed scope. This upholds the
+verifiable-answers premise: never silently answer a different question than was asked. (3)
+`Answer.ignored` records the flagged words.
+
+**The guardrail trigger is a measured *gray zone*, not a blocklist.** The hard part was separating a
+misspelled domain word from an ordinary English word that merely appears in a query ("because",
+"degrees", "second", "staying"). A first attempt (flag any unrecognized ≥5-char word) broke 10 tests
+by blocking legitimate causal/threshold/ordinal questions. Fix: `clarifications_needed` fires only
+when a word's similarity to its nearest domain term is in **[0.75, 0.85)** — genuine typos score
+≥0.77 ("tocber"→october 0.77, "lowset"→lowest 0.83) while incidental words all sit ≤0.71 ("because"
+0.67, "degrees" 0.67, "staying" 0.71). 0.75 splits them cleanly; below it, words are left to normal
+routing / the semantic off-topic fallback. So the final behaviour: **auto-correct** confident typos,
+**stop-and-ask** on gray-zone near-misses (with a "did you mean?"), **answer normally** everything
+else, and **redirect** off-topic — verified by a spectrum demo plus parametrized tests for each band.
+
+### v1: ambiguity notes — answer the best guess, but flag what was assumed
+
+**Extending "don't guess silently" from spelling to the whole question.** When a query
+under-specifies its **sensor**, **statistic**, or **period** (or matches **two intents**), the router
+used to silently default (sensor→temperature, missing-statistic→full summary, no-period→whole
+record). It now still answers — the user chose *answer + confirm note* over block-and-ask — but
+appends a short note inviting a refinement, and records the defaults in a new `Answer.assumptions`
+field. Examples: "what was the maximum in 2015" → *"ℹ️ Assuming you mean temperature — name another
+sensor (humidity, pressure, wind, …) if not."*; "temperature in 2015" → *"…full overview — ask for
+the max, min or average for just one."*; "hottest temperature" → *"…covering the whole 2009–2016
+record — name a year, month or season to narrow it."*; "maximum temperature trend in 2015" → *"…read
+as a 'max' question — say 'trend' if you meant that."*
+
+**Kept quiet on fully-specified questions and on implied sensors.** A note fires only for the seven
+single-sensor intents, and never when the sensor/statistic/period was named. Temperature-implying
+words that aren't sensor aliases ("warmest", "coolest") are treated as naming temperature, so they
+don't trigger a spurious "assuming temperature" note. The whole-record year is de-artefacted (an
+hourly resample leaves a lone Jan-1 bucket, which naïvely read as "2009–2017"; corrected to 2016).
+New `tests/test_interface_assumptions.py` (7 tests) covers each case plus the no-note and
+suppression paths; a fully-specified-query sweep shows zero spurious notes.
+
+**Generalised the "ask again" to any not-understood query — not a word list.** The ask-to-clarify
+behaviour is not tied to specific trigger words: the existing `_semantic_fallback` is a general
+catch-all — *any* question that can't be mapped to an intent+sensor+scope reaches it (gibberish,
+vague phrasing, multi-topic), and it either asks the user to confirm the closest on-topic
+interpretation or redirects with an invitation to rephrase. Reworded both branches to explicit
+"could you rephrase to confirm?" / "could you rephrase and try again?" prompts so the whole system
+reads consistently: understood → answer (with assumption notes if defaults were used); uncertain
+word → did-you-mean guardrail; not understood at all → ask again to verify. (Boundary, stated
+honestly: "understood" means the deterministic parser or the semantic matcher can map it; with the
+LLM enabled, understanding is broader, but the numbers are still computed by code either way.)
+
+### v1: routing bug — "du(ring)" substring tripped the chart-legend explainer
+
+**Found while fact-checking the max fix.** "what was the maximum temperature **during** July 2015?"
+mis-routed to the legend/marker explainer ("a dashed amber ring marks a borderline point…") instead
+of computing the max. Root cause: `resolve_legend_query` tested its marker-cue words
+(`dot/circle/ring/…`) with raw substring membership (`w in q`), and **"ring" is a substring of
+"during"**; combined with "what" (a meaning cue) it fired. **Fix:** match marker cues on word
+boundaries (`\bring\b` via a precompiled regex), same for the borderline-marker set. Genuine legend
+questions ("what does the amber ring mean?") still route; the two `during` phrasings now route to
+`max`. Regression asserts added to `test_resolve_legend_query_maps_markers`.
+
+---
+
+## 2026-07-28
+
+### v1: semantic fallback router — no more raw "couldn't map" error; off-topic guardrail
+
+**What changed.** When a question matches neither an intent nor a sensor keyword it used to hit a
+raw dump: *"I couldn't map that to a known query. Try max / min / …"*. Replaced that with a
+**semantic fallback router** (`interface.py`, `Interface._semantic_fallback`): the question's
+*meaning* is measured against the sensor knowledge base with the project's dense Sentence-BERT
+retriever (`rag_system.dense_retriever`, TF-IDF fallback if no encoder), and one of two things
+happens:
+- **on-topic but unclear** (cosine ≥ `DOMAIN_THRESHOLD`) → a targeted suggestion naming the closest
+  sensor + an example query (`SENSOR_HINTS`), e.g. *"how sunny is it"* → *"you're asking about
+  temperature — try 'hottest day in 2015'"*.
+- **off-topic** (below threshold) → a polite redirect to the dataset's scope, e.g. *"what is my
+  dog's name"* → *"I can only answer questions about this weather dataset…"*.
+
+**Threshold set from evidence, not guessed.** Measured dense cosine on sample queries: off-topic
+tops out at ~0.12 ("dog's name" 0.07, "hello" 0.12), on-topic starts at ~0.18 ("how sunny is it"
+0.42, "what is the air like" 0.41). `DOMAIN_THRESHOLD = 0.15` sits in that gap; documented inline
+alongside the numbers, in the same justify-the-parameter style as the anomaly threshold/contamination
+sweeps. Deliberately conservative — wrongly redirecting a borderline weather question is a smaller
+harm than confidently answering an off-topic one.
+
+**Why it uses the dense retriever, not TF-IDF.** Measured evidence: TF-IDF returns *empty* for
+vocabulary-mismatch weather queries ("how sunny is it", "is it a nice day") — the exact keyword
+weakness the dense encoder exists to fix (Reimers & Gurevych, 2019). The router therefore uses the
+semantic encoder for relevance, degrading safely to TF-IDF if no backend. Built lazily on first
+unroutable question (loads a model once); injectable via `Interface(domain_retriever=…)` so tests
+exercise both branches offline without the encoder.
+
+**Trust untouched.** The fallback produces no number and attaches no chart (`sensors=[]`), so the
+computation-vs-explanation guarantee is unaffected.
+
+**Verification.** Drove the real interface end-to-end with the live dense encoder: off-topic → redirect,
+"how sunny is it" → temperature suggestion, "is the air heavy and thick" → routes normally (density
+aliases, never reaches the fallback), "hottest day in 2015" → normal max answer. Added 3 tests
+(off-topic redirect, on-topic suggestion, empty-match→off-topic) and updated the one test that asserted
+the old wording. **355 passed / 1 skipped · ruff clean · mypy clean · verify 35/35.**
+
+### Report support (no code): confirmed the real citation list + a related-work paper
+
+- **Papers actually used are already in `v1/report/REPORT.md` §References** — 18 real Harvard-style
+  entries, each mapping to a technique in the code (STL: Cleveland et al. 1990; ARIMA: Box & Jenkins
+  1970; Isolation Forest: Liu, Ting & Zhou 2008; LOF: Breunig et al. 2000; One-Class SVM: Schölkopf
+  et al. 2001; Matrix Profile: Yeh et al. 2016; LSTM-AE: Malhotra et al. 2015; TCN: Bai, Kolter &
+  Koltun 2018; deep-AD review: Pang et al. 2021; RAG: Lewis et al. 2020; TF-IDF: Sparck Jones 1972;
+  BM25: Robertson & Zaragoza 2009; LSA: Deerwester et al. 1990; Sentence-BERT: Reimers & Gurevych
+  2019; hallucination: Ji et al. 2023; benchmark-flaws: Wu & Keogh 2021; DAD/M100 datasets: Vigoya
+  et al. 2020 / Borghesi et al. 2023). Not fabricated — pulled with line-number evidence.
+- **arXiv 2503.01385 (Q-NL Verifier, Schwabe et al. 2025)** — thematically related (an NL interface to
+  structured data with a *verifier*), but a different problem: knowledge-graph QA, a *learned* verifier
+  of NL↔query paraphrase equivalence, and an LLM that *produces the query* (text-to-query). Good
+  related-work / contrast citation for the text-to-query family this project positions against; not a
+  basis the work builds on. Flagged for the literature review.
+- **Added a prioritised shortlist** to `report/notes/LITERATURE_TOOLUSE_TEXT2SQL.md` §5.0 (essential
+  4: PAL, Program-of-Thoughts, one text-to-SQL anchor, Tan et al. 2024; optional ≤1 tool-use;
+  explicit "skip" list for LLM-forecasting papers). New §5.5 (LLMs + time series, incl. Tan et al.
+  as a stance-supporting counter-argument) and §5.6 (Q-NL Verifier as related-work + future-work,
+  the one entry actually read/verified, not recalled). No code.
+
+### Explainer deck: `v1/report/v1_how_it_works.pptx` (29 slides)
+
+- Plain-English walkthrough for a general university audience, built from the actual code
+  (`interface_parsing.py` INTENTS/SENSOR_ALIASES/`resolve_period`, `interface.py` router,
+  `query_engine.py`, `rag_system.py`, `llm.py` SYSTEM_PROMPT + faithfulness gate). Traces one
+  question — "maximum temperature during July 2015?" — through the 5 layers (understand → compute →
+  RAG context → explain → faithfulness gate).
+- **Honesty point made explicit** (slide 11): the LLM does *not* choose `max`; deterministic keyword
+  routing does. Optional planner/agent modes (where the LLM *does* pick tools) covered separately,
+  with the guarantee restated: LLM may choose *what* to compute, never computes it.
+- **Equation slides added** (12b/12c, on request): descriptive-stat formulas the truth layer
+  evaluates — max/min, mean μ=(1/n)Σxᵢ, sample std σ (n−1), range, Pearson ρ — plus detector maths
+  (z-score, Mahalanobis D², Isolation Forest path-length score s(x)=2^(−E[h(x)]/c(n))). All standard
+  textbook definitions; the point framed as "code evaluates them exactly", not the reference itself.
+- Built with `python-pptx` in `code/.venv`; visually verified by rendering to PDF/PNG via libreoffice
+  (Greek/sub-super glyphs, code blocks, diagrams all clean). One illustrative 33.75 °C figure is
+  labelled illustrative on the compute slide (the engine returns the real July-2015 value at runtime).
+- **Expanded architecture section** (on request): 4 diagram slides added — data-flow pipeline
+  (question → structured request → exact result → +context → trust-labelled answer, with module names
+  and the worked example under each stage), a code-module component map (entry → interface.py →
+  understand/compute/context/optional-AI), and two drill-downs (inside UNDERSTAND: the three parsers
+  converging to a structured request; inside COMPUTE: the router dispatching to get_max etc.).
+- **Removed the "AI makes the text human/friendly" framing** (on request): the default output is now
+  presented as the deterministic, trust-labelled template answer; any local LLM is shown only as an
+  optional, gated re-phraser that never changes a number. Retitled the old EXPLAIN slide/layer to
+  PRESENT and reworded title, core-principle, recap and summary slides to match.
+- **Styling**: settled on a normal Office-style palette (dark-blue headers, blue primary with green
+  "truth/gate" and orange "optional-AI" accents, white slides) after trying a greyscale pass and
+  reverting it on request. Applied via value→value colour remaps over the build script.
+- **Removed all em/en dashes from slide text** (on request): replaced with commas / "to" (ranges) and a
+  hollow-dot sub-bullet; the mathematical minus signs in the formula slides (n−1, xᵢ−μ) are deliberately
+  kept, as those are operators, not text dashes.
+- **De-coloured the text** (on request): all body/emphasis text is now normal dark (bold carries
+  emphasis instead of colour); code blocks are monochrome; PASS/FAIL and section/node titles no longer
+  coloured. Colour is retained only on structural elements (title bars, number badges, box borders),
+  i.e. a normal-looking deck with plain text.
+- **Removed remaining light-blue tinted text** (on request): kept the dark navy title bars and
+  title/summary slides but turned their tinted text white/neutral; code text made neutral light-grey
+  (blue tint removed). Net: black text on white areas, white text on the dark bars, no tinted text.
+- **Added a faithfulness-gate mechanism slide** (on request): a step-by-step of the actual check
+  (strip clock times, extract numbers, match with rounding tolerance but near-exact years/counts,
+  invented vs dropped, discard-and-template on failure), plus a PASS/FAIL worked example and the
+  documented ≤12-integer trade-off. Sits right after the high-level gate slide.
+
+## 2026-07-17
+
+### v1: assessment of remaining work, mypy/ruff cleanup, and a literature-positioning note
+
+**Note on grading: deliberately not recorded here.** A component-by-component assessment was done
+during this session against a published UK MSc rubric, but that rubric was **not Loughborough's**
+(Loughborough doesn't publish its dissertation criteria — the public pages only point to internal
+Learn handbooks), and marking criteria change year to year. Writing specific weightings, marks or
+bands into the project record would create a stale reference that later work might trust. **Pull
+the real criteria off Learn when needed.** What's recorded below are the substantive gaps found,
+which hold regardless of any particular rubric or its weightings.
+
+**Where the remaining work actually is: the write-up, not the code.** The computational work is
+complete and verified (353 tests + 1 skipped, 35/35 `verify_results.py`, ruff clean, mypy clean).
+The evaluation is the project's strongest asset by a wide margin — McNemar significance test,
+bootstrap CIs, 8-seed benchmarking, point-adjusted metrics, ablation, adversarial probe, honest
+negative results throughout. Two written components are materially weaker than the work they
+describe, and both are fixable with prose alone:
+
+- **Literature review**: rich and correct on *methods* (Box & Jenkins, Cleveland, Liu, Sparck
+  Jones — all primary sources, all should stay), but **one citation** (Ji et al. 2023) in the
+  *contribution area*. Depth collapses exactly where §1.6 claims novelty, which is the one place
+  it can't afford to. **No search-strategy description at all** — no databases, search terms, or
+  inclusion criteria, so a reader can't tell whether the gap is real or just unsearched. Newest
+  citation 2023 against a 2026 report. §2 largely *describes* rather than *critiques* (the Wu &
+  Keogh usage is the honourable exception, and the model for what the rest should look like).
+- **Conclusions**: missing a critical reflection on the dissertation *as research* — major
+  achievements, barriers, innovative aspects. §7's limitations are excellent but they're
+  limitations *of the system*, not reflection *on the work*. §6 also barely links its findings
+  back to §2's literature (one genuine link: Wu & Keogh). Recommendations to practice/academia —
+  who benefits, and how the knowledge gets used — aren't really addressed; future work isn't the
+  same thing.
+
+**Fixed: mypy and ruff are now clean.** Two mypy errors in `src/llm.py` (`per_case` in
+`adversarial_faithfulness_probe` was untyped, so the two `sum()` generators over it inferred
+`object`) → annotated `list[dict[str, Any]]`. Two pre-existing ruff issues in `verify_results.py`
+(unsorted imports, a `lambda` assignment at check #14) → import block sorted (`query_engine as qe`
+split onto its own `# noqa: E402` line, still after `sys.path.insert`), lambda rewritten as
+`def det(noisy)`. Verified by driving the real code, not just re-running the linters: `verify_results.py`
+still **35/35** (exit 0), `evaluation.benchmark` with the new `def det` returns recall 0.867, and
+`adversarial_faithfulness_probe` against live Ollama returns correctly-typed `n_total_runs: int` /
+`invention_rate: float` and still catches the known "3.11 degrees hotter than 2012" fabrication.
+
+**New note: `v1/report/notes/LITERATURE_TOOLUSE_TEXT2SQL.md`** — in-depth write-up material for
+the literature review's two biggest gaps. **Write-up only; no code required, and that's the point
+of the document.**
+- **Tool-use**: `agent.py` already *is* the program-aided/tool-augmented-LM pattern — the doc maps
+  it concept-by-concept (`TOOLS` catalogue ↔ function schemas, `execute_step` ↔ validated
+  execution, `compose`'s faithfulness gate ↔ grounded synthesis). The code is done; it just was
+  never named or cited, so it reads as a personal hunch rather than correct application of an
+  established principle. The genuine addition on top of the standard pattern: tool-use grounds the
+  *number*, but doesn't verify the *prose wrapped around it* — that's what `llm.faithfulness()`
+  adds, and the adversarial probe already evidences it.
+- **Text-to-SQL**: deliberately **not** built. Cited as the competing paradigm. The argument: this
+  project's architecture *is* a semantic parser, and not acknowledging that field invites "does
+  the author know this exists?" Text-to-SQL guarantees the database executes correctly but nothing
+  verifies the generated query answers the question *asked* — valid-but-semantically-wrong SQL
+  executes silently. This project constrains the query space to pre-verified operations
+  (`execute_step` rejects unknown tools/sensors/operators before execution), trading expressiveness
+  for verifiability. **This reframes §7.1's confessed "defined set of intents" limitation from an
+  apology into the mechanism that delivers the guarantee** — highest-leverage single change
+  available to the write-up, one paragraph.
+- **Honesty constraint recorded prominently**: this project solves an *easier* problem than
+  text-to-SQL (72 questions, fixed 14-sensor schema, ~13 intents vs. thousands of questions over
+  unseen schemas needing joins/nesting). The 100% routing figure must **never** be compared against
+  text-to-SQL benchmark scores — category error, and an examiner would spot it instantly. Frame as
+  a trade-off, never a win.
+- **Citations are listed as a search list, not a bibliography**, with an explicit warning that
+  every one is recalled from training, may be wrong in author/year/venue, and must be independently
+  verified before use — a fabricated citation is an academic-integrity issue and it's the user's
+  name on the submission.
+
+**Verdict on remaining work: the code is done; what's left is the write-up.** The literature
+review, the conclusions, and the finishing pass on structure/referencing are all fixable with
+prose, and all are already supported by evidence that exists. A text-to-SQL baseline experiment
+was considered and **argued against**: ~1–2 days of work adding evidence to the evaluation — which
+is already the strongest part of the project and doesn't need more — versus comparable effort
+spent on the two written components that are genuinely weak. Do the writing first.
+
+---
+
 ## 2026-07-16
 
 ### v1: today's `recommend`/correlation work folded into `docs/evaluation/` as citable evidence (4 of 4)

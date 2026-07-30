@@ -17,9 +17,21 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from src import (preprocess, query_engine as qe, interface, anomaly, analysis,  # noqa: E402
-                 evaluation, forecasting, reasoning, llm, rag_system, retrieval_eval, clustering,
-                 query_coverage)
+from src import (  # noqa: E402
+    analysis,
+    anomaly,
+    clustering,
+    evaluation,
+    forecasting,
+    interface,
+    llm,
+    preprocess,
+    query_coverage,
+    rag_system,
+    reasoning,
+    retrieval_eval,
+)
+from src import query_engine as qe  # noqa: E402
 
 DATA = ROOT / "data" / "jena_climate_2009_2016.csv"
 S = "T (degC)"
@@ -138,8 +150,9 @@ check("forecast backtest MASE finite & < 1.5", np.isfinite(bt["mase"]) and bt["m
       f"95%CI=[{bt['mase_ci_low']:.2f},{bt['mase_ci_high']:.2f}], n_folds={bt['folds']})")
 
 # 14. multi-seed anomaly benchmark recall is solid
-det = lambda noisy: anomaly.zscore_anomalies(
-    analysis.decompose(noisy, period=24)["resid"].dropna(), threshold=4.0)
+def det(noisy):
+    return anomaly.zscore_anomalies(
+        analysis.decompose(noisy, period=24)["resid"].dropna(), threshold=4.0)
 bench = evaluation.benchmark(df[S].iloc[:4000], det, seeds=range(4), n=30, magnitude=6.0)
 check("benchmark recall mean > 0.5", bench["recall"]["mean"] > 0.5, f"R={bench['recall']['mean']:.2f}")
 

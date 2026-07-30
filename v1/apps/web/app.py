@@ -43,22 +43,28 @@ SUGGESTIONS = [
 ]
 
 
-def load_default_df() -> pd.DataFrame:
-    """Load + preprocess the full Jena dataset (used when no df is injected)."""
+def load_default_df() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load + preprocess the full Jena dataset (used when no df is injected).
+
+    Returns ``(df, raw)``: ``df`` is the hourly-mean grid used by the analysis/anomaly layers;
+    ``raw`` is the native 10-min grid used for exact extrema (hourly averaging smooths peaks).
+    """
     print("Loading dataset...")
-    df = preprocess.align(preprocess.clean(preprocess.load_data(DATA)), freq="1h")
+    raw = preprocess.clean(preprocess.load_data(DATA))
+    df = preprocess.align(raw, freq="1h")
     print(f"Ready: {df.shape[0]:,} rows, {df.shape[1]} sensors.")
-    return df
+    return df, raw
 
 
-def create_app(df: pd.DataFrame | None = None) -> Flask:
+def create_app(df: pd.DataFrame | None = None, raw: pd.DataFrame | None = None) -> Flask:
     """Build the Flask app serving `df` (or the full dataset if None).
 
     Data loading lives here, not at import time, so the routes can be tested against a
-    small in-memory frame without reading the 70k-row CSV.
+    small in-memory frame without reading the 70k-row CSV. `raw` is the native-resolution
+    frame for exact max/min; when omitted, the Interface falls back to `df`.
     """
     if df is None:
-        df = load_default_df()
+        df, raw = load_default_df()
     sensors = list(df.columns)
 
     app = Flask(__name__, static_folder=str(HERE), static_url_path="")
@@ -92,7 +98,7 @@ def create_app(df: pd.DataFrame | None = None) -> Flask:
         if not question:
             return jsonify({"error": "empty question"}), 400
         try:
-            iface = interface.Interface(df, use_llm=use_llm, model=model, detector=detector)
+            iface = interface.Interface(df, use_llm=use_llm, model=model, detector=detector, raw=raw)
             # Seed conversation memory so follow-ups ("what about 2014?") resolve against prior turns.
             iface.history = [h for h in history if isinstance(h, dict)][-6:]
             ans = iface.ask(question)

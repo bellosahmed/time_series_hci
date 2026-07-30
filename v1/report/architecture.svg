@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 1290" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .h    { font-weight:700; font-size:17px; }
+      .sub  { font-size:13px; fill:#334155; }
+      .small{ font-size:11.5px; fill:#475569; }
+      .badge{ font-weight:700; font-size:10px; fill:#ffffff; }
+      .lg   { font-size:12px; fill:#334155; }
+      .pill { font-size:13px; fill:#ffffff; font-weight:600; }
+      .num  { font-weight:700; font-size:14px; fill:#ffffff; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="880" height="1290" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="440" y="42" text-anchor="middle" font-size="25" font-weight="700" fill="#0f172a">Verifiable NL Analytics &#8212; System Architecture</text>
+  <text x="440" y="68" text-anchor="middle" font-size="13.5" fill="#64748b">Code is the source of every number; the LLM only rephrases, and the gate verifies it.</text>
+
+  <!-- Input pill -->
+  <rect x="255" y="88" width="370" height="44" rx="22" fill="#1e293b"/>
+  <text x="440" y="115" text-anchor="middle" class="pill">User question &#8212; &#8220;maximum temperature in July 2015?&#8221;</text>
+  <line x1="440" y1="132" x2="440" y2="168" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 1 UNDERSTAND -->
+  <rect x="140" y="170" width="600" height="96" rx="14" fill="#eaf1fe" stroke="#3f6fd6" stroke-width="1.6"/>
+  <circle cx="172" cy="200" r="13" fill="#3f6fd6"/>
+  <text x="172" y="205" text-anchor="middle" class="num">1</text>
+  <text x="196" y="205" class="h" fill="#1a3a7a">UNDERSTAND</text>
+  <text x="196" y="228" class="sub">Deterministic parser: intent &#183; sensor &#183; period &#183; threshold</text>
+  <text x="196" y="248" class="small">Decides <tspan font-style="italic">what</tspan> to compute &#8212; computes nothing. Routing is auditable.</text>
+  <rect x="560" y="184" width="164" height="30" rx="15" fill="#fff4e3" stroke="#dd8b1f"/>
+  <text x="642" y="203" text-anchor="middle" font-size="10.5" font-weight="700" fill="#8a4b00">LLM: gap-fill only</text>
+  <line x1="440" y1="266" x2="440" y2="300" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 2 TRUTH / COMPUTE -->
+  <rect x="140" y="302" width="600" height="256" rx="14" fill="#e0ebff" stroke="#2f5fc7" stroke-width="2.6"/>
+  <circle cx="172" cy="332" r="13" fill="#2f5fc7"/>
+  <text x="172" y="337" text-anchor="middle" class="num">2</text>
+  <text x="196" y="337" class="h" fill="#12326f">TRUTH / COMPUTE LAYER</text>
+  <text x="196" y="356" class="small" font-weight="600" fill="#12326f">The only place numbers are created &#8212; no LLM here.</text>
+
+  <!-- row a: exact stats -->
+  <rect x="158" y="366" width="564" height="50" rx="9" fill="#ffffff" stroke="#c7d7f5"/>
+  <text x="172" y="387" class="sub" font-weight="600">Exact statistics</text>
+  <text x="172" y="405" class="small">max &#183; min &#183; mean &#183; std &#183; correlation &#183; threshold &#183; missing</text>
+  <rect x="560" y="379" width="150" height="24" rx="12" fill="#2f9e5f"/>
+  <text x="635" y="395" text-anchor="middle" class="badge">PROVEN = pandas</text>
+
+  <!-- row b: detectors -->
+  <rect x="158" y="422" width="564" height="66" rx="9" fill="#ffffff" stroke="#c7d7f5"/>
+  <text x="172" y="443" class="sub" font-weight="600">Detectors</text>
+  <text x="172" y="461" class="small">z-score &#183; Isolation Forest &#183; LOF &#183; One-Class SVM</text>
+  <text x="172" y="478" class="small">Mahalanobis + flat-line &#183; Matrix Profile &#183; CNN / LSTM autoencoder</text>
+  <rect x="536" y="443" width="174" height="24" rx="12" fill="#dd8b1f"/>
+  <text x="623" y="459" text-anchor="middle" class="badge">REPRODUCIBLE + BENCHMARKED</text>
+
+  <!-- row c: forecasting -->
+  <rect x="158" y="494" width="564" height="50" rx="9" fill="#ffffff" stroke="#c7d7f5"/>
+  <text x="172" y="515" class="sub" font-weight="600">Forecasting</text>
+  <text x="172" y="533" class="small">STL deseasonalise, then ARIMA</text>
+  <rect x="560" y="507" width="150" height="24" rx="12" fill="#dd8b1f"/>
+  <text x="635" y="523" text-anchor="middle" class="badge">BACKTESTED &#183; MASE 0.83</text>
+
+  <line x1="440" y1="558" x2="440" y2="592" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 3 CONTEXT (RAG) -->
+  <rect x="140" y="594" width="600" height="82" rx="14" fill="#eef3fd" stroke="#6b8fd8" stroke-width="1.6"/>
+  <circle cx="172" cy="624" r="13" fill="#6b8fd8"/>
+  <text x="172" y="629" text-anchor="middle" class="num">3</text>
+  <text x="196" y="629" class="h" fill="#25467f">CONTEXT (RAG)</text>
+  <text x="196" y="652" class="sub">Retrieves the sensor description as background for wording.</text>
+  <text x="196" y="670" class="small">Supplies <tspan font-weight="700">prose</tspan>, never a number &#8212; cannot introduce a wrong value.</text>
+  <line x1="440" y1="676" x2="440" y2="710" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 4 EXPLAIN (LLM) -->
+  <rect x="140" y="712" width="600" height="96" rx="14" fill="#fff4e3" stroke="#dd8b1f" stroke-width="1.8"/>
+  <circle cx="172" cy="742" r="13" fill="#dd8b1f"/>
+  <text x="172" y="747" text-anchor="middle" class="num">4</text>
+  <text x="196" y="747" class="h" fill="#8a4b00">EXPLAIN &#183; local LLM (Ollama)</text>
+  <text x="196" y="770" class="sub">Rephrases the exact computed fact into 1&#8211;2 friendly sentences.</text>
+  <text x="196" y="789" class="small">LLM off: falls back to a deterministic template &#8212; the system still answers.</text>
+  <rect x="566" y="726" width="158" height="30" rx="15" fill="#ffffff" stroke="#dd8b1f"/>
+  <text x="645" y="745" text-anchor="middle" font-size="10.5" font-weight="700" fill="#8a4b00">LLM: language only</text>
+  <line x1="440" y1="808" x2="440" y2="842" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 5 FAITHFULNESS GATE -->
+  <rect x="140" y="844" width="600" height="118" rx="14" fill="#e7f6ec" stroke="#2f9e5f" stroke-width="2"/>
+  <circle cx="172" cy="874" r="13" fill="#2f9e5f"/>
+  <text x="172" y="879" text-anchor="middle" class="num">5</text>
+  <text x="196" y="879" class="h" fill="#14612f">FAITHFULNESS GATE</text>
+  <text x="196" y="901" class="sub">Every number in the prose must trace to a computed fact</text>
+  <text x="196" y="919" class="small">(rounding 37.04 to 37.0 and clock reformat 16:00 to 4pm are tolerated).</text>
+  <rect x="196" y="928" width="250" height="26" rx="13" fill="#2f9e5f"/>
+  <text x="321" y="945" text-anchor="middle" class="badge">PASS: all numbers trace &#8212; show LLM prose</text>
+  <rect x="458" y="928" width="266" height="26" rx="13" fill="#d64545"/>
+  <text x="591" y="945" text-anchor="middle" class="badge">FAIL: invented number &#8212; use template instead</text>
+  <line x1="440" y1="962" x2="440" y2="996" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Answer pill -->
+  <rect x="255" y="998" width="370" height="44" rx="22" fill="#1e293b"/>
+  <text x="440" y="1025" text-anchor="middle" class="pill">Trust-labelled answer</text>
+
+  <!-- Legend -->
+  <line x1="140" y1="1072" x2="740" y2="1072" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="140" y="1096" font-size="12.5" font-weight="700" fill="#0f172a">Who acts</text>
+  <rect x="140" y="1106" width="16" height="16" rx="4" fill="#e0ebff" stroke="#2f5fc7"/>
+  <text x="164" y="1118" class="lg">Deterministic code &#8212; source of truth</text>
+  <rect x="420" y="1106" width="16" height="16" rx="4" fill="#fff4e3" stroke="#dd8b1f"/>
+  <text x="444" y="1118" class="lg">LLM &#8212; language only, gated</text>
+
+  <text x="140" y="1152" font-size="12.5" font-weight="700" fill="#0f172a">Strength of guarantee</text>
+  <rect x="140" y="1162" width="132" height="20" rx="10" fill="#2f9e5f"/>
+  <text x="206" y="1176" text-anchor="middle" class="badge">PROVEN = pandas</text>
+  <text x="284" y="1176" class="lg">one correct answer (a theorem)</text>
+  <rect x="140" y="1192" width="182" height="20" rx="10" fill="#dd8b1f"/>
+  <text x="231" y="1206" text-anchor="middle" class="badge">REPRODUCIBLE + BENCHMARKED</text>
+  <text x="334" y="1206" class="lg">an evaluated estimate, not a theorem</text>
+
+  <!-- Footnote: agentic path -->
+  <line x1="140" y1="1230" x2="740" y2="1230" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="140" y="1252" font-size="11" fill="#64748b"><tspan font-weight="700">Agentic path (agent.py):</tspan> for multi-step questions the LLM plans which truth-layer tools to call;</text>
+  <text x="140" y="1268" font-size="11" fill="#64748b">the executor runs them (= pandas), and the same faithfulness gate checks the synthesis.</text>
+</svg>

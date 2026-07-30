@@ -23,6 +23,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from typing import Any
 
 OLLAMA_URL = "http://localhost:11434"
 
@@ -506,7 +507,7 @@ def adversarial_faithfulness_probe(cases: list[tuple[str, str, str | None, str |
     """
     if not is_available():
         return {"available": False}
-    per_case = []
+    per_case: list[dict[str, Any]] = []
     for question, computed, context, inferred in cases:
         facts = " ".join(filter(None, [computed, context, inferred]))
         invented_runs = 0

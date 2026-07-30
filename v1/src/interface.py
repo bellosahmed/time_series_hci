@@ -32,6 +32,7 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
     LEGEND_EXPLANATIONS,
     SENSOR_ALIASES,
     _coerce_date,
+    clarifications_needed,
     correlation_strength,
     detect_intent,
     hour_mask,
@@ -55,6 +56,7 @@ from .interface_parsing import (  # noqa: F401  re-exported for callers and test
     resolve_secondary_period,
     resolve_sensors,
     resolve_threshold,
+    spell_normalize,
     split_target_clause,
 )
 
@@ -77,6 +79,9 @@ class Answer:
     detector: str | None = None  # which network detector produced the anomaly answer (transparency)
     resolved: str | None = None  # standalone rewrite of a follow-up (transparency), if any
     understood: str | None = None  # trace of what the deterministic parser found (transparency)
+    spelling: list = field(default_factory=list)  # typo fixes applied before routing: (orig, fixed)
+    ignored: list = field(default_factory=list)  # meaningful words the router did not understand
+    assumptions: list = field(default_factory=list)  # defaults the router had to assume (transparency)
 
 
 # Selectable **network-level** anomaly detectors (all read the whole in-scope sensor frame and return a
@@ -92,12 +97,55 @@ NETWORK_DETECTORS: dict = {
 DEFAULT_DETECTOR = "portfolio"
 
 
+# --- Semantic fallback router --------------------------------------------------------------
+# When a question matches no intent *and* no sensor keyword, it reaches the fallback below.
+# Rather than show a raw "I couldn't map that" error, we measure the question's *meaning*
+# against the sensor knowledge base with a dense encoder (Sentence-BERT; Reimers & Gurevych,
+# 2019) and either give a targeted on-topic suggestion or a polite off-topic redirect.
+#
+# DOMAIN_THRESHOLD (cosine) separates the two. It was set from measured scores, not guessed:
+# off-topic queries score <= ~0.12 ("what is my dog's name" 0.07, "hello there" 0.12) while
+# on-topic ones score >= ~0.18 ("how sunny is it" 0.42, "what is the air like" 0.41). 0.15 sits
+# in that gap. It is deliberately conservative: wrongly redirecting a borderline weather question
+# is a smaller harm than confidently answering an off-topic one.
+DOMAIN_THRESHOLD = 0.15
+
+# Friendly name + one example query per sensor, so a semantic match becomes a concrete, helpful
+# suggestion ("you seem to be asking about humidity -- try 'how humid was summer 2013'") instead
+# of a generic error.
+SENSOR_HINTS: dict[str, tuple[str, str]] = {
+    "T (degC)": ("temperature", "hottest day in 2015"),
+    "Tpot (K)": ("potential temperature", "average potential temperature in 2013"),
+    "Tdew (degC)": ("the dew point", "highest dew point in summer 2014"),
+    "rh (%)": ("humidity", "how humid was summer 2013"),
+    "VPmax (mbar)": ("saturation vapour pressure", "max saturation vapour pressure in 2012"),
+    "VPact (mbar)": ("actual vapour pressure", "average vapour pressure in 2014"),
+    "VPdef (mbar)": ("the vapour-pressure deficit", "highest vapour-pressure deficit in 2015"),
+    "sh (g/kg)": ("specific humidity", "average specific humidity in 2013"),
+    "H2OC (mmol/mol)": ("water-vapour concentration", "max water-vapour concentration in 2012"),
+    "rho (g/m**3)": ("air density", "average air density in winter 2013"),
+    "p (mbar)": ("air pressure", "lowest pressure in 2014"),
+    "wv (m/s)": ("wind speed", "average wind speed in winter 2012"),
+    "max. wv (m/s)": ("wind gusts", "the strongest wind gust in 2015"),
+    "wd (deg)": ("wind direction", "the prevailing wind direction in 2013"),
+}
+
+
 class Interface:
     """Answer natural-language questions about a prepared DataFrame."""
 
     def __init__(self, df: pd.DataFrame, use_llm: bool = False, model: str = llm.DEFAULT_MODEL,
-                 detector: str = DEFAULT_DETECTOR):
+                 detector: str = DEFAULT_DETECTOR, domain_retriever=None,
+                 raw: pd.DataFrame | None = None):
         self.df = df
+        # `df` is the hourly-mean grid the analysis/anomaly/forecast layers need (regularly spaced).
+        # `raw` is the native-resolution frame (Jena = 10-min) used ONLY for point statistics
+        # (max/min/mean/std): hourly averaging smooths peaks, so the max of the hourly means is
+        # systematically below the true reading (e.g. July-2015 peak 37.04 hourly vs 37.28 raw).
+        # Extrema/summary queries therefore run on `raw` so they reconcile with the source data.
+        # Defaults to `df` when no raw frame is supplied, so callers that only have the hourly
+        # frame (tests, verify_results) keep their previous behaviour unchanged.
+        self.raw = raw if raw is not None else df
         self._anchor = df.index.max()  # the dataset's own "now" -- a static record has no real one
         self.retriever = rag_system.Retriever()
         self.use_llm = use_llm
@@ -105,6 +153,11 @@ class Interface:
         self.detector = detector          # which network-level anomaly detector the anomaly intent uses
         self.history: list[dict] = []  # recent turns, for follow-up resolution
         self._daytypes: tuple | None = None  # lazily-built K-means day-types (labels, profiles)
+        # Semantic fallback router (below): a dense retriever used only to judge domain relevance
+        # of an otherwise-unroutable question. Built lazily on first use (loads a model), and
+        # injectable here so tests can exercise both branches offline without the encoder.
+        self._domain_retriever_injected = domain_retriever
+        self._domain_clf = None
 
     def _day_types(self):
         """Lazily compute K-means day-types once: (labels per day, per-cluster mean features)."""
@@ -144,6 +197,41 @@ class Interface:
         snip = self.retriever.for_sensor(sensor)
         return snip.text if snip else None
 
+    def _domain_classifier(self):
+        """Lazily build the dense semantic retriever used to judge domain relevance (cached).
+
+        Uses a Sentence-BERT encoder when available and transparently falls back to TF-IDF
+        otherwise (``rag_system.dense_retriever``), so it is always usable. Injectable via the
+        constructor's ``domain_retriever`` so tests can drive both branches without the encoder.
+        """
+        if self._domain_clf is None:
+            self._domain_clf = (self._domain_retriever_injected
+                                or rag_system.dense_retriever())
+        return self._domain_clf
+
+    def _semantic_fallback(self, question: str) -> Answer:
+        """Answer an unroutable question without ever surfacing a raw error.
+
+        Runs a *semantic* search of the question against the sensor knowledge base. A confident
+        match (score >= ``DOMAIN_THRESHOLD``) means the question is about the weather data, so we
+        return a targeted suggestion naming the closest sensor and an example query. No confident
+        match means it is off-topic, so we return a polite redirect to the dataset's scope. This
+        path produces no number, so the trust guarantee is untouched.
+        """
+        hits = self._domain_classifier().retrieve(question, k=1)
+        if hits and hits[0].score >= DOMAIN_THRESHOLD:
+            friendly, example = SENSOR_HINTS.get(hits[0].sensor, ("the weather data",
+                                                                  "hottest day in 2015"))
+            text = (f"I think you're asking about {friendly}, but I'm not sure exactly what to "
+                    f"compute — could you rephrase to confirm? For example '{example}', or ask for "
+                    f"the max, min, average, trend or anomalies over a year, month or season.")
+            return Answer(question, None, text, None, [])
+        text = ("I couldn't understand that as a question about this weather dataset — temperature, "
+                "humidity, wind, pressure, dew point and related sensors, recorded hourly from 2009 "
+                "to 2016. Could you rephrase and try again? For example 'coldest day in 2013' or "
+                "'average wind speed in winter 2012'.")
+        return Answer(question, None, text, None, [])
+
     def _phrase(self, question, computed, context=None, inferred=None) -> str:
         """Produce the answer text: local LLM if enabled+available, else template."""
         if self.use_llm and llm.is_available():
@@ -167,6 +255,124 @@ class Interface:
     def _reply(self, question, intent, value, sensors, computed, context=None, inferred=None):
         text = self._phrase(question, computed, context, inferred)
         return Answer(question, intent, text, value, sensors, computed, context, inferred)
+
+    def _clarify(self, question: str, spell_fixes: list, clarify_words: list) -> Answer:
+        """A no-answer response asking the user to fix words that look misspelled but couldn't be
+        confidently corrected. `clarify_words` is a list of (word, suggestion) pairs.
+
+        `intent` is None (this is not a computed answer) and `value` is None, so callers/UI treat it
+        as a prompt, not a result. Any typos that *were* confidently corrected are noted first.
+        """
+        parts = [f"'{w}' (did you mean '{sug}'?)" for w, sug in clarify_words]
+        prefix = ""
+        if spell_fixes:
+            fixed = ", ".join(f"'{o}' as '{f}'" for o, f in spell_fixes)
+            prefix = f"I read {fixed}, but "
+        msg = (f"{prefix}I couldn't understand {', '.join(parts)}. "
+               f"Could you check the spelling and ask again?")
+        if prefix:
+            msg = msg[0].upper() + msg[1:]
+        return Answer(question, None, msg, None, [],
+                      spelling=spell_fixes, ignored=[w for w, _ in clarify_words])
+
+    # Intents that legitimately consume an "A and B" phrasing as a SINGLE question (a correlation
+    # is between two sensors; a comparison is between two periods) — never split these on "and".
+    _COMPOUND_KEEP_INTENTS = {"correlation", "compare"}
+    # Splits a compound question into its parts. Only clear separators: semicolons, "&", explicit
+    # additive cues, and bare " and ". Each candidate part is re-validated before we commit to a
+    # split, so this regex being permissive is safe.
+    _COMPOUND_SPLIT_RE = re.compile(
+        r"\s*;\s*|\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+&\s+|\s+plus\s+|\s+and\s+", re.IGNORECASE)
+
+    def _split_questions(self, question: str) -> list[str] | None:
+        """Return ≥2 sub-questions if `question` is genuinely compound, else None.
+
+        Conservative on purpose: a question is only treated as compound when (a) it is NOT itself a
+        correlation/compare question (those legitimately use "and"), and (b) at least two of the
+        split parts each independently look like their own question — i.e. each carries its own
+        intent keyword. This keeps "correlation between temperature and humidity", "compare 2012 and
+        2015" and "mean pressure between 2012 and 2014" as single questions, while
+        "max temperature in 2015 and min humidity in 2013" becomes two.
+        """
+        if detect_intent(question) in self._COMPOUND_KEEP_INTENTS:
+            return None
+        if resolve_compare(question) is not None:      # "warmer than", "difference between", …
+            return None
+        parts = [p.strip(" ?.") for p in self._COMPOUND_SPLIT_RE.split(question) if p.strip(" ?.")]
+        if len(parts) < 2:
+            return None
+        # each *kept* part must independently resolve an intent; require at least two such parts so a
+        # trailing fragment ("…between 2012 and 2014" -> "2014") never triggers a bogus split.
+        answerable = [p for p in parts if detect_intent(p) is not None]
+        if len(answerable) < 2:
+            return None
+        return answerable
+
+    def _answer_compound(self, clauses: list[str]) -> Answer:
+        """Answer each sub-question independently through the deterministic engine and combine them.
+
+        Each clause is self-contained, so follow-up/history resolution is skipped and the shared
+        history is not consulted (or polluted) mid-list — every number is still computed by the
+        query engine, one clause at a time.
+        """
+        saved = self.history
+        self.history = []
+        try:
+            subs = [self._answer(c) for c in clauses]
+        finally:
+            self.history = saved
+        text = "\n\n".join(f"{i}. {s.text}" for i, s in enumerate(subs, 1))
+        sensors = sorted({sensor for s in subs for sensor in (s.sensors or [])})
+        computed = " | ".join(s.computed for s in subs if s.computed)
+        return Answer("", "multi", text, [s.value for s in subs], sensors, computed=computed)
+
+    # Intents that answer about ONE named sensor over a period — the ones where a missing
+    # sensor / statistic / period means the router had to assume a default worth flagging.
+    _ASSUMPTION_INTENTS = {"max", "min", "mean", "spread", "summary", "trend", "threshold"}
+    # Words that imply the temperature sensor even though they are not in SENSOR_ALIASES ("hot"/
+    # "cold" are aliases, but "warmest"/"coolest" are not). When one is present, defaulting to
+    # temperature is what the user meant, not a blind guess, so the sensor note is suppressed.
+    _TEMP_IMPLIED = {"hot", "hottest", "hotter", "cold", "coldest", "colder", "warm", "warmest",
+                     "warmer", "cool", "coolest", "cooler", "freezing", "scorching", "chilly",
+                     "mild", "icy", "sweltering", "balmy"}
+
+    def _assumption_notes(self, resolved: str, ans: Answer) -> list[str]:
+        """Short notes for any default the router assumed, so an under-specified question is
+        answered with a best guess AND an invitation to correct it, rather than silently. Empty
+        when the question named its sensor, statistic and period explicitly.
+        """
+        if ans.intent not in self._ASSUMPTION_INTENTS:
+            return []
+        cols = list(self.df.columns)
+        notes: list[str] = []
+        # (1) sensor defaulted — no sensor named in the text, but the answer used one. Skip when a
+        # temperature-implying word ("warmest") makes the temperature default what the user meant.
+        words = set(re.findall(r"[a-z]+", resolved.lower()))
+        if (ans.sensors and not resolve_sensors(resolved, cols)
+                and not (ans.sensors[0] == "T (degC)" and words & self._TEMP_IMPLIED)):
+            friendly = SENSOR_HINTS.get(ans.sensors[0], (ans.sensors[0],))[0]
+            notes.append(f"assuming you mean {friendly} — name another sensor "
+                         f"(humidity, pressure, wind, …) if not")
+        # (2) statistic defaulted — fell back to a full overview because no max/min/mean/… keyword
+        if ans.intent == "summary" and detect_intent(resolved) is None:
+            notes.append("no specific statistic named, so this is a full overview — "
+                         "ask for the max, min or average for just one")
+        # (3) period defaulted — no year/month/season/day, so the whole record was used
+        start, end, _ = resolve_any_period(resolved, self._anchor)
+        if not start and not end and resolve_day(resolved) is None:
+            lo = self.df.index.min().year
+            hi_ts = self.df.index.max()   # a resample can leave a lone Jan-1 00:00 bucket in the next
+            hi = hi_ts.year - 1 if (hi_ts.month == 1 and hi_ts.day == 1) else hi_ts.year
+            notes.append(f"covering the whole {lo}–{hi} record — name a year, month or season "
+                         f"to narrow it")
+        # (4) another analytical intent also matches the wording (an ambiguous request)
+        others = [name for name, kws in INTENTS.items()
+                  if name != ans.intent
+                  and name in (self._ASSUMPTION_INTENTS | {"compare", "correlation"})
+                  and any(re.search(rf"\b{re.escape(k)}\b", resolved.lower()) for k in kws)]
+        if others:
+            notes.append(f"read as a '{ans.intent}' question — say '{others[0]}' if you meant that")
+        return notes
 
     def _understand(self, question: str):
         """Work out (intent, sensors, start, end, label, threshold, day, hour) for a question.
@@ -236,6 +442,23 @@ class Interface:
         """Return (data, where_label) for a date window; (None, label) if it has no rows."""
         return qe.slice_window(self.df, start, end, label=label)
 
+    def _scope_raw(self, day, start, end, label, hour):
+        """The SAME window as the hourly `data`, but sliced from the native-resolution `self.raw`
+        frame so extremes/statistics reflect the true readings, not hourly means. Mirrors the
+        scope logic in `_answer` exactly. Returns an empty frame (not None) when the window has no
+        raw rows, so callers can fall back to the hourly slice rather than crash."""
+        if day is not None:
+            m, d, y, _ = day
+            idx = self.raw.index
+            rd = self.raw[(idx.month == m) & (idx.day == d) & ((idx.year == y) if y else True)]
+        else:
+            rd, _ = qe.slice_window(self.raw, start, end, label=label)
+            if rd is None:
+                rd = self.raw.iloc[0:0]
+        if hour[0] is not None and len(rd):
+            rd = rd[hour_mask(rd.index, hour[0], hour[1])]
+        return rd
+
     def _missing_concept(self, question: str):
         """If the user named a sensor concept this dataset doesn't have, return the word."""
         q = question.lower()
@@ -277,7 +500,27 @@ class Interface:
         computed by the deterministic query engine. Legend questions and the LLM-off case are
         answered directly (single-shot), the latter being the documented no-model limitation.
         """
+        original = question
+        # Repair obvious typos of domain words BEFORE any routing, so a misspelled sensor/intent
+        # ("higest tempreature") still resolves. Conservative + transparent: only high-confidence
+        # fixes to long domain words, and every fix is surfaced on the answer (see spell_normalize).
+        question, spell_fixes = spell_normalize(question)
         resolved = question
+        # Compound question ("max temp in 2015 AND min humidity in 2013"): answer each part
+        # separately rather than silently answering only the first (and merging their scopes). Done
+        # before follow-up resolution because a compound question is self-contained.
+        clauses = self._split_questions(question)
+        if clauses:
+            ans = self._answer_compound(clauses)
+            ans.question = original
+            if spell_fixes:
+                ans.spelling = spell_fixes
+                fixes = ", ".join(f"'{o}' as '{f}'" for o, f in spell_fixes)
+                ans.text = f"(Reading {fixes}.) {ans.text}"
+            ans.understood = f"compound: {len(clauses)} sub-questions"
+            self.history.append({"question": question, "resolved": question, "computed": ans.computed})
+            self.history = self.history[-6:]
+            return ans
         # Attempt follow-up resolution when the question is elliptical, or when a continuation cue
         # ("and…", "what about…") means it should inherit the prior scope even if it restates an
         # intent/sensor (e.g. "and the coldest?" -> the coldest *in the year we were discussing*).
@@ -301,9 +544,33 @@ class Interface:
                 if det and self._routable(det) and det.strip().lower() != question.strip().lower():
                     resolved = det.strip()
 
+        # GUARDRAIL: if a word looks like a misspelled sensor/period/intent term but is too
+        # uncertain to auto-correct (a mangled month "tocber", "lowset"->lowest), do NOT answer on a
+        # scope we had to guess at -- stop and ask the user to fix it, offering the "did you mean?"
+        # hint. Answering with a silent-wrong scope would break the verifiable-answers premise.
+        # Ordinary words far from any term ("because", "degrees") are excluded, so normal questions
+        # are never blocked.
+        clarify_words = clarifications_needed(resolved, tuple(self.df.columns))
+        if clarify_words:
+            clar = self._clarify(original, spell_fixes, clarify_words)
+            self.history.append({"question": original, "resolved": resolved, "computed": ""})
+            self.history = self.history[-6:]
+            return clar
+
         ans = self._answer(resolved)
-        ans.question = question                 # keep the user's own wording for display
-        if resolved != question:
+        ans.question = original                 # keep the user's own wording for display
+        if spell_fixes:
+            ans.spelling = spell_fixes          # transparency: which typos were corrected
+            fixes = ", ".join(f"'{o}' as '{f}'" for o, f in spell_fixes)
+            ans.text = f"(Reading {fixes}.) {ans.text}"
+        # Best-guess-with-a-note: if the router had to assume a sensor / statistic / period (or the
+        # wording matches two intents), answer anyway but flag the assumption so the user can refine.
+        notes = self._assumption_notes(resolved, ans)
+        if notes:
+            ans.assumptions = notes
+            joined = "; ".join(notes)
+            ans.text = f"{ans.text}\n\nℹ️ {joined[0].upper()}{joined[1:]}."
+        if resolved != original:
             ans.resolved = resolved             # transparency: what we understood it as
         ans.understood = self._describe_understanding(resolved)
         try:
@@ -776,11 +1043,18 @@ class Interface:
                               f"I have no data for {hour[2]}{(' ' + scope) if scope else ''}.",
                               None, [sensor])
 
+        # Native-resolution slice for the exact point statistics (max/min/mean/std/summary/weather).
+        # Same window as `data`; falls back to the hourly slice if the raw frame has no rows there
+        # (only possible when `self.raw` is the hourly frame anyway, i.e. no raw was supplied).
+        raw_data = self._scope_raw(day, start, end, label, hour)
+        if not len(raw_data):
+            raw_data = data
+
         # Weather report: a multi-sensor snapshot for the chosen day/period.
         if intent == "weather":
             wanted = [c for c in ("T (degC)", "rh (%)", "Tdew (degC)", "p (mbar)", "wv (m/s)")
                       if c in data.columns]
-            rep = qe.weather_report(data, wanted)
+            rep = qe.weather_report(raw_data, wanted)
             bits = []
             if "T (degC)" in rep:
                 t = rep["T (degC)"]
@@ -871,17 +1145,17 @@ class Interface:
             return self._reply(question, intent, cs, [sensor], computed=computed, context=ctx)
 
         if intent == "max":
-            r = qe.get_max(data, sensor)
+            r = qe.get_max(raw_data, sensor)
             return self._reply(question, intent, r, [sensor],
                                computed=f"max {sensor}{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}.", context=ctx)
 
         if intent == "min":
-            r = qe.get_min(data, sensor)
+            r = qe.get_min(raw_data, sensor)
             return self._reply(question, intent, r, [sensor],
                                computed=f"min {sensor}{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}.", context=ctx)
 
         if intent in ("mean", "spread"):
-            r = qe.get_mean_std(data, sensor)
+            r = qe.get_mean_std(raw_data, sensor)
             return self._reply(question, intent, r, [sensor],
                                computed=f"{sensor}{where} mean={r['mean']:.2f}, std={r['std']:.2f}, range={r['range']:.2f}.",
                                context=ctx)
@@ -982,17 +1256,16 @@ class Interface:
             return ans
 
         if intent == "summary":
-            s = qe.sensor_summary(data, sensor)
+            s = qe.sensor_summary(raw_data, sensor)
             return self._reply(question, intent, s, [sensor],
                                computed=(f"{sensor}{where}: min={s['min']:.2f}, max={s['max']:.2f}, "
                                          f"mean={s['mean']:.2f}, std={s['std']:.2f}, missing={s['missing']}."),
                                context=ctx)
 
-        return Answer(question, None,
-                      "I couldn't map that to a known query. Try max / min / mean / trend / "
-                      "compare / correlation / missing / anomaly / weather / summary — optionally "
-                      "scoped to a year, month, season or day (e.g. 'hottest in summer 2013'), or a "
-                      "threshold ('how often above 30?').", None, sensors)
+        # Nothing routed: neither an intent nor a sensor was found. Instead of a raw error, use a
+        # semantic search to tell an on-topic-but-unclear question (-> targeted suggestion) from an
+        # off-topic one (-> polite redirect). See DOMAIN_THRESHOLD / SENSOR_HINTS above.
+        return self._semantic_fallback(question)
 
 
 def repl(df: pd.DataFrame, use_llm: bool = False) -> None:  # pragma: no cover

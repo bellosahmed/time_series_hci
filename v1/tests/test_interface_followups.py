@@ -203,6 +203,10 @@ def test_resolve_legend_query_maps_markers():
     # not a legend question -> None (normal routing)
     assert r("what was the max temperature?") is None
     assert r("hottest in 2013") is None
+    # marker cues must match on word boundaries, not as raw substrings: "ring" inside "during"
+    # (a common date phrasing) must NOT trip the legend explainer.
+    assert r("what was the maximum temperature during July 2015?") is None
+    assert r("maximum temperature during in July 2015 ?") is None
 
 
 def test_interface_answers_legend_question_not_fallback(df):

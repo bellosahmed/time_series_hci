@@ -66,5 +66,7 @@ def test_llm_faithful_phrasing_is_kept(df, monkeypatch):
     monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
     monkeypatch.setattr(llm, "plan", lambda *a, **k: None)
     monkeypatch.setattr(llm, "explain", lambda *a, **k: "Nicely worded, no figures here.")
-    ans = interface.Interface(df, use_llm=True).ask("max temperature")
+    ans = interface.Interface(df, use_llm=True).ask("max temperature in 2024")
+    # the LLM's faithful phrasing is retained (an appended assumption note may follow it, but the
+    # explicit period here means none is added)
     assert ans.text == "Nicely worded, no figures here."

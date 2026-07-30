@@ -39,3 +39,8 @@ chroma/
 
 # Regenerable model artifacts from notebook 05
 v1/notebooks/saved_models_05/
+
+# API keys / secrets (benchmark OpenRouter leg)
+.openrouter_key
+**/.openrouter_key
+*.key

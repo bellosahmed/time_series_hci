@@ -12,6 +12,7 @@ still work.
 
 from __future__ import annotations
 
+import difflib
 import re
 
 import pandas as pd
@@ -49,6 +50,187 @@ SENSOR_ALIASES = {
     "wind speed": "wv (m/s)", "wind": "wv (m/s)",
     "breezy": "wv (m/s)", "blowy": "wv (m/s)", "gusty": "wv (m/s)",
 }
+
+# --- Typo tolerance -------------------------------------------------------------------------
+# The router matches intent/sensor keywords EXACTLY, so a misspelling ("tempreature") finds
+# nothing. `spell_normalize` fixes obvious typos of domain words BEFORE routing, but stays
+# deliberately conservative so it never silently changes the meaning of a question:
+#   * only words of length >= 5 are corrected, and only ONTO vocabulary words of length >= 5.
+#     This keeps the short, easily-confused intent keywords (max/min/hot/cold/top/vs) exact-only
+#     -- fuzzy-mapping a typo to "max" vs "min" could flip the answer.
+#   * a high similarity cutoff (0.82) means only near-misses are touched; unknown real words
+#     (e.g. "during", "rainfall") are left alone.
+#   * every correction is returned to the caller, which surfaces it ("read 'tempreature' as
+#     'temperature'") -- the guess is shown, never hidden, preserving the auditable-routing goal.
+_SPELL_MIN_LEN = 5
+# 0.85, not lower: single-character typos of the domain words all score >= 0.857
+# ("maximun"->"maximum", "avearge"->"average"), while the nearest false positive
+# ("monthly"->"month", a real word that leaks in from the "next month" intent phrase) sits at
+# 0.833 and is correctly rejected. Erring toward missing a correction beats silently rewriting a
+# legitimate word.
+_SPELL_CUTOFF = 0.85
+_SPELL_VOCAB: set[str] | None = None
+
+
+def _spell_vocab() -> set[str]:
+    """The set of domain words a typo may be corrected onto (length >= _SPELL_MIN_LEN), cached.
+
+    Built from the sensor aliases and intent keywords defined below, so it always tracks the
+    real routing vocabulary -- add a sensor alias and its typos become correctable automatically.
+    """
+    global _SPELL_VOCAB
+    if _SPELL_VOCAB is None:
+        vocab: set[str] = set()
+        for alias in SENSOR_ALIASES:
+            vocab.update(w for w in alias.split() if len(w) >= _SPELL_MIN_LEN)
+        for keywords in INTENTS.values():
+            for kw in keywords:
+                vocab.update(w for w in kw.split() if len(w) >= _SPELL_MIN_LEN and w.isalpha())
+        # Month + season names so a misspelled *period* ("octber", "septmber", "wnter") is repaired
+        # and the scope still resolves. Only names >= _SPELL_MIN_LEN qualify, so the short months
+        # (may/jun/jul and the 3-letter abbreviations) stay exact-only.
+        vocab.update(w for w in MONTHS if len(w) >= _SPELL_MIN_LEN)
+        vocab.update(w for w in SEASONS if len(w) >= _SPELL_MIN_LEN)
+        _SPELL_VOCAB = vocab
+    return _SPELL_VOCAB
+
+
+def spell_normalize(question: str) -> tuple[str, list[tuple[str, str]]]:
+    """Return (corrected_question, corrections) where corrections is a list of (original, fixed).
+
+    Conservatively repairs typos of domain words; leaves numbers, months, and any word it isn't
+    confident about untouched (see the module note above for the safety rules).
+    """
+    vocab = _spell_vocab()
+    corrections: list[tuple[str, str]] = []
+
+    def fix(m: re.Match[str]) -> str:
+        tok = m.group(0)
+        low = tok.lower()
+        if len(low) < _SPELL_MIN_LEN or not low.isalpha() or low in vocab:
+            return tok
+        near = difflib.get_close_matches(low, vocab, n=1, cutoff=_SPELL_CUTOFF)
+        if near and near[0] != low:
+            corrections.append((tok, near[0]))
+            return near[0]
+        return tok
+
+    return re.sub(r"[A-Za-z]+", fix, question), corrections
+
+
+# A word must be at least this similar to a known term to be offered as a "did you mean?" hint.
+# Lower than the auto-correct cutoff (0.85): a moderate match is worth *suggesting* to the user even
+# when it is too weak to apply silently -- "tocber" -> "october" (0.77) is a good suggestion, a bad
+# silent correction.
+_SPELL_SUGGEST_CUTOFF = 0.6
+
+
+def spell_suggest(word: str) -> str | None:
+    """The closest known domain word to `word` above _SPELL_SUGGEST_CUTOFF, else None.
+
+    Used to turn "I didn't understand X" into "did you mean Y?" without ever auto-applying Y.
+    """
+    near = difflib.get_close_matches(word.lower(), _spell_vocab(), n=1, cutoff=_SPELL_SUGGEST_CUTOFF)
+    return near[0] if near and near[0] != word.lower() else None
+
+
+# Common non-domain words that carry no scope/intent/sensor meaning — question words, articles,
+# prepositions, and generic time/measure nouns. A leftover word NOT in here (and not a
+# sensor/intent/month/season term) is one the router silently dropped, so it's worth flagging.
+_FILLER_WORDS = {
+    "what", "whats", "which", "when", "where", "there", "here", "this", "that", "these", "those",
+    "how", "why", "was", "were", "is", "are", "the", "for", "and", "with", "from", "about",
+    "tell", "show", "give", "please", "kindly", "could", "would", "can", "get", "got", "you",
+    "your", "does", "did", "over", "been", "have", "has", "had", "during", "between", "than",
+    "versus", "any", "all", "some", "most", "least", "value", "values", "reading", "readings",
+    "data", "record", "records", "level", "levels", "amount", "point", "much", "many", "into",
+    "day", "days", "daily", "week", "weeks", "weekly", "month", "months", "monthly", "year",
+    "years", "yearly", "time", "times", "date", "dates", "season", "seasons", "hour", "hours",
+    "morning", "afternoon", "evening", "night", "noon", "midnight", "today", "tomorrow",
+    "yesterday", "period", "range", "whole", "entire", "across", "throughout",
+    # hedges / politeness / connectors — benign filler that must not trip the clarification guardrail
+    "around", "roughly", "approximately", "exactly", "actually", "really", "maybe",
+    "perhaps", "quite", "rather", "thanks", "thank", "want", "need", "like", "looking",
+    "find", "output", "result", "results", "figure", "number", "stats", "statistics", "info",
+    "information", "overall", "total", "recorded", "measured", "observed",
+}
+_KNOWN_WORDS: set[str] | None = None
+
+
+def _known_words() -> set[str]:
+    """All words the router understands: sensor aliases, intent keywords, months, seasons,
+    comparison words, plus harmless filler. Cached. Anything else (>= 5 chars) in a question was
+    not consumed by routing — a candidate 'ignored word' to surface."""
+    global _KNOWN_WORDS
+    if _KNOWN_WORDS is None:
+        known = set(_FILLER_WORDS)
+        for alias in SENSOR_ALIASES:
+            known.update(alias.split())
+        for keywords in INTENTS.values():
+            for kw in keywords:
+                known.update(w for w in kw.split() if w.isalpha())
+        known.update(MONTHS)
+        known.update(SEASONS)
+        for phrases in COMPARE.values():
+            for ph in phrases:
+                known.update(ph.split())
+        _KNOWN_WORDS = known
+    return _KNOWN_WORDS
+
+
+# The clarification guardrail fires only in this gray zone: a word similar enough to a domain term
+# to be a probable typo, but below the 0.85 auto-correct line. Measured separation: genuine typos
+# score >= 0.77 to their nearest term ("tocber"->october 0.77, "lowset"->lowest 0.83), while
+# ordinary English words that merely appear in a query ("because" 0.67, "degrees" 0.67, "staying"
+# 0.71, "nonsense" 0.62) all sit <= 0.71 -- so 0.75 cleanly splits "misspelled domain word, ask the
+# user" from "just an unrelated word, let normal routing/fallback handle it".
+_SPELL_GUARD_FLOOR = 0.75
+
+
+def clarifications_needed(question: str, columns: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    """Words that look like a misspelled domain term (period/sensor/intent) but are too uncertain to
+    auto-correct — each with its best-guess match. Returns ``[(word, suggestion), ...]``.
+
+    These are the only words worth *stopping to ask about*: close to a known term (>= 0.75) yet
+    below the auto-correct cutoff (0.85). Words far from any domain term are ordinary language, not
+    typos, and are deliberately excluded so the guardrail never blocks a normal question.
+    """
+    vocab = _spell_vocab()
+    known = set(_known_words())
+    for col in columns:
+        known.update(re.findall(r"[a-z]+", col.lower()))
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for tok in re.findall(r"[A-Za-z]+", question.lower()):
+        if len(tok) < _SPELL_MIN_LEN or tok in known or tok in seen:
+            continue
+        seen.add(tok)
+        match = difflib.get_close_matches(tok, vocab, n=1, cutoff=_SPELL_GUARD_FLOOR)
+        if match and match[0] != tok:
+            ratio = difflib.SequenceMatcher(None, tok, match[0]).ratio()
+            if _SPELL_GUARD_FLOOR <= ratio < _SPELL_CUTOFF:
+                out.append((tok, match[0]))
+    return out
+
+
+def unrecognized_words(question: str, columns: tuple[str, ...] = ()) -> list[str]:
+    """Meaningful words (>= 5 letters) the router does not recognize — i.e. that it silently
+    ignored. Returns them in order, de-duplicated, so the caller can warn the user rather than
+    quietly answer a broader/different question than they asked. Short filler-length typos
+    (\"waht\", \"si\") are below the length cutoff and not reported.
+
+    `columns` (the dataset's raw column names) are folded into the known set so a user who names a
+    column or unit directly ("vpmax", "mbar") is not told it was ignored.
+    """
+    known = set(_known_words())
+    for col in columns:
+        known.update(re.findall(r"[a-z]+", col.lower()))
+    out: list[str] = []
+    for tok in re.findall(r"[A-Za-z]+", question.lower()):
+        if len(tok) >= 5 and tok not in known and tok not in out:
+            out.append(tok)
+    return out
+
 
 INTENTS = {
     # recommend is BEFORE max/min/trend so "recommend the hottest days" routes here, not to
@@ -315,6 +497,11 @@ LEGEND_EXPLANATIONS = {
 _LEGEND_MARKER_WORDS = ("dot", "circle", "ring", "marker", "legend", "symbol", "colour", "color",
                         "band", "shaded", "shade")
 _LEGEND_MEANING_WORDS = ("what", "mean", "meaning", "explain", "represent", "stand for", "which", "why")
+# Match marker cues on WORD BOUNDARIES, not as raw substrings: "ring" must not fire inside
+# "du(ring)", or an ordinary data question like "maximum temperature during July 2015" is
+# mis-routed to the chart-legend explainer.
+_LEGEND_MARKER_RE = re.compile(r"\b(?:" + "|".join(_LEGEND_MARKER_WORDS) + r")\b")
+_LEGEND_BORDERLINE_RE = re.compile(r"\b(?:dashed|dotted|amber|hollow|ring|borderline)\b")
 
 
 def resolve_legend_query(question: str) -> str | None:
@@ -325,11 +512,11 @@ def resolve_legend_query(question: str) -> str | None:
     are not captured. Returns one of the ``LEGEND_EXPLANATIONS`` keys.
     """
     q = question.lower()
-    is_marker = any(w in q for w in _LEGEND_MARKER_WORDS)
+    is_marker = bool(_LEGEND_MARKER_RE.search(q))
     is_meaning = ("legend" in q) or any(w in q for w in _LEGEND_MEANING_WORDS)
     if not (is_marker and is_meaning):
         return None
-    if any(w in q for w in ("dashed", "dotted", "amber", "hollow", "ring", "borderline")):
+    if _LEGEND_BORDERLINE_RE.search(q):
         return "borderline"
     if "red" in q:
         return "anomaly"

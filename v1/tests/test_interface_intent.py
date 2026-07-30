@@ -2,7 +2,18 @@
 
 import pandas as pd
 
-from src import interface
+from src import interface, rag_system
+
+
+class _StubRetriever:
+    """A domain classifier that always returns the same snippet (or none), for offline tests
+    of the semantic fallback -- exercises both branches without loading a real encoder."""
+
+    def __init__(self, snippet):
+        self._snip = snippet
+
+    def retrieve(self, query, k=1):
+        return [self._snip] if self._snip is not None else []
 
 
 def test_detect_intent():
@@ -196,11 +207,33 @@ def test_bare_sensor_question_with_no_scope_also_gets_a_real_answer(df):
     assert ans.intent == "summary"
 
 
-def test_question_with_neither_intent_nor_sensor_still_gets_the_fallback(df):
-    # The fallback must still fire when there's truly nothing to work with -- the new default
-    # only kicks in once a sensor was actually named, not for every unroutable question.
-    ans = interface.Interface(df).ask("blah blah nonsense")
-    assert "couldn't map" in ans.text
+def test_offtopic_question_gets_polite_redirect(df):
+    # A question with no semantic relation to the weather data (dense score below threshold)
+    # must be redirected politely, never shown a raw error or answered.
+    stub = _StubRetriever(rag_system.Snippet("T (degC)", "", 0.05))  # below DOMAIN_THRESHOLD
+    ans = interface.Interface(df, domain_retriever=stub).ask("what is my dog's name")
+    assert ans.intent is None
+    assert ans.sensors == []
+    assert "weather dataset" in ans.text        # redirected to the dataset's scope
+    assert "rephrase" in ans.text.lower()       # and invited to ask again
+    assert "couldn't map" not in ans.text
+
+
+def test_ontopic_unroutable_question_gets_semantic_suggestion(df):
+    # A question that reaches the fallback but is semantically about a sensor (score above
+    # threshold) gets a targeted, sensor-specific suggestion -- not a generic error.
+    stub = _StubRetriever(rag_system.Snippet("rh (%)", "", 0.40))  # above DOMAIN_THRESHOLD
+    ans = interface.Interface(df, domain_retriever=stub).ask("xyzzy foobar plugh")
+    assert ans.intent is None
+    assert "humidity" in ans.text            # friendly name mapped from rh (%)
+    assert "couldn't map" not in ans.text
+
+
+def test_empty_semantic_match_is_treated_as_offtopic(df):
+    # No snippet at all (e.g. TF-IDF fallback returns nothing) -> off-topic redirect.
+    ans = interface.Interface(df, domain_retriever=_StubRetriever(None)).ask("blah blah nonsense")
+    assert ans.intent is None
+    assert "weather dataset" in ans.text
 
 
 def test_ask_max_matches_engine(df):
