@@ -7,6 +7,34 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ## 2026-07-30
 
+### v1: Understanding/Clarifier agent — LLM self-correction of malformed queries (sub-project 1 of 3)
+
+**Motive (user asked).** How can the system understand a query that's misspelled beyond the
+deterministic auto-corrector, paraphrased, or word-order-scrambled? Added an LLM "Understanding
+agent" that **rewrites** such a query into a clear standalone question — accepted **only if the
+deterministic parser can route the rewrite** (`_routable`). The LLM never routes or computes a
+number; it only proposes phrasings the engine already handles.
+
+**Design (Approach A, framework-free — LangChain explicitly rejected).** New `llm.understand()`
+(mirrors `rewrite_followup`, numberless, offline-safe). Hook in `Interface.ask` fires **only when
+the deterministic parser found no intent AND no sensor** (the query's core is unknown) — note this
+is stricter than "not routable", because a stray year makes a garbled query routable. A second hook
+lets a gray-zone guardrail try the LLM before blocking. Interpretation is always surfaced ("I read
+this as: '…'").
+
+**Result (real, local `llama3.2:3b`).** On 8 malformed queries: LLM off = 5 answered / 4 correct /
+3 declined; LLM on = 8 answered / 5 correct / 0 declined. *Honest trade-off:* coverage up (+1
+correct, 0 declines) but the 3B model produced 3 plausible-but-wrong routable rewrites (e.g.
+"umidty tocber 2012" → a weather report, not humidity). Crucially these are **mis-routings, not
+mis-arithmetic** — numbers stay exact; the wrong interpretation is shown to the user, not silent. A
+stronger model would raise rewrite fidelity; the trust gates are model-independent. Offline → skipped
+entirely, deterministic behaviour unchanged. Write-up: `docs/evaluation/09-understanding-agent.md`.
+
+**Process.** Brainstorm → spec (`docs/superpowers/specs/2026-07-30-understanding-agent-design.md`) →
+plan (`docs/superpowers/plans/2026-07-30-understanding-agent.md`) → TDD on branch
+`feat/understanding-agent`. Tests: `test_interface_understanding.py` (11) +
+`test_understanding_eval.py` (1); full suite **454 passing, 1 skipped**; ruff + mypy clean.
+
 ### v1: comparative benchmark — our app vs general-purpose LLMs (external tools as the baseline)
 
 **Motive.** The truth layer proves we equal pandas, but not that we beat the obvious alternative:
