@@ -83,3 +83,23 @@ class Orchestrator:
         if not pairs or len(pairs) < 2:
             return [SubTask(_DEFAULT_ROLE, question)]
         return [SubTask(role if role in ROLES else _DEFAULT_ROLE, q) for role, q in pairs]
+
+    def _run_one(self, sub: SubTask) -> RoleResult:
+        """Run one sub-task through a role-restricted agent; a failure becomes a flagged result,
+        never an exception that sinks the whole run."""
+        tools = ROLES.get(sub.role, ROLES[_DEFAULT_ROLE])
+        ag = agent.Agent(self.df, use_llm=self.use_llm, model=self.model, tools=tools)
+        try:
+            ans = ag.run(sub.question)
+        except Exception as exc:  # noqa: BLE001 - a failed sub-agent must not sink the run
+            return RoleResult(sub.role, sub.question, [], "", f"(failed: {exc})")
+        return RoleResult(sub.role, sub.question, list(ans.steps), ans.computed, ans.text)
+
+    def dispatch(self, subtasks: list[SubTask]) -> list[RoleResult]:
+        """Run every sub-task's role-agent concurrently; results are re-ordered to match input order
+        so output is deterministic despite parallel execution. Each number is still == pandas."""
+        if not subtasks:
+            return []
+        workers = min(self.max_workers, len(subtasks))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(self._run_one, subtasks))
