@@ -53,14 +53,31 @@ def _df():
 
 
 def test_unroutable_query_uses_llm_rewrite_and_answers(monkeypatch):
-    # "flibber the wobbertron" resolves to no intent and no sensor -> the Understanding agent fires.
+    # Garbled wording but a real data signal (the year 2015): no intent and no sensor resolve, so the
+    # Understanding agent fires -- but only because the query is plausibly about the data.
     monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
     monkeypatch.setattr(llm, "understand", lambda *a, **k: "maximum temperature in 2015")
     iface = interface.Interface(_df(), use_llm=True)
-    ans = iface.ask("flibber the wobbertron")
+    ans = iface.ask("flibber the wobbertron 2015")
     assert ans.intent == "max" and ans.value is not None
     assert "I read this as" in ans.text
     assert ans.resolved == "maximum temperature in 2015"
+
+
+def test_offtopic_query_with_no_data_signal_is_not_rewritten(monkeypatch):
+    # Zero data signal (no sensor/intent/period/direction) -> the Understanding agent must NOT be
+    # consulted and the query is declined, rather than fabricated into a weather query.
+    called = {"n": 0}
+
+    def spy(*a, **k):
+        called["n"] += 1
+        return "maximum temperature in 2015"
+
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "understand", spy)
+    iface = interface.Interface(_df(), use_llm=True)
+    ans = iface.ask("flibber the wobbertron")
+    assert ans.value is None and called["n"] == 0
 
 
 def test_llm_rewrite_that_is_not_routable_is_rejected(monkeypatch):
@@ -106,9 +123,10 @@ def test_understand_exception_is_caught_and_falls_back(monkeypatch, caplog):
         raise RuntimeError("ollama exploded")
 
     monkeypatch.setattr(llm, "understand", boom)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)   # isolate: no real Ollama after the catch
     iface = interface.Interface(_df(), use_llm=True)
     with caplog.at_level("WARNING"):
-        ans = iface.ask("flibber the wobbertron")
+        ans = iface.ask("flibber the wobbertron 2015")   # data signal (year) -> agent is consulted
     assert ans.value is None
     assert any("understanding" in r.getMessage().lower() for r in caplog.records)
 

@@ -179,6 +179,22 @@ class Interface:
                     or start or end or resolve_day(question) is not None
                     or resolve_legend_query(question) or resolve_hour(question)[0] is not None)
 
+    def _mentions_domain(self, question: str) -> bool:
+        """True if the question carries ANY signal tying it to the weather dataset — a sensor,
+        intent, directional adjective, time period, day, hour, or legend reference.
+
+        Used to refuse fabricating a query from an off-topic message: a small LLM will cheerfully
+        turn "what is the name of my cat" into a routable weather query, and `_routable` alone can't
+        tell that apart from a real question. If nothing here matches, the message is not about the
+        data — the LLM planner/rewriter must not be consulted, and we decline deterministically.
+        """
+        cols = list(self.df.columns)
+        start, end, _ = resolve_any_period(question, self._anchor)
+        return bool(detect_intent(question) or resolve_sensors(question, cols)
+                    or resolve_direction(question) is not None
+                    or start or end or resolve_day(question) is not None
+                    or resolve_hour(question)[0] is not None or resolve_legend_query(question))
+
     def _needs_context(self, question: str) -> bool:
         """True if `question` looks elliptical — i.e. not already a self-contained query.
 
@@ -391,13 +407,21 @@ class Interface:
 
         # The LLM only *fills gaps* the reliable deterministic parser left open — it
         # never overrides a confident keyword/explicit-date match (a small model is
-        # error-prone, e.g. flipping "typical"->mean into max).
-        if self.use_llm and llm.is_available():
+        # error-prone, e.g. flipping "typical"->mean into max). It is consulted only when the
+        # question carries some data signal, so it can't invent a query from off-topic text.
+        if self.use_llm and llm.is_available() and self._mentions_domain(question):
             plan = llm.plan(question, list(INTENTS.keys()), list(self.df.columns),
                             model=self.model)
             if plan:
                 if intent is None:
-                    intent = plan.get("intent")
+                    plan_intent = plan.get("intent")
+                    # A bare per-sensor question ("what is the specific humidity") resolves the
+                    # sensor but no statistic; don't let the planner reclassify it as the
+                    # temperature-centric "weather" day-report (which ignores the named sensor).
+                    # Summarise the sensor the user actually named instead.
+                    if plan_intent == "weather" and sensors:
+                        plan_intent = "summary"
+                    intent = plan_intent
                 for s in plan.get("sensors", []):
                     if s not in sensors:
                         sensors.append(s)
@@ -525,7 +549,8 @@ class Interface:
         # ("and…", "what about…") means it should inherit the prior scope even if it restates an
         # intent/sensor (e.g. "and the coldest?" -> the coldest *in the year we were discussing*).
         if (resolve_legend_query(question) is None and self.history
-                and (self._needs_context(question) or is_followup_cue(question))):
+                and (self._needs_context(question) or is_followup_cue(question))
+                and (is_followup_cue(question) or self._mentions_domain(question))):
             used = False
             # Richer path first: with the LLM on, let it rewrite free-form ellipsis.
             if self.use_llm and llm.is_available():
@@ -582,7 +607,7 @@ class Interface:
         # it "routable". Ask the LLM to rewrite it into a clear question; accept ONLY a rewrite the
         # parser can route -- the LLM never gains routing authority and never emits a number. Offline
         # or on failure, the deterministic path below is unchanged (no regression).
-        if (self.use_llm and llm.is_available()
+        if (self.use_llm and llm.is_available() and self._mentions_domain(resolved)
                 and detect_intent(resolved) is None and not resolve_sensors(resolved, cols)):
             try:
                 rw = llm.understand(resolved, cols, list(INTENTS.keys()), model=self.model)
