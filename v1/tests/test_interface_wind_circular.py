@@ -56,3 +56,19 @@ def test_wd_correlation_is_circular_linear_unsigned():
     ans = interface.Interface(df).ask("relationship between wind direction and temperature")
     assert ans.intent == "correlation"
     assert 0.0 <= ans.value <= 1.0
+
+
+def test_wd_summary_is_circular_not_linear():
+    # "prevailing wind direction" carries no stat keyword, so it routes to `summary`. The summary
+    # path must ALSO use circular statistics -- a linear min/max/mean/std on a wrapped compass angle
+    # is meaningless (a tight cluster near 0/360 yields a linear mean of ~180, the exact wrong way).
+    df = _wd_df()
+    ans = interface.Interface(df).ask("prevailing wind direction")
+    assert ans.sensors == ["wd (deg)"]
+    assert ans.intent == "summary"
+    # circular language, and NOT the linear "min=…, max=…, mean=…, std=…" summary format
+    assert any(w in ans.computed.lower() for w in ("prevailing", "circular", "compass"))
+    assert "min=" not in ans.computed.lower() and "max=" not in ans.computed.lower()
+    # the circular mean sits near 0/360 for a wrapped cluster, never the linear ~180
+    m = ans.value["mean"]
+    assert min(m, 360 - m) < 30

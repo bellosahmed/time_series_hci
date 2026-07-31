@@ -1309,8 +1309,11 @@ class Interface:
 
         # Circular sensors (wind direction) wrap at 360°, so linear max/min/mean/std are
         # invalid — route them through circular statistics instead (a linear "max" just
-        # reports ~359° regardless of the actual prevailing wind).
-        if sensor in analysis.CIRCULAR_SENSORS and intent in ("max", "min", "mean", "spread"):
+        # reports ~359° regardless of the actual prevailing wind). This includes `summary`:
+        # "prevailing wind direction" carries no stat keyword and defaults to summary, whose
+        # linear min/max/mean/std on a wrapped angle is just as meaningless (a cluster near
+        # 0°/360° averages to ~180°, the exact wrong way).
+        if sensor in analysis.CIRCULAR_SENSORS and intent in ("max", "min", "mean", "spread", "summary"):
             cs = analysis.circular_stats_deg(data[sensor])
             prevailing = analysis.compass_point(cs["mean"])
             if intent in ("max", "min"):
@@ -1318,6 +1321,12 @@ class Interface:
                             f"{'maximum' if intent == 'max' else 'minimum'} is meaningless "
                             f"(359° and 1° are 2° apart, not 358°). Prevailing direction{where} "
                             f"is {cs['mean']:.1f}° ({prevailing}), circular spread {cs['std']:.1f}°.")
+            elif intent == "summary":
+                missing = int(data[sensor].isna().sum())
+                computed = (f"{sensor}{where} is a circular compass bearing (0–360°), so plain "
+                            f"min/max/mean/std don't apply (an angle wraps at 360°). Prevailing "
+                            f"(circular mean) direction {cs['mean']:.1f}° ({prevailing}), circular "
+                            f"std {cs['std']:.1f}°, {missing} missing.")
             else:
                 computed = (f"{sensor}{where}: prevailing (circular mean) direction "
                             f"{cs['mean']:.1f}° ({prevailing}), circular std {cs['std']:.1f}°.")

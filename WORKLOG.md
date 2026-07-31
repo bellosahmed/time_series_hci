@@ -5,6 +5,63 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-07-31
+
+### v1: architect/reviewer sweep — two live routing bugs found by probing the real model, fixed
+
+Read every core module (interface, interface_parsing, query_engine, llm, anomaly, forecasting,
+clustering, reasoning, analysis, agent, preprocess, main) as an architect + reviewer pass. The code
+is genuinely mature — every parser has commented edge-case guards — so the two real defects came
+**not from re-reading tests but from probing the running model** against the real Jena data with the
+LLM on, across the categories the user cares about (off-topic → in-dataset per-sensor → repeat →
+follow-up → ambiguous). Both were confirmed deterministically before fixing (root cause first).
+
+**Bug 1 — wind-direction `summary` reported meaningless *linear* stats.** "prevailing wind direction
+in 2013" carries no stat keyword, so it defaults to the `summary` intent. The interface special-cases
+the circular sensor `wd (deg)` for max/min/mean/spread (a linear max on a wrapped angle just returns
+~359°), but **`summary` was not in that list**, so it fell through to `query_engine.sensor_summary`
+and printed `min=0.01, max=360.00, mean=165.60, std=92.03`. The linear mean (165.6°, ≈S/SSE) is the
+*wrong compass sector*: the true **circular** prevailing direction is 193.7° (SSW), and the linear
+std (92°) is equally meaningless. Fix: added `"summary"` to the circular branch in `interface._answer`
+and gave it a circular-summary line (prevailing circular mean + compass point + circular std +
+missing count), so "prevailing wind direction" now answers 193.7° (S). This is exactly the
+`circular_stats_deg` path the analysis layer exists to provide — the summary intent just wasn't wired
+to it. *Trade-off / discovery:* the hourly `df` stores wd as a **linear** per-hour mean (from
+`preprocess.align`), so even the circular mean here is computed on already-linearly-averaged angles;
+that pre-existing coarseness is out of scope for this fix (it affects all circular intents equally,
+which all use `data`), noted for future work — a raw-frame circular resample would be more correct.
+
+**Bug 2 — "strongest wind gust" answered on *wind speed*, not the gust sensor.** With the LLM on,
+"strongest wind gust in 2012" came back on `wv (m/s)` (wind speed), not `max. wv (m/s)` (the gust
+channel) — despite `resolve_sensors` correctly returning `max. wv (m/s)`. Root cause: the
+clarification guardrail (`clarifications_needed`) flagged **"strongest"** as a probable misspelling of
+the anomaly keyword **"strange"** (SequenceMatcher 0.75–0.85 band). That fired the recover-rewrite
+path; the small model then rewrote the query and dropped the "gust" distinction, landing on wind
+speed. So a perfectly clear, fully-routable query was being mangled. `"strongest"` is a genuine
+superlative for wind/gust/pressure — in fact `interface.SENSOR_HINTS` uses *"the strongest wind gust
+in 2015"* as its **own suggested example query** for the gust sensor, and `rag_system` describes gusts
+as "the strongest sudden blast". Fix: added `"strongest"` → `max` and `"weakest"` → `min` to the
+intent keywords. This (a) routes the superlative to the right intent, and (b) auto-adds both words to
+the spell/known-word vocabulary, so the guardrail no longer treats them as typos. Now "strongest wind
+gust" → `max` on `max. wv (m/s)` (2012 raw max 20.78 m/s). *Trade-off / discovery, documented not
+hidden:* `detect_intent` returns the first matching intent in dict order, and `max` precedes
+`correlation`, so `"strongest correlation between X and Y"` now routes to `max` rather than
+`correlation`. This is **consistent with existing behaviour** — `"most"` is already a `max` keyword,
+so `"most correlation"` already routed to max — and `"strongest correlation"` is far rarer than
+`"strongest wind/gust"`; accepted as the smaller harm than leaving the system's own example query
+broken. A context-sensitive tie-break (prefer `correlation` when two sensors + a correlation word are
+present) is possible future refinement.
+
+**TDD + verification.** Red→green: 4 new tests (`test_interface_wind_circular.py`:
+`test_wd_summary_is_circular_not_linear`; `test_interface_aliases.py`:
+`test_strongest_and_weakest_are_superlative_intent_keywords`,
+`test_strongest_gust_is_not_flagged_for_clarification`,
+`test_strongest_wind_gust_answers_on_the_gust_sensor`). Both fixes re-verified live against the real
+llama3.2:3b + real data with the LLM on. Full gate: **510 passed, 1 skipped**; ruff + mypy clean;
+`verify_results.py` 35/35.
+
+---
+
 ## 2026-07-30
 
 ### v1: LIMITATION — contamination/quantile anomaly detection can never report "no anomalies"

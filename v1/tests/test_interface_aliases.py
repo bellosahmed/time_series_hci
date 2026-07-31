@@ -33,6 +33,36 @@ def test_variable_is_a_spread_synonym():
     assert interface.detect_intent("how variable is the dew point") == "spread"
 
 
+def test_strongest_and_weakest_are_superlative_intent_keywords():
+    # "strongest"/"weakest" are natural superlatives for wind/gust/pressure ("the strongest wind
+    # gust") -- interface.py's OWN example query for the gust sensor is "the strongest wind gust in
+    # 2015". They belong with max/min like the existing "biggest"/"smallest"/"most".
+    assert interface.detect_intent("strongest wind gust in 2012") == "max"
+    assert interface.detect_intent("weakest wind in 2013") == "min"
+
+
+def test_strongest_gust_is_not_flagged_for_clarification():
+    # Regression: "strongest" fuzzily matched the anomaly keyword "strange" (0.75-0.85 band), so the
+    # clarification guardrail asked "did you mean 'strange'?" on a perfectly clear, fully-routable
+    # query -- and with the LLM on, the recover-rewrite dropped the gust, answering on wind SPEED.
+    assert not any(w == "strongest"
+                   for w, _ in interface.clarifications_needed("strongest wind gust in 2012",
+                                                               tuple(JENA_COLUMNS)))
+
+
+def test_strongest_wind_gust_answers_on_the_gust_sensor():
+    import numpy as np
+    import pandas as pd
+    idx = pd.date_range("2012-01-01", periods=240, freq="h")
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"T (degC)": rng.normal(5, 3, len(idx)),
+                       "wv (m/s)": rng.uniform(0, 8, len(idx)),
+                       "max. wv (m/s)": rng.uniform(4, 16, len(idx))}, index=idx)
+    ans = interface.Interface(df).ask("strongest wind gust")
+    assert ans.sensors[0] == "max. wv (m/s)"   # the gust sensor, not wind speed
+    assert ans.intent == "max"
+
+
 def test_all_14_sensors_have_plain_english_aliases():
     cols = JENA_COLUMNS
     phrases = {
