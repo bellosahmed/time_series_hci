@@ -81,6 +81,40 @@ def test_ask_route_accepts_history_and_returns_resolved_key():
     assert "resolved" in r.get_json()   # follow-up transparency field is exposed
 
 
+def _multiyear_client():
+    import app as webapp
+    import numpy as np
+    import pandas as pd
+    idx = pd.date_range("2013-01-01", "2014-12-31 23:00", freq="h")
+    rng = np.random.default_rng(0)
+    doy = idx.dayofyear.to_numpy()
+    season = 12 * np.sin(2 * np.pi * (doy - 80) / 365)          # a yearly temperature cycle
+    df = pd.DataFrame({"T (degC)": 10 + season + rng.normal(0, 2, len(idx)),
+                       "rh (%)": 70 + rng.normal(0, 8, len(idx))}, index=idx)
+    application = webapp.create_app(df)
+    application.testing = True
+    return application.test_client()
+
+
+def test_web_followup_chain_stays_on_scope_when_resolved_is_round_tripped():
+    # Regression (web app): the JS client must round-trip the server's `resolved` rewrite, not just
+    # {question, computed}. A 3-hop deterministic chain ("hottest in 2013" -> "what about 2014?" ->
+    # "and humidity?") only keeps the max-intent AND the 2014 scope on the third hop if the second
+    # hop's resolved form is carried forward (mimics apps/web/chart.js `nextConvo`). Without it, the
+    # third hop fell back to a whole-record humidity summary.
+    client = _multiyear_client()
+    convo: list[dict] = []
+    last = None
+    for q in ["hottest in 2013", "what about 2014?", "and humidity?"]:
+        d = client.post("/api/ask", json={"question": q, "use_llm": False, "history": convo}).get_json()
+        convo = (convo + [{"question": d["question"], "resolved": d.get("resolved"),
+                           "computed": d.get("computed") or ""}])[-6:]
+        last = d
+    assert last["intent"] == "max"                 # carried from turn 1, not lost to a bare summary
+    assert last["sensors"] == ["rh (%)"]           # the new sensor from turn 3
+    assert "2014" in last["computed"]              # the scope carried from turn 2
+
+
 def test_chart_js_is_served():
     r = _client().get("/chart.js")           # index.html depends on it
     assert r.status_code == 200

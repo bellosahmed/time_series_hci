@@ -57,8 +57,50 @@ present) is possible future refinement.
 `test_strongest_and_weakest_are_superlative_intent_keywords`,
 `test_strongest_gust_is_not_flagged_for_clarification`,
 `test_strongest_wind_gust_answers_on_the_gust_sensor`). Both fixes re-verified live against the real
-llama3.2:3b + real data with the LLM on. Full gate: **510 passed, 1 skipped**; ruff + mypy clean;
-`verify_results.py` 35/35.
+llama3.2:3b + real data with the LLM on.
+
+### v1: live-probe sweep extended to rag_system + the web app — one web-only follow-up bug fixed
+
+Followed the same probe-the-running-system method into `rag_system.py` and `apps/web/`.
+
+**rag_system — clean, no defects.** Probed the TF-IDF retriever with deliberately keyword-free
+paraphrases: every one routed to the right sensor doc ("how muggy and sticky" → `rh (%)`, "the
+strongest sudden blast of wind" → `max. wv (m/s)`, "barometer reading" → `p (mbar)`, "which way is
+the wind blowing" → `wd (deg)`, "how far from saturation" → `VPdef (mbar)`). The dense retriever that
+backs the interface's semantic off-topic gate cleanly separates on-topic from off-topic on the live
+encoder — on-topic ≥ 0.36 ("how sunny is it" 0.42, "what is the air like" 0.41, "how humid was
+summer" 0.36) vs off-topic ≤ 0.12 ("hello there" 0.12, "what is my dog's name" 0.08, "tell me a joke"
+0.06) — comfortably astride the `DOMAIN_THRESHOLD = 0.15` used in `interface._semantic_fallback`. No
+change made.
+
+**Web-app bug — multi-hop follow-ups broke in the browser (but not the CLI).** The Flask server is
+stateless: each `/api/ask` rebuilds the `Interface` and seeds `iface.history` from a `history` array
+the client sends. The server's response already includes the `resolved` rewrite of each turn, and the
+deterministic `resolve_followup` **prefers** `history[-1]["resolved"]` over the raw question. But the
+JS client (`app.js`) stored only `{question, computed}` per turn and re-sent that — **dropping
+`resolved`**. Reproduced end-to-end through the Flask test client mimicking the JS client exactly
+(LLM off): a 3-hop chain "hottest in 2013" → "what about 2014?" → "and humidity?" returned a
+**whole-record humidity summary** on the third hop (`rh (%): …mean=76.03…`), silently losing *both*
+the `max` intent and the `2014` scope. Round-tripping `resolved` (as the server already supplies it)
+made the same hop correctly answer `max rh (%) in 2014`. The single-process CLI (`chat.py`) was never
+affected — its persistent `iface.history` keeps `resolved` — so this was strictly a web-client
+state-serialisation bug.
+
+Fix: added a pure `nextConvo(convo, data)` helper to `chart.js` (the already-unit-tested render-helper
+module `app.js` reuses) that appends `{question, resolved, computed}` and caps the rolling window;
+`app.js` now builds `convo` through it instead of the inline `{question, computed}`. Kept in `chart.js`
+so it is covered by Node unit tests without a browser (`app.js` boots React at import and isn't
+unit-testable as-is). Tests: 4 `nextConvo` assertions in `chart.test.js` (keeps `resolved`, null/'' 
+defaults, 6-turn cap) + a Python server-contract regression in `test_apps.py`
+(`test_web_followup_chain_stays_on_scope_when_resolved_is_round_tripped`, on a synthetic 2013–2014
+frame) that fails if the third hop drops to a bare summary. *Discovery worth citing:* the web UI's
+statelessness means conversational memory correctness depends on the **client** faithfully
+round-tripping the server's interpretation, not just the visible Q&A — an HCI/architecture point about
+where "memory" actually lives in a stateless request model.
+
+**TDD + verification (web).** `chart.test.js` all assertions pass (node). Combined gate for this
+2026-07-31 session (both entries): **511 passed, 1 skipped**; ruff + mypy clean; `verify_results.py`
+35/35.
 
 ---
 

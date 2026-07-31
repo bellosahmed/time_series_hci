@@ -122,6 +122,21 @@ function legendHtml(c){
     '</div>';
 }
 
+// Append a completed turn to the rolling conversation memory sent back with the next question.
+// Crucially it keeps the server's `resolved` rewrite alongside the original question: the
+// deterministic follow-up resolver prefers the *resolved* form of the previous turn, so a
+// multi-hop chain ("hottest in 2013" -> "what about 2014?" -> "and humidity?") only stays on the
+// right scope/intent if `resolved` is round-tripped. Storing just {question, computed} silently
+// dropped it, so the third hop fell back to a whole-record answer. Kept here (a pure, unit-tested
+// helper) rather than inline in app.js so it can be covered without a browser.
+function nextConvo(convo, data, max = 6) {
+  return convo.concat([{
+    question: data.question,
+    resolved: data.resolved || null,
+    computed: data.computed || '',
+  }]).slice(-max);
+}
+
 if (typeof module !== 'undefined' && module.exports) {  // Node (tests); no-op in the browser
-  module.exports = { esc, drawChart, swatch, lineSwatch, legendHtml };
+  module.exports = { esc, drawChart, swatch, lineSwatch, legendHtml, nextConvo };
 }

@@ -229,7 +229,8 @@ function App() {
     }
     setMessages(m => m.slice(0, -1).concat({ type: 'bot', data }));   // replace the thinking bubble
     if (data && !data.error) {
-      setConvo(c => [...c, { question: data.question, computed: data.computed || '' }].slice(-6));
+      // Round-trip `resolved` too (see nextConvo): follow-up chains depend on it.
+      setConvo(c => nextConvo(c, data));
     }
     setBusy(false);
     setTimeout(() => inputRef.current && inputRef.current.focus(), 0);

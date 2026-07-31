@@ -1,7 +1,24 @@
 // Unit tests for the pure client-side render helpers (chart.js). Run: `node chart.test.js`.
 // Also driven from the Python suite via tests/test_web_js.py (skipped if node is absent).
 const assert = require('assert');
-const { esc, drawChart, swatch, lineSwatch, legendHtml } = require('./chart.js');
+const { esc, drawChart, swatch, lineSwatch, legendHtml, nextConvo } = require('./chart.js');
+
+// --- nextConvo: keeps the server's `resolved` rewrite so multi-hop follow-ups stay on scope ---
+let convo = nextConvo([], { question: 'hottest in 2013', resolved: null, computed: 'max T 35.48' });
+assert.strictEqual(convo.length, 1);
+assert.strictEqual(convo[0].resolved, null);            // self-contained turn -> no rewrite stored
+convo = nextConvo(convo, { question: 'what about 2014?', resolved: 'max in 2014', computed: 'max T 33.74' });
+assert.strictEqual(convo[1].resolved, 'max in 2014');   // the rewrite is carried, not dropped
+assert.strictEqual(convo[1].question, 'what about 2014?');
+// missing/empty fields degrade to null/'' rather than undefined
+const t = nextConvo([], { question: 'q' });
+assert.strictEqual(t[0].resolved, null);
+assert.strictEqual(t[0].computed, '');
+// rolling window cap
+let big = [];
+for (let i = 0; i < 9; i++) big = nextConvo(big, { question: 'q' + i, computed: '' });
+assert.strictEqual(big.length, 6);
+assert.strictEqual(big[0].question, 'q3');
 
 // --- esc ---
 assert.strictEqual(esc('<a>&'), '&lt;a&gt;&amp;');
