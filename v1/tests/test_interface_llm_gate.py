@@ -60,6 +60,24 @@ def test_llm_inventing_a_number_is_rejected_for_template(df, monkeypatch, caplog
     assert any("invented" in r.getMessage().lower() for r in caplog.records)
 
 
+def test_llm_inventing_a_number_on_a_multi_sensor_answer_is_rejected(df, monkeypatch, caplog):
+    # Live-observed real case (not just a design assumption): asking a multi-sensor question
+    # through a real local model actually produced a fabricated figure once, and the gate caught
+    # it and fell back to template exactly as it does for a single-sensor answer. Pin that down
+    # deterministically here so it doesn't depend on a live Ollama call to keep working.
+    from src import llm
+    monkeypatch.setattr(llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(llm, "plan", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "explain", lambda *a, **k: "Around 999.99 degrees and 999.99 percent.")
+    iface = interface.Interface(df, use_llm=True)
+    with caplog.at_level("WARNING"):
+        ans = iface.ask("what was the max temperature and humidity?")
+    assert len(ans.sensors) == 2                # the multi-sensor path was taken
+    assert "999.99" not in ans.text              # the fabricated figure never reaches the user
+    assert "Computed" in ans.text                # template fallback used instead
+    assert any("invented" in r.getMessage().lower() for r in caplog.records)
+
+
 def test_llm_faithful_phrasing_is_kept(df, monkeypatch):
     # When the LLM only rewords the exact facts (no invented numbers), keep its phrasing.
     from src import llm
