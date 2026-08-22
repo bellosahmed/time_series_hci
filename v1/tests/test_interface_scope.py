@@ -332,6 +332,19 @@ def test_multi_sensor_answer_matches_the_single_sensor_answer_exactly(multi_sens
     assert f"{solo.value['value']:.2f}" in combined.text
 
 
+def test_multi_sensor_threshold_is_not_mislabelled_as_a_vague_summary(multi_sensor_df):
+    # Regression: `intent` can still hold the "summary" default (no statistic keyword found)
+    # when `thr` is what actually routes the question, and the multi-sensor helper used to pass
+    # that stale "summary" straight through to `_reply`, which made `_assumption_notes` wrongly
+    # append "no specific statistic named" onto an answer that named one via `thr`.
+    iface = interface.Interface(multi_sensor_df)
+    ans = iface.ask("how often was p (mbar) and T (degC) above 100 last month?")
+    assert ans.intent == "threshold"
+    assert "no specific statistic named" not in ans.text
+    assert "p (mbar) was above 100" in ans.text
+    assert "T (degC) was above 100" in ans.text
+
+
 def test_correlation_with_three_sensors_stays_pairwise_and_says_so(multi_sensor_df):
     iface = interface.Interface(multi_sensor_df)
     ans = iface.ask("how do p (mbar), T (degC) and Tpot (K) relate?")

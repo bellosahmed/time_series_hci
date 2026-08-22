@@ -1526,7 +1526,12 @@ class Interface:
                 lines.append(f"{s}{where}: min={r['min']:.2f}, max={r['max']:.2f}, "
                              f"mean={r['mean']:.2f}, std={r['std']:.2f}, missing={r['missing']}")
         computed = "; ".join(lines) + "."
-        return self._reply(question, intent, None, sensors, computed=computed, context=ctx)
+        # `intent` may still hold the "summary" default from `_answer` if no statistic keyword was
+        # found before `thr` was checked (the single-sensor threshold branch hardcodes "threshold"
+        # for exactly this reason -- match it here, or `_assumption_notes` wrongly appends "no
+        # specific statistic named" onto a threshold answer that did name one, via `thr`).
+        reported_intent = "threshold" if thr is not None else intent
+        return self._reply(question, reported_intent, None, sensors, computed=computed, context=ctx)
 
 
 def repl(df: pd.DataFrame, use_llm: bool = False) -> None:  # pragma: no cover
