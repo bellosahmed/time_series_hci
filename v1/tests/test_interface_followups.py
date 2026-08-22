@@ -112,6 +112,14 @@ def test_history_accumulates_across_turns(df):
     assert iface.history[-1]["question"] == "min temperature"
 
 
+def test_history_window_keeps_the_ten_most_recent_turns(df):
+    iface = interface.Interface(df)
+    for i in range(11):
+        iface.ask(f"max temperature in 201{i % 9}")
+    assert len(iface.history) == 10
+    assert iface.history[-1]["question"] == "max temperature in 2011"
+
+
 def test_llm_rewriter_not_called_when_off_but_memory_still_works(df, monkeypatch):
     from src import llm
     calls = {"n": 0}

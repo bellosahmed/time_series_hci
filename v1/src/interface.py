@@ -636,7 +636,7 @@ class Interface:
                 ans.text = f"(Reading {fixes}.) {ans.text}"
             ans.understood = f"compound: {len(clauses)} sub-questions"
             self.history.append({"question": question, "resolved": question, "computed": ans.computed})
-            self.history = self.history[-6:]
+            self.history = self.history[-10:]
             return ans
         # Attempt follow-up resolution when the question is elliptical, or when a continuation cue
         # ("and…", "what about…") means it should inherit the prior scope even if it restates an
@@ -690,7 +690,7 @@ class Interface:
             if recovered is None:
                 clar = self._clarify(original, spell_fixes, clarify_words)
                 self.history.append({"question": original, "resolved": resolved, "computed": ""})
-                self.history = self.history[-6:]
+                self.history = self.history[-10:]
                 return clar
             interpretation = recovered
             resolved = interpretation
@@ -730,7 +730,7 @@ class Interface:
                          f"'recommend' them.)", None, resolve_sensors(resolved, cols))
             ask.understood = self._describe_understanding(resolved)
             self.history.append({"question": original, "resolved": resolved, "computed": ""})
-            self.history = self.history[-6:]
+            self.history = self.history[-10:]
             return ask
 
         ans = self._answer(resolved)
@@ -759,7 +759,7 @@ class Interface:
             ans.chart = None
 
         self.history.append({"question": question, "resolved": resolved, "computed": ans.computed})
-        self.history = self.history[-6:]        # keep a short rolling window
+        self.history = self.history[-10:]        # keep a short rolling window
         return ans
 
     def _scoped(self, question: str, sensor: str):
@@ -1229,6 +1229,16 @@ class Interface:
         if not len(raw_data):
             raw_data = data
 
+        # Multiple sensors named on a single-statistic question ("mean humidity and temperature in
+        # April 2009"): answer each one instead of silently keeping only sensors[0] (the previous
+        # behaviour dropped every sensor after the first with no signal to the user, even though
+        # `_understand` had correctly resolved all of them). Reuses the exact same query_engine /
+        # analysis calls the single-sensor branches below call, once per named sensor, so the two
+        # paths cannot silently disagree on a number. See docs/MULTI_SENSOR_ANSWERS_PLAN.md.
+        if len(sensors) > 1 and (thr is not None
+                                  or intent in ("max", "min", "mean", "spread", "summary", "trend")):
+            return self._answer_multi_sensor(question, intent, sensors, data, raw_data, where, thr, ctx)
+
         # Weather report: a multi-sensor snapshot for the chosen day/period.
         if intent == "weather":
             wanted = [c for c in ("T (degC)", "rh (%)", "Tdew (degC)", "p (mbar)", "wv (m/s)")
@@ -1351,6 +1361,13 @@ class Interface:
         if intent == "correlation":
             if len(sensors) < 2:
                 sensors = (sensors + ["T (degC)", "rho (g/m**3)"])[:2]
+            # Correlation is inherently pairwise. Naming a third+ sensor used to be silently
+            # dropped with no signal to the user; now the first two are used (as before) but the
+            # answer says so explicitly. See docs/MULTI_SENSOR_ANSWERS_PLAN.md.
+            extra_note = (f" Correlation compares two sensors at a time; using {sensors[0]} and "
+                          f"{sensors[1]} (also named: {', '.join(sensors[2:])})."
+                          if len(sensors) > 2 else "")
+            sensors = sensors[:2]
             a, b = sensors[0], sensors[1]
             cause_note = (" Note: this is correlation, not causation — the system measures "
                           "association, not cause." if causal else "")
@@ -1363,7 +1380,7 @@ class Interface:
                 return self._reply(question, intent, c, [a, b],
                                    computed=f"circular–linear correlation({deg}, {lin}){where} = {c:.3f} "
                                             f"({strength}; 0–1, unsigned; {deg} is a compass angle)."
-                                            f"{cause_note}",
+                                            f"{cause_note}{extra_note}",
                                    inferred="Wind direction wraps at 360°, so this uses a circular "
                                             "measure of association, not linear Pearson.")
             c = qe.get_correlation(data, a, b)
@@ -1372,7 +1389,8 @@ class Interface:
                 strength_sign = "no correlation"
             else:
                 strength_sign = f"{correlation_strength(c)} {'positive' if c > 0 else 'negative'} correlation"
-            computed = (f"correlation({a}, {b}){where} = {c:.3f} ({strength_sign}).{cause_note}")
+            computed = (f"correlation({a}, {b}){where} = {c:.3f} ({strength_sign})."
+                        f"{cause_note}{extra_note}")
             if is_correlation_breakdown_query(question):
                 # "why is that only moderate?" -- explain the NUMBER's own magnitude with real
                 # computed evidence, not a canned line: how much variance it linearly explains,
@@ -1461,6 +1479,54 @@ class Interface:
         # semantic search to tell an on-topic-but-unclear question (-> targeted suggestion) from an
         # off-topic one (-> polite redirect). See DOMAIN_THRESHOLD / SENSOR_HINTS above.
         return self._semantic_fallback(question)
+
+    def _answer_multi_sensor(self, question: str, intent: str, sensors: list[str],
+                              data: pd.DataFrame, raw_data: pd.DataFrame, where: str,
+                              thr, ctx: str | None) -> Answer:
+        """Answer a single-statistic question for every named sensor, instead of silently keeping
+        only the first. Calls the exact same query_engine / analysis functions the single-sensor
+        branches in `_answer` call, once per sensor, so the two paths cannot silently disagree on a
+        number (see docs/MULTI_SENSOR_ANSWERS_PLAN.md). `thr` takes priority over `intent`, matching
+        the precedence used in `_answer` (a threshold clause overrides whatever `intent` was routed).
+        """
+        lines: list[str] = []
+        for s in sensors:
+            if thr is not None:
+                op, value = thr
+                r = qe.threshold_events(data, s, op, value)
+                sign = "above" if op == ">" else "below"
+                lines.append(f"{s} was {sign} {value:g}{where} {r['count']} times "
+                             f"({r['pct']:.2f}%)")
+            elif intent == "trend":
+                if s in analysis.CIRCULAR_SENSORS:
+                    lines.append(f"{s}: a compass bearing, a linear trend is not meaningful on it")
+                    continue
+                per_year = analysis.trend_slope(data[s]) * 24 * 365.25
+                direction = ("rising" if per_year > 0.05 else
+                             "falling" if per_year < -0.05 else "roughly flat")
+                lines.append(f"{s}{where} is {direction} at {per_year:+.2f} per year")
+            elif s in analysis.CIRCULAR_SENSORS and intent in ("max", "min", "mean", "spread", "summary"):
+                cs = analysis.circular_stats_deg(data[s])
+                prevailing = analysis.compass_point(cs["mean"])
+                lines.append(f"{s}: prevailing direction {cs['mean']:.1f}° ({prevailing}), circular "
+                             f"std {cs['std']:.1f}° (a compass bearing; linear {intent} is not "
+                             "meaningful on it)")
+            elif intent == "max":
+                r = qe.get_max(raw_data, s)
+                lines.append(f"{s}: max{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}")
+            elif intent == "min":
+                r = qe.get_min(raw_data, s)
+                lines.append(f"{s}: min{where} was {r['value']:.2f} on {qe.fmt_when(r['when'])}")
+            elif intent in ("mean", "spread"):
+                r = qe.get_mean_std(raw_data, s)
+                lines.append(f"{s}{where} mean={r['mean']:.2f}, std={r['std']:.2f}, "
+                             f"range={r['range']:.2f}")
+            else:  # "summary"
+                r = qe.sensor_summary(raw_data, s)
+                lines.append(f"{s}{where}: min={r['min']:.2f}, max={r['max']:.2f}, "
+                             f"mean={r['mean']:.2f}, std={r['std']:.2f}, missing={r['missing']}")
+        computed = "; ".join(lines) + "."
+        return self._reply(question, intent, None, sensors, computed=computed, context=ctx)
 
 
 def repl(df: pd.DataFrame, use_llm: bool = False) -> None:  # pragma: no cover

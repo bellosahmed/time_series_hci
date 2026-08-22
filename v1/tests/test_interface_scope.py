@@ -306,3 +306,36 @@ def test_ask_forecast():
     ans = interface.Interface(df).ask("what will the temperature be next week?")
     assert ans.intent == "forecast"
     assert ans.value is not None and len(ans.value) == 14
+
+
+# Regression coverage for docs/MULTI_SENSOR_ANSWERS_PLAN.md: naming more than one sensor on a
+# single-statistic question used to silently keep only sensors[0] and drop the rest with no
+# signal to the user, even though the router had correctly resolved every named sensor.
+
+def test_mean_with_two_sensors_answers_both_not_just_the_first(multi_sensor_df):
+    iface = interface.Interface(multi_sensor_df)
+    ans = iface.ask("what was the mean p (mbar) and T (degC) last month?")
+    expected_p = multi_sensor_df.loc["2016-12-01":"2016-12-31", "p (mbar)"].mean()
+    expected_t = multi_sensor_df.loc["2016-12-01":"2016-12-31", "T (degC)"].mean()
+    assert "p (mbar)" in ans.text and "T (degC)" in ans.text
+    assert f"{expected_p:.2f}" in ans.text
+    assert f"{expected_t:.2f}" in ans.text
+    assert set(ans.sensors) == {"p (mbar)", "T (degC)"}
+
+
+def test_multi_sensor_answer_matches_the_single_sensor_answer_exactly(multi_sensor_df):
+    # The multi-sensor path must call the identical query_engine function as the single-sensor
+    # path, not a second implementation of the same statistic -- so the two can never disagree.
+    iface = interface.Interface(multi_sensor_df)
+    solo = iface.ask("what was the max p (mbar) last month?")
+    combined = iface.ask("what was the max p (mbar) and T (degC) last month?")
+    assert f"{solo.value['value']:.2f}" in combined.text
+
+
+def test_correlation_with_three_sensors_stays_pairwise_and_says_so(multi_sensor_df):
+    iface = interface.Interface(multi_sensor_df)
+    ans = iface.ask("how do p (mbar), T (degC) and Tpot (K) relate?")
+    assert ans.intent == "correlation"
+    assert ans.sensors == ["p (mbar)", "T (degC)"]          # first two, not silently all three
+    assert "compares two sensors at a time" in ans.text
+    assert "Tpot (K)" in ans.text                            # the dropped one is still named
