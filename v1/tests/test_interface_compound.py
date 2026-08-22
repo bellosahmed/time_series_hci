@@ -19,8 +19,22 @@ def _df():
                          "Tdew (degC)": rng.normal(5, 6, len(idx))}, index=idx)
 
 
+def _df2009():
+    """Hourly frame that spans 1 Jan 2009 so day-scoped compound questions can be tested."""
+    idx = pd.date_range("2009-01-01", "2009-02-01", freq="h")
+    rng = np.random.default_rng(1)
+    return pd.DataFrame({"T (degC)": rng.normal(0, 5, len(idx)),
+                         "rh (%)": rng.normal(85, 8, len(idx))}, index=idx)
+
+
 def _ask(q):
     iface = interface.Interface(_df())
+    iface.history = []
+    return iface.ask(q)
+
+
+def _ask2009(q):
+    iface = interface.Interface(_df2009())
     iface.history = []
     return iface.ask(q)
 
@@ -43,6 +57,31 @@ def test_each_part_computed_independently_and_appears_in_text():
     assert ans.intent == "multi"
     assert "rh (%)" in ans.text and "Tdew (degC)" in ans.text
     assert ans.text.strip().startswith("1.") and "\n2." in ans.text
+
+
+def test_shared_sensor_and_period_distribute_across_both_clauses():
+    # "max AND min temp in jan 1 2009" -> BOTH clauses are temperature on 1 Jan 2009. The bug was
+    # the first clause ("give me the max") losing the trailing sensor+date and defaulting to the
+    # whole-record temperature max.
+    ans = _ask2009("give me the max and min temp in jan 1 2009")
+    assert ans.intent == "multi"
+    assert isinstance(ans.value, list) and len(ans.value) == 2
+    assert {v["kind"] for v in ans.value} == {"max", "min"}
+    assert {v["sensor"] for v in ans.value} == {"T (degC)"}
+    for v in ans.value:
+        assert (v["when"].year, v["when"].month, v["when"].day) == (2009, 1, 1)
+
+
+def test_shared_trailing_period_distributes_when_sensors_differ():
+    # "max temp AND min humidity in 1 jan 2009" -> the shared trailing date applies to BOTH; the bug
+    # was the first clause ("give me the max temp") losing the date and using the whole record.
+    ans = _ask2009("give me the max temp and min humidity in 1 jan 2009")
+    assert ans.intent == "multi"
+    assert isinstance(ans.value, list) and len(ans.value) == 2
+    assert {v["kind"] for v in ans.value} == {"max", "min"}
+    assert {v["sensor"] for v in ans.value} == {"T (degC)", "rh (%)"}
+    for v in ans.value:
+        assert (v["when"].year, v["when"].month, v["when"].day) == (2009, 1, 1)
 
 
 def test_correlation_between_two_sensors_is_not_split():

@@ -382,6 +382,60 @@ class Interface:
             return None
         return answerable
 
+    def _period_key(self, clause: str):
+        """A hashable identity for whatever period a clause names (or None). Two clauses share a
+        period iff their keys are equal — used to tell a genuinely shared scope from two distinct ones.
+        """
+        day = resolve_day(clause)
+        if day is not None:
+            return ("day", day[0], day[1], day[2])   # (month, day, year_or_None)
+        start, end, _ = resolve_any_period(clause, self._anchor)
+        if start is not None or end is not None:
+            return ("range", start, end)
+        return None
+
+    def _period_text(self, clause: str):
+        """(period_key, minimal trailing text that reproduces it), or None if the clause names no
+        period. The shortest matching suffix is used so injecting it into a sibling clause carries the
+        date WITHOUT dragging along the donor's own sensor or intent word.
+        """
+        key = self._period_key(clause)
+        if key is None:
+            return None
+        words = clause.split()
+        for i in range(len(words) - 1, -1, -1):   # shortest suffix first
+            suffix = " ".join(words[i:])
+            if self._period_key(suffix) == key:
+                return key, suffix
+        return key, clause
+
+    def _distribute_scope(self, clauses: list[str]) -> list[str]:
+        """Back-fill an elliptical (gapped) clause with a sensor/period stated only once elsewhere.
+
+        "max AND min temp in jan 1 2009" splits into ["give me the max", "min temp in jan 1 2009"];
+        the first clause names neither sensor nor date and would otherwise default to the whole-record
+        temperature max. Here the sensor and the date are each shared by *exactly one* value across the
+        clauses, so they unambiguously belong to both parts — we inject them. When a sensor or period
+        is genuinely ambiguous (two different ones named), nothing is injected and the normal
+        assumption-notes path still flags the under-specified clause rather than guess.
+        """
+        cols = list(self.df.columns)
+        sensors = [resolve_sensors(c, cols) for c in clauses]
+        periods = [self._period_text(c) for c in clauses]
+        named = {s[0] for s in sensors if s}
+        shared_sensor = next(iter(named)) if len(named) == 1 else None
+        ptexts = {p[0]: p[1] for p in periods if p is not None}   # period_key -> text
+        shared_period = next(iter(ptexts.values())) if len(ptexts) == 1 else None
+        out: list[str] = []
+        for clause, sens, per in zip(clauses, sensors, periods, strict=True):
+            add = ""
+            if not sens and shared_sensor is not None:
+                add += f" {shared_sensor}"        # canonical column name — resolve_sensors matches it exactly
+            if per is None and shared_period is not None:
+                add += f" {shared_period}"
+            out.append(clause + add if add else clause)
+        return out
+
     def _answer_compound(self, clauses: list[str]) -> Answer:
         """Answer each sub-question independently through the deterministic engine and combine them.
 
@@ -628,6 +682,7 @@ class Interface:
         # before follow-up resolution because a compound question is self-contained.
         clauses = self._split_questions(question)
         if clauses:
+            clauses = self._distribute_scope(clauses)   # share a once-stated sensor/date across parts
             ans = self._answer_compound(clauses)
             ans.question = original
             if spell_fixes:

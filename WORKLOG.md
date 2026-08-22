@@ -5,6 +5,160 @@ A running log of what we built, tried, and decided. Newest entries at the top.
 
 ---
 
+## 2026-08-03
+
+### v1: blind independent re-rating of the 72-question routing benchmark + live dataset-connected coverage re-run
+
+**What I did:** acted as an independent **blind second rater** on the query-routing benchmark
+(`docs/evaluation/blind-worksheet/worksheet.csv`, 72 questions) — filled in my own intent/sensor/scope
+judgement for every question **without looking at the ground-truth labels first** (that's what keeps it
+blind), then scored inter-rater agreement with `query_coverage.score_blind_labels`. Separately, because
+label-vs-label agreement does **not** touch the data, I ran the **dataset-connected** check too:
+`query_coverage.score_coverage`, which routes every question through the real `Interface.ask()` on the
+loaded Jena data.
+
+**Blind inter-rater agreement (my labels vs the project's hand-authored labels — NO dataset involved):**
+intent **79.2%** (57/72), sensors **98.6%** (71/72), scope **97.2%** (70/72).
+
+**Dataset-connected routing coverage (live `Interface.ask()` on the real 70k-row Jena data):**
+GROUND_TRUTH (n=49) intent 98.0% / sensors 100% / scope 100% / overall 98.0%; HELD_OUT (n=23) 100% on
+all; COMBINED (n=72) intent **98.6%** / sensors **100%** / scope **100%** / overall **98.6%**.
+
+**The two numbers measure different things — this is the important distinction:** the blind 79.2% is
+*human/rater ambiguity about what the labels should be*; the live 98.6% is *whether the system's actual
+routing matches those labels on the real data*. They are not comparable and must not be conflated in the
+write-up.
+
+**Finding 1 (blind gap localises cleanly):** 13 of my 15 intent disagreements are the **same**
+disagreement — I labelled a specific statistic (mean/max) where the ground truth uses **`summary`**. The
+rule the ground truth follows: a sensor named with **no explicit statistic word** ("average", "max",
+"std") routes to a general summary rather than *guessing* one statistic. Both readings are defensible;
+this is exactly the genuine labelling ambiguity the blind worksheet exists to surface, not a routing bug.
+The 2 non-summary disagreements are real edge cases: "temperature at 3pm" (is a bare clock time a
+scope?) and "how gusty is the wind in july 2014" (gust column `max. wv` vs wind-speed `wv` — and the
+ground truth itself is internally inconsistent here, using `max. wv` for "wind gust last week" but `wv`
+for "how gusty is the wind").
+
+**Finding 2 (live run surfaces one honest failure):** on the real data the interface fails exactly one
+case — **"how breezy is it in june"** returns `intent=None` (fails to route) where the label expects
+`summary`. Same question I independently flagged as ambiguous in the blind pass, so it's a genuine weak
+spot in the router's handling of "how <adjective> is it" phrasing, not label noise. Still clears the
+`verify_results.py` ≥95% gate (98.6%).
+
+**Honesty caveat (must carry into the report):** I am an **automated** rater, so the blind pass is a
+*blind LLM-judge cross-check*, methodologically better than the non-blind LLM judge in
+`06-query-routing-coverage.md` §3 (I never saw the answers before rating) but **NOT** human inter-rater
+agreement — it must not be reported as such. `worksheet.csv` was edited in place with my labels (it's a
+reusable template and can be reset to blank).
+
+### v1: full re-verification + re-ran the comparative LLM benchmark (our app vs local Ollama models)
+
+**What I did (no code changes — verification only):** re-ran every documented gate for v1 against the
+intended interpreter (`/usr/bin/python3.12`, torch 2.11.0+cu128, CUDA available) to confirm the system
+still works end-to-end, then exercised both front-ends live and re-ran the external-LLM benchmark.
+
+**Gates — all green, matching the 2026-08-02 baseline:** `pytest tests/` → **513 passed / 1 skipped**
+(exit 0); `ruff check .` clean; `mypy src/` clean (23 files); `verify_results.py` → **35/35** (the 3
+advisory LLM items reported but excluded from pass/fail, as designed). No regressions.
+
+**Live smoke, not just tests:** ran the CLI (`apps/chat.py`) — returned the exact computed max
+(37.28 °C, 4 Jul 2015 16:00). Started the Flask web app (`apps/web/app.py`, 70,129 rows / 14 sensors)
+and drove its real HTTP endpoints: `/`, `/api/models` (local Ollama available, 3 models), `/api/detectors`,
+`/api/suggestions`, and four `/api/ask` queries (plain compute; LLM-worded avg humidity 2015 with
+`used_llm=true` and no invented numbers; anomaly count for 2014 via the `portfolio` detector; and the
+compound-scope case *"max and min temp in jan 1 2009"* → both clauses correctly scoped, max −4.17 /
+min −9.91, confirming the 2026-08-02 ellipsis fix holds in the running app). Server shut down cleanly.
+
+**Comparative benchmark (`docs/evaluation/benchmark/run_local.py`) — the design thesis, measured:**
+8 single-day compute questions, each contestant judged against an independently-recomputed oracle
+(straight from the raw CSV, ±0.01 tolerance — never grading the code against its own output).
+
+| Contestant | Score |
+| --- | --- |
+| **Our app** (deterministic query engine) | **8/8 — 100%** |
+| Gemma-4-E4B (Q6_K) | 6/8 — 75% |
+| llama3.2:3b | 1/8 — 12% |
+| Gemma-3-1B (F16) | 0/8 — 0% |
+
+**What this shows / the finding:** given the *identical* embedded raw data table and asked to compute
+directly, the LLMs fail even on max/min ("pick the largest number"), and **all three miss every mean** —
+averaging 144 rows is where they uniformly break down (Q3 and Q8 wrong for every model). Gemma-3-1B is
+effectively random, emitting out-of-range values (−1.00, 23.49). Our app is right on all 8 by
+construction, because it routes each question to the query engine and the LLM only words the result.
+This is the central premise made quantitative: **computation = code; the LLM only explains** — an LLM
+left to do the arithmetic produces plausible-but-wrong figures, exactly the failure v1 is built against.
+
+**Caveat (honest reporting):** the local-LLM columns are non-deterministic, so the specific wrong values
+shift run-to-run; the headline (app 100%; local LLMs poor, worst on means) is stable across runs. Raw
+replies written to `docs/evaluation/benchmark/results_local.csv` for audit. The external/OpenRouter leg
+(`run_openrouter.py`) was **not** re-run this session (it calls an external service and needs the API key).
+
+---
+
+## 2026-08-02
+
+### v1: fixed compound-question scope ellipsis — a shared sensor/date now distributes across both clauses (TDD)
+
+**Symptom (user-reported):** "give me the max **and** min temp in jan 1 2009" appeared to answer only
+one of the two. **Actual root cause (found by reproducing on the real data):** it *did* split into two,
+but the **first clause was silently wrong**. The splitter (`interface._split_questions`) cuts on "and"
+into independent clauses — `["give me the max", "min temp in jan 1 2009"]` — and the shared sensor
+(`temp`) and date (`jan 1 2009`) were written once but landed only on the *second* clause. The first
+clause, having neither, fell back to defaults (temperature, whole record) and returned the global
+**37.28 °C on 4 Jul 2015** instead of the max on 1 Jan 2009. Same failure for "max temp **and** min
+humidity in 1 jan 2009" (first clause lost the trailing date). This is a linguistic **gapping/ellipsis**:
+"[max __] and [min temp in jan 1 2009]" means the sensor+date distribute over both conjuncts.
+
+**Fix (`interface._distribute_scope`, called in `ask` before `_answer_compound`):** after splitting,
+back-fill any clause missing a sensor and/or period from a value that is stated *exactly once* across
+the clauses (so it unambiguously belongs to all of them). The sensor is injected as its **canonical
+column name** (`resolve_sensors` matches it exactly); the period is injected as the **shortest trailing
+text** that re-resolves to the same period (`_period_text` reuses `resolve_day`/`resolve_any_period`, so
+no date-parsing logic is duplicated). Now both clauses answer on 1 Jan 2009 (max −4.17, min −9.91).
+
+**Trade-off / safety choice:** distribution fires **only when unambiguous** — if two *different* sensors
+or two *different* dates are named (e.g. "max temp in 2015 and min humidity in 2013"), nothing is
+injected and each clause keeps its own scope, with the existing assumption-notes path still flagging any
+genuinely under-specified clause. This deliberately declines to guess rather than risk a silent-wrong
+merge, consistent with the verifiable-answers premise. `correlation`/`compare`/`between X and Y` remain
+unsplit as before.
+
+**Discovery:** the earlier compound tests only covered clauses that each carried their *own* full scope,
+so this whole class of *shared*-scope questions was untested — exactly where the bug lived. **Gates:**
+2 new TDD tests in `tests/test_interface_compound.py` (watched fail → pass); full suite **513 passed /
+1 skipped**, ruff + mypy clean, `verify_results.py` **35/35**.
+
+### v1: clarified/verified the `wd (deg)` circular-sensor handling (not a bug — working as designed)
+
+A question about `min wd (deg)` on 1 Jan 2009 surfaced confusion: the system doesn't return a plain
+minimum for wind direction, it returns *prevailing direction + circular spread* (e.g. 175.2° (S),
+spread 40.7°). Confirmed this is deliberate, correct behaviour — **the only "special" sensor is
+`wd (deg)`** and the reason is angular wrap-around, not the unit "degrees".
+
+**Why:** `wd (deg)` is a compass bearing that wraps at 360°, so 359° and 1° are 2° apart, not 358°. A
+linear `min`/`max`/`mean`/`std` on a wrapped angle is mathematically meaningless (a linear max just
+returns ~359°; a linear mean of a north-cluster near 0°/360° averages to ~180°, the exact wrong way).
+The trust layer therefore refuses the exact-but-wrong number and substitutes the correct circular
+statistic, explaining why.
+
+**Where in code:** `analysis.CIRCULAR_SENSORS = ("wd (deg)",)` — a hard-coded list of exactly one
+sensor, keyed on the column being an *angular quantity*, **not** on a units/"degrees" string match
+(otherwise `T (degC)` would wrongly break too). The guard reroutes `max/min/mean/spread/summary` to
+`analysis.circular_stats_deg` in `interface._answer` (interface.py:1316) and identically in
+`agent.py:70`. Circular–linear correlation (e.g. wind direction vs speed) uses
+`analysis.circular_linear_corr` (interface.py:1361).
+
+**Discovery / scope check:** verified against the real 14-column Jena header that `wd (deg)` is the
+*only* circular sensor — the two wind columns `wv (m/s)` and `max. wv (m/s)` are **speeds**
+(magnitudes), which don't wrap, so their linear min/max are valid. So there is no hidden set of
+"problem sensors": 13 answer with normal linear stats, 1 (direction) answers in circular form by
+design. Separately noted a *different* concern for the wind columns — the raw file's `-9999` error
+sentinels — which are stripped in `preprocess.py` before any stats run (a cleaning matter, not a
+circular-math one). Complements the 2026-07-31 Bug 1 entry, which added `summary` to this same
+circular branch.
+
+---
+
 ## 2026-07-31
 
 ### v1: architect/reviewer sweep — two live routing bugs found by probing the real model, fixed
