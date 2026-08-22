@@ -51,6 +51,16 @@ def test_wd_threshold_flags_circular_caveat():
     assert any(w in ans.computed.lower() for w in ("circular", "compass", "wrap"))
 
 
+def test_wd_threshold_flags_circular_caveat_when_multiple_sensors_named():
+    # Regression: the multi-sensor threshold path (_answer_multi_sensor) used to drop this
+    # caveat, since it duplicates the single-sensor threshold branch's computation but hadn't
+    # duplicated its circular-sensor caveat too.
+    ans = interface.Interface(_wd_df()).ask("how often was wind direction and temperature above 200?")
+    assert ans.intent == "threshold"
+    assert set(ans.sensors) == {"wd (deg)", "T (degC)"}
+    assert any(w in ans.computed.lower() for w in ("circular", "compass", "wrap"))
+
+
 def test_wd_correlation_is_circular_linear_unsigned():
     df = _wd_df()
     ans = interface.Interface(df).ask("relationship between wind direction and temperature")

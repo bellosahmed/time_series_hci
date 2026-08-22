@@ -1495,8 +1495,11 @@ class Interface:
                 op, value = thr
                 r = qe.threshold_events(data, s, op, value)
                 sign = "above" if op == ">" else "below"
+                caveat = (" (a compass bearing that wraps at 360°, so this is a literal angular "
+                          "comparison, not a directional 'more/less')"
+                          if s in analysis.CIRCULAR_SENSORS else "")
                 lines.append(f"{s} was {sign} {value:g}{where} {r['count']} times "
-                             f"({r['pct']:.2f}%)")
+                             f"({r['pct']:.2f}%){caveat}")
             elif intent == "trend":
                 if s in analysis.CIRCULAR_SENSORS:
                     lines.append(f"{s}: a compass bearing, a linear trend is not meaningful on it")
