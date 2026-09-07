@@ -21,6 +21,7 @@ from src import (  # noqa: E402
     analysis,
     anomaly,
     clustering,
+    config,
     evaluation,
     forecasting,
     interface,
@@ -33,7 +34,7 @@ from src import (  # noqa: E402
 )
 from src import query_engine as qe  # noqa: E402
 
-DATA = ROOT / "data" / "jena_climate_2009_2016.csv"
+DATA = config.DATA_PATH
 S = "T (degC)"
 checks: list[tuple[str, bool, str]] = []
 
@@ -186,7 +187,7 @@ check("interface exposes day-type classification for a real day",
 
 # 17. retrieval-quality evaluation (IR metrics on a hand-labelled query set). Evaluates the RAG
 # *retriever* (not the truth layer) with Precision@k / Recall@k / MRR / MAP / NDCG, and checks
-# the LSA retriever produces valid metrics on the same ground truth. See docs/RETRIEVAL_EVALUATION.md.
+# the LSA retriever produces valid metrics on the same ground truth. See docs/archive/RETRIEVAL_EVALUATION.md.
 gt = retrieval_eval.GROUND_TRUTH
 tfidf_metrics = retrieval_eval.evaluate_retriever(rag_system.Retriever(), gt, k=3)
 check("retriever IR metrics valid & TF-IDF MRR >= 0.8 on labelled queries",

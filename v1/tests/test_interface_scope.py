@@ -308,7 +308,7 @@ def test_ask_forecast():
     assert ans.value is not None and len(ans.value) == 14
 
 
-# Regression coverage for docs/MULTI_SENSOR_ANSWERS_PLAN.md: naming more than one sensor on a
+# Regression coverage for docs/archive/MULTI_SENSOR_ANSWERS_PLAN.md: naming more than one sensor on a
 # single-statistic question used to silently keep only sensors[0] and drop the rest with no
 # signal to the user, even though the router had correctly resolved every named sensor.
 

@@ -5,7 +5,28 @@ ask questions in plain English — *"what was the hottest day in 2015?"*, *"were
 — and it answers with **exact numbers computed by code**. A local LLM is optional and only *rewords*
 those numbers into friendly sentences; it never calculates anything.
 
-> **New here? Start with [GETTING_STARTED.md](GETTING_STARTED.md).** This README is the developer's map.
+## Quick start
+
+Verified working end to end (tests, independent verification harness, lint, type-check, CLI, web app,
+and every dissertation-reproducibility script — see **"How to check it works"** below for how to
+confirm this yourself):
+
+```bash
+cd code/v1
+python3.12 -m pip install -r requirements.txt              # one-time setup — CPU by default
+python3.12 apps/chat.py "what was the hottest temperature?" # ask a question
+python3.12 -m pytest tests/                                 # confirm the install: 520 passed, 1 skipped
+```
+
+That's the whole loop — nothing else is required to get an answer. The dataset must already be at
+`data/jena_climate_2009_2016.csv` (see **"About the data"** below); a local LLM, GPU support, and the
+web app are all optional extras, not prerequisites.
+
+> **First time setting this up, or hit a problem?** Go to
+> **[GETTING_STARTED.md](GETTING_STARTED.md)** — it covers getting the dataset, troubleshooting, and
+> a guided first run in plain language. This README is the developer's map: code layout and the full
+> command reference. The *"How to run it"* / *"How to check it works"* sections below are that
+> reference, in order.
 
 > **The one idea to remember:** **computation = code (the source of truth); the LLM only explains.**
 > This is the deliberate defence against language models making up figures.
@@ -109,7 +130,8 @@ Use **Python 3.12** (it has the dependencies and the GPU build of PyTorch).
 
 ```bash
 cd code/v1
-python3.12 -m pip install -r requirements.txt        # one-time setup
+python3.12 -m pip install -r requirements.txt        # one-time setup — CPU (default, no GPU needed)
+python3.12 -m pip install -r requirements-gpu.txt     # one-time setup — NVIDIA GPU (same pins, CUDA torch)
 ```
 
 **Run the whole pipeline once** (loads data, detects anomalies, prints a summary):
@@ -124,12 +146,32 @@ python3.12 -m src.main --data data/jena_climate_2009_2016.csv --sensor "T (degC)
 python3.12 apps/chat.py "what was the hottest temperature?"
 python3.12 apps/chat.py --llm                          # interactive
 python3.12 apps/chat.py --agent "compare the hottest of 2013, 2014 and 2015"   # multi-step tool-use
+python3.12 apps/chat.py --orchestrate "coldest temperature ever and the windiest reading"  # multi-agent decompose/dispatch/critique
 python3.12 apps/chat.py --detector mahalanobis "any unusual readings in 2014?"  # pick the anomaly detector
+```
+
+Real output from the first command above:
+
+```
+Loading + preprocessing data...
+Anomaly detector: portfolio
+
+Q: what was the hottest temperature?
+🔢 Computed: max T (degC) was 37.28 on 4 Jul 2015 16:00.
+📚 Context: T (degC) is the air temperature in degrees Celsius — how hot or cold it is outside. ...
+
+ℹ️ Covering the whole 2009–2016 record — name a year, month or season to narrow it.
+🧭 Understood: sensor=T (degC)
 ```
 
 > `--agent` plans several query-engine tool calls for a multi-step question. The LLM chooses the
 > tools; every number is still computed deterministically and faithfulness-checked. Pull a larger
 > model (`ollama pull llama3.1:8b`, or set `TSHCI_MODEL`) and it is used automatically.
+>
+> `--orchestrate` is the multi-agent path: an LLM decomposes a genuinely multi-part question into
+> sub-tasks, dispatches them to role-restricted agents in parallel, then a Critic and a combiner
+> assemble one faithfulness-gated answer. Offline or single-topic, it collapses to the same
+> behaviour as `--agent`.
 >
 > `--detector` selects the **network-level** anomaly detector used for "unusual readings" questions —
 > `portfolio` (default) · `mahalanobis` · `isolation_forest` · `lof` · `ocsvm`. All read every sensor at
@@ -164,10 +206,12 @@ Stop it with `Ctrl-C` (or `pkill -f apps/web/app.py` if it's running in the back
 ## How to check it works
 
 ```bash
-python3.12 -m pytest tests/       # 266 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
-python3.12 verify_results.py      # 30/30 independent checks (results == pandas, day-types, retriever IR metrics, query-routing coverage, LLM invents 0 numbers)
+python3.12 -m pytest tests/       # 520 passed, 1 skipped (LLM/dense/BM25/MP tests skip if deps absent)
+python3.12 verify_results.py      # 35/35 independent checks (results == pandas, day-types, retriever IR metrics, query-routing coverage, LLM invents 0 numbers)
 python3.12 -m ruff check src tests apps    # lint (clean)
 python3.12 -m mypy                # lightweight static typing (clean)
+# — or the first two of the above, in one command: —
+bash reproduce.sh
 ```
 
 `verify_results.py` is the trust gate: it re-computes headline results independently and confirms the
@@ -176,6 +220,14 @@ hand-labelled, 49-question benchmark of realistic questions, scored against the 
 routing (intent/sensor/time-scope), the same "does it actually work on realistic input" principle
 `retrieval_eval.py` applies to the retriever. Currently 100% on all four scored dimensions; see
 `WORKLOG.md` (15 July 2026) for the honest first run (91.8%) and the specific gaps it found and closed.
+A handful of its checks print as "advisory" in the output — reported for transparency, not counted
+toward the 35/35, because they measure something inherently fuzzy (e.g. one LLM judging another)
+rather than an exact, checkable claim.
+
+For a specific dissertation-cited figure beyond what `verify_results.py` covers, four narrower
+scripts at the project root each reproduce one figure independently (from saved checkpoints, not
+the notebook) — see the **"Verification & analysis scripts"** table below for which script proves
+which claim.
 
 **Transparency:** every `Answer` also carries `.understood` — a short trace of what the deterministic
 parser found (sensor, time scope, hour), independent of intent routing or LLM phrasing, and guaranteed
@@ -193,10 +245,25 @@ web UI (`🧭 parsed: ...`).
 | `notebooks/` | 5 Jupyter notebooks — walkthrough, EDA, methods, interface, deep models (see `notebooks/README.md`) |
 | `apps/` | things you **run**: `chat.py` (CLI) and `web/` (browser app) |
 | `report/` | things you **read**: the write-up, evaluation, model comparison (see below) |
-| `docs/` | design & review notes: `UNDERSTANDING_V1.md`, `ASSESSMENT_AND_RECOMMENDATIONS.md`, `AGENTIC_AND_POLISH.md`, `RETRIEVAL_EVALUATION.md`, `CHAT_MEMORY_PLAN.md`, `evaluation/` (below) |
+| `docs/` | `UNDERSTANDING_V1.md` (design walkthrough), `evaluation/` (below), `archive/` (below) |
 | `docs/evaluation/` | **how each of the 6 evaluation methods works, with reproducible real evidence** — start at `docs/evaluation/README.md` |
-| `verify_results.py` | the 30/30 independent verification of results |
+| `docs/archive/` | dated dev-diary snapshots kept for the record, not living docs — figures inside are stale (superseded by the current test/verify counts above): `ASSESSMENT_AND_RECOMMENDATIONS.md`, `AGENTIC_AND_POLISH.md`, `RETRIEVAL_EVALUATION.md`, `CHAT_MEMORY_PLAN.md`, `MULTI_SENSOR_ANSWERS_PLAN.md` |
 | `pyproject.toml` | package metadata + pytest/ruff config (puts `src` on the path from any directory) |
+| `reproduce.sh` | one command that runs the test suite + `verify_results.py` — see "How to check it works" above |
+
+### Verification & analysis scripts (repo root)
+
+Five scripts live at the top level. **Most users only need the first one** — the other four are
+narrow, dissertation-specific reproducibility checks, kept at root (not moved into a subfolder)
+so the paths already cited throughout `docs/` and `report/` stay valid.
+
+| Script | Who needs it | What it does |
+| --- | --- | --- |
+| `verify_results.py` | **everyone** — this is `reproduce.sh`'s second step | the 35/35 independent verification: results == pandas, day-types, retriever IR metrics, query-routing coverage, LLM invents 0 numbers |
+| `verify_network_level_results.py` | dissertation reviewers | guards the Chapter 4 §4.4 network-level AP figures against silent drift (CSV vs. cited numbers) |
+| `verify_network_level_from_checkpoints.py` | dissertation reviewers | rebuilds each detector architecture from its saved checkpoint and reruns the fault-injection protocol from scratch — the strongest reproducibility check of the four |
+| `verify_cudnn_determinism.py` | dissertation reviewers | isolates whether cuDNN non-determinism explains a training-run discrepancy found by the script above |
+| `network_level_prf1.py` | dissertation reviewers | extends the checkpoint check with precision/recall/F1 at each detector's best-F1 threshold, plus the Appendix bar chart |
 
 ### Docs in `report/`
 - `REPORT.md` — the MSc report draft

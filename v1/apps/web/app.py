@@ -25,9 +25,10 @@ from flask import Flask, jsonify, request, send_from_directory
 HERE = Path(__file__).resolve().parent              # .../v1/apps/web
 V1 = HERE.parent.parent                             # .../v1
 sys.path.insert(0, str(V1))
-DATA = V1 / "data" / "jena_climate_2009_2016.csv"
 
-from src import interface, llm, preprocess  # noqa: E402
+from src import config, interface, llm, preprocess  # noqa: E402
+
+DATA = config.DATA_PATH
 
 SUGGESTIONS = [
     "What was the hottest temperature?",

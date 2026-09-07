@@ -165,3 +165,35 @@ def test_grayzone_without_llm_still_asks(monkeypatch):
     iface = interface.Interface(_df(), use_llm=True)
     ans = iface.ask("avarge tempratur")
     assert ans.value is None                            # asks to clarify, as today
+
+
+# --- Malformed-query scorer (src/eval_corpora.py) ------------------------------------------
+# Counts how many messy queries an interface answers correctly. Uses a stub interface so it
+# runs without Ollama.
+
+from src import eval_corpora as ec  # noqa: E402
+from src.query_coverage import Case  # noqa: E402
+
+
+class _ScorerStubAnswer:
+    def __init__(self, intent, sensors, value):
+        self.intent, self.sensors, self.value = intent, sensors, value
+
+
+class _ScorerStubIface:
+    def __init__(self, mapping):
+        self.mapping = mapping
+        self.history = []
+
+    def ask(self, q):
+        intent, sensors, value = self.mapping.get(q, (None, [], None))
+        return _ScorerStubAnswer(intent, sensors, value)
+
+
+def test_score_counts_correct_and_declined():
+    cases = [Case("q1", "max", frozenset({"T (degC)"}), True),
+             Case("q2", "mean", frozenset({"rh (%)"}), False)]
+    iface = _ScorerStubIface({"q1": ("max", ["T (degC)"], {"value": 1.0}),
+                              "q2": (None, [], None)})
+    out = ec.score_understanding(iface, cases)
+    assert out["n"] == 2 and out["correct"] == 1 and out["declined"] == 1

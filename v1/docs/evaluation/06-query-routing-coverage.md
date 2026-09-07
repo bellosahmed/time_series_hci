@@ -148,6 +148,12 @@ the independent judge's exact wording — and occasionally its exact classificat
 borderline case — isn't bit-identical every run. The disagreement *patterns* discussed below were
 consistent across runs; the exact percentages wobble by 1–2 points.)
 
+**Later reproduction (25 August 2026, identical command, identical model)**: intent 62.5%, sensors
+73.6%, scope 93.1%, with roughly 40 of the 72 questions disagreeing on at least one dimension
+(against 39 in the 15 July runs above) — the same wobble already documented, now shown across a
+six-week gap rather than same-day reruns. These are the figures this dissertation's Chapter 4 §4.8
+cites. The disagreement patterns discussed below held in this run too.
+
 **Honest reading — this is meaningfully lower than the 100% self-scored result, and that's the
 point.** An independent judge, even an imperfect automated one, surfaces real interpretive
 divergence a self-authored benchmark cannot see on its own. Two distinct, explicable patterns

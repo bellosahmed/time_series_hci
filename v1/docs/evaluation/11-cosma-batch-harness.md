@@ -9,7 +9,7 @@ is the textbook fit for an HPC array job. `src/batch_harness.py` shards a list o
 as one SLURM array task on COSMA/DiRAC, and aggregates the per-shard outputs into one results table.
 
 The harness **only schedules and collects** — every number still comes from the existing deterministic
-evaluators (`benchmark_external`, `orchestrator_eval`, `understanding_eval`). It computes nothing itself,
+evaluators (`benchmark_external`, `eval_corpora`). It computes nothing itself,
 so the trust invariant is untouched.
 
 ## Flow

@@ -26,12 +26,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 import pandas as pd
 
-V1 = Path(__file__).resolve().parents[1]
-DATA = V1 / "data" / "jena_climate_2009_2016.csv"
+from . import config
+
+DATA = config.DATA_PATH
 
 
 @dataclass(frozen=True)

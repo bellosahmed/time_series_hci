@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import llm
+
 
 @dataclass(frozen=True)
 class JobSpec:
@@ -161,8 +163,7 @@ def build_jobs(kinds: list[str], models: list[str]) -> list[JobSpec]:
     """Enumerate eval jobs from the existing corpora, in a fixed order with stable unique ids. For
     ``benchmark`` each case is crossed with every model; the other corpora are model-agnostic."""
     from . import benchmark_external as be
-    from . import orchestrator_eval as oe
-    from . import understanding_eval as ue
+    from . import eval_corpora as ec
     jobs: list[JobSpec] = []
     if "benchmark" in kinds:
         for model in models:
@@ -170,11 +171,11 @@ def build_jobs(kinds: list[str], models: list[str]) -> list[JobSpec]:
                 jobs.append(JobSpec(id=f"bench-{model}-{i:03d}", kind="benchmark",
                                     payload={"case_index": i, "model": model}))
     if "orchestrator" in kinds:
-        for i, (q, expected) in enumerate(oe.MULTIPART_CASES):
+        for i, (q, expected) in enumerate(ec.MULTIPART_CASES):
             jobs.append(JobSpec(id=f"orch-{i:03d}", kind="orchestrator",
                                 payload={"question": q, "expected": list(expected)}))
     if "understanding" in kinds:
-        for i, case in enumerate(ue.MALFORMED_CASES):
+        for i, case in enumerate(ec.MALFORMED_CASES):
             jobs.append(JobSpec(id=f"und-{i:03d}", kind="understanding",
                                 payload={"question": case.question, "intent": case.intent,
                                          "sensors": list(case.sensors)}))
@@ -241,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("plan", help="write jobs.jsonl + sbatch script")
     sp.add_argument("--kinds", required=True)
-    sp.add_argument("--models", default="llama3.2:3b")
+    sp.add_argument("--models", default=llm.DEFAULT_MODEL)
     sp.add_argument("--num-shards", type=int, required=True)
     sp.add_argument("--out-dir", required=True)
     sp.add_argument("--account", required=True)
@@ -252,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     sr.add_argument("--shard", type=int, required=True)
     sr.add_argument("--num-shards", type=int, required=True)
     sr.add_argument("--kinds", required=True)
-    sr.add_argument("--models", default="llama3.2:3b")
+    sr.add_argument("--models", default=llm.DEFAULT_MODEL)
     sr.add_argument("--out", required=True)
 
     sa = sub.add_parser("aggregate", help="merge shard JSONL into a results CSV")
@@ -261,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sl = sub.add_parser("local", help="run all shards in-process (no SLURM) and aggregate")
     sl.add_argument("--kinds", required=True)
-    sl.add_argument("--models", default="llama3.2:3b")
+    sl.add_argument("--models", default=llm.DEFAULT_MODEL)
     sl.add_argument("--num-shards", type=int, default=4)
     sl.add_argument("--out", default="results.csv")
 

@@ -33,16 +33,17 @@ Everything runs **locally and offline**. There are no cloud API keys or accounts
 
 ## Install
 
-From the `code/v1` directory, install the dependencies once:
+From the `code/v1` directory, install the dependencies once — pick the file that matches your
+hardware, both install the same package versions:
 
 ```bash
 cd code/v1
-python3.12 -m pip install -r requirements.txt
+python3.12 -m pip install -r requirements.txt        # default — CPU, no GPU needed
+python3.12 -m pip install -r requirements-gpu.txt     # NVIDIA GPU (CUDA 12.8 torch build) instead
 ```
 
-This pulls numpy, pandas, scikit-learn, statsmodels, matplotlib, PyTorch, and Flask. The pinned
-PyTorch is a CUDA build for an RTX 5070 — on a CPU-only machine, install the CPU wheel instead (see
-the note at the top of `requirements.txt`, and the torch note under Troubleshooting).
+This pulls numpy, pandas, scikit-learn, statsmodels, matplotlib, PyTorch, and Flask. The deep
+models (`src/deep.py`) run fine on CPU, just slower — the core Q&A doesn't need a GPU at all.
 
 ## Get the data
 
@@ -162,23 +163,19 @@ export TSHCI_MODEL=llama3.1:8b
 the dependencies (especially PyTorch) are pinned for 3.12, so another version may not resolve. Check
 with `python3.12 --version`.
 
-**PyTorch / GPU install trouble.** `requirements.txt` pins a CUDA 12.8 build of PyTorch for an
-NVIDIA RTX 5070. On a CPU-only machine, install the CPU wheel instead and drop the `+cu128` pin:
-
-```bash
-python3.12 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-```
-
-The deep models are device-aware and run fine on CPU (just slower); the core Q&A doesn't need a GPU
-at all.
+**PyTorch / GPU install trouble.** `requirements.txt` (the default) installs the CPU torch wheel —
+no GPU needed. If you have an NVIDIA GPU and want CUDA acceleration for the deep models, use
+`requirements-gpu.txt` instead (see Install above), which pins the CUDA 12.8 build used on the
+project's RTX 5070. The deep models are device-aware either way and run fine on CPU, just slower;
+the core Q&A doesn't need a GPU at all.
 
 ## Verify the install
 
 To confirm everything is wired up correctly:
 
 ```bash
-python3.12 -m pytest tests/        # 197 passed, 1 skipped (skips = optional LLM/dense-retriever deps)
-python3.12 verify_results.py       # 29/29 independent checks (results == pandas; LLM invents 0 numbers)
+python3.12 -m pytest tests/        # 520 passed, 1 skipped (skips = optional LLM/dense-retriever deps)
+python3.12 verify_results.py       # 35/35 independent checks (results == pandas; LLM invents 0 numbers)
 ```
 
 `verify_results.py` is the trust gate: it independently recomputes headline results and confirms the

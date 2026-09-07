@@ -52,7 +52,7 @@ def test_evaluate_lsa_retriever_on_ground_truth():
 def test_enriched_kb_lets_keyword_methods_handle_paraphrases():
     # After enriching the KB with everyday synonyms, even literal TF-IDF matches paraphrase
     # queries well — the earlier vocabulary-mismatch gap is closed by better documents, not a
-    # fancier retriever (see docs/RETRIEVAL_EVALUATION.md).
+    # fancier retriever (see docs/archive/RETRIEVAL_EVALUATION.md).
     m = re.evaluate_retriever(rag_system.Retriever(), re.PARAPHRASE_GROUND_TRUTH, k=3)
     assert m["mrr"] >= 0.8
 

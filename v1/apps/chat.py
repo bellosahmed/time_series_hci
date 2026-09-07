@@ -23,9 +23,9 @@ HERE = Path(__file__).resolve().parent          # .../v1/apps
 V1 = HERE.parent                                 # .../v1
 sys.path.insert(0, str(V1))                      # make `src` importable from anywhere
 
-from src import agent, interface, llm, orchestrator, preprocess
+from src import agent, config, interface, llm, orchestrator, preprocess
 
-DEFAULT_DATA = V1 / "data" / "jena_climate_2009_2016.csv"
+DEFAULT_DATA = config.DATA_PATH
 
 
 def pick_model(requested: str | None) -> str:

@@ -72,14 +72,28 @@ print(llm.faithfulness_ablation(iface, questions, model=model, n_repeats=3))
 raw_invention_rate = 0.0, gated_invention_rate = 0.0, n_total_runs = 15
 ```
 
-**Honest reading of this result**: on `llama3.2:3b` with this project's system prompt, the *raw,
-ungated* output never invented a number across 15 sampled runs (5 questions × 3 repeats) either.
-This means the gate's measured marginal contribution *on this sample* is not distinguishable from
-zero — the strict system prompt is already doing the work. This is not the same claim as "the gate
-demonstrably rescues bad output" — it's the more honest one: on the evidence collected so far, we
-have not observed a case the gate needed to catch. The gate is still worth keeping (it is cheap,
-and is the only thing standing between a future model/prompt regression and a hallucinated number
-reaching a user), but its value here is a documented hypothesis, not a demonstrated rescue.
+**Honest reading of this run (15 July)**: on `llama3.2:3b` with this project's system prompt, the
+*raw, ungated* output never invented a number across 15 sampled runs (5 questions × 3 repeats)
+either. This means the gate's measured marginal contribution on this particular sample is not
+distinguishable from zero — the strict system prompt is already doing most of the work. This is not
+the same claim as "the gate demonstrably rescues bad output"; the later reproduction below observed
+exactly that, on the same model and the same command.
+
+**Later reproduction (25 August 2026, identical command, identical model)**:
+
+```
+raw_invention_rate = 0.0, gated_invention_rate = 0.2, n_total_runs = 15
+```
+
+This run caught a real case live: asked "any anomalies in 2013?", the raw phrasing invented the
+figure 24.0 (matching nothing in the computed facts it was given), and the gate discarded it and
+fell back to the template. Read together, the two reproductions bracket what a genuinely stochastic
+small model does across separate sessions: on 15 July the raw output happened to be clean
+throughout, so the gate's contribution was not observed on that sample; on 25 August it was not, and
+the gate visibly did its job. Reporting both runs, rather than only the more flattering one, is the
+honest reading; the 25 August figures are the ones this dissertation's Chapter 4 §4.7 cites. The
+gate is worth keeping either way — it is cheap, and on at least one real reproduction it was not a
+documented hypothesis but a demonstrated rescue.
 
 **An exploratory attempt to find a harder counter-example, reported transparently even though it
 was inconclusive**: the same ablation was run against a smaller, differently-tuned community model

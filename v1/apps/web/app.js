@@ -16,11 +16,12 @@ function h(type, props, ...children) {
 }
 const html = htm.bind(h);
 
-// ---- header: dataset line, Ollama status lamp, "Explain with AI" toggle + model picker + detector ----
-function Header({ dsInfo, aiAvailable, models, model, setModel, llmOn, setLlmOn, detectors, detector, setDetector }) {
-  const ready = aiAvailable === true && models.length > 0;
-  const statusText = aiAvailable === null ? 'checking…'
-    : ready ? 'AI ready' : 'AI off — plain answers';
+// ---- header: dataset line only.
+// No manual switches: phrasing is automatic (a local model explains the answer when one is
+// available, otherwise the exact computed figure is shown directly — see BotMessage), the best
+// available model is picked automatically, and the anomaly detector is fixed to the project's
+// recommended default (the "portfolio" union — see Chapter 3 §3.5). One behaviour, no options.
+function Header({ dsInfo }) {
   return html`
     <header><div class="bar wrap">
       <div class="brand">
@@ -29,29 +30,6 @@ function Header({ dsInfo, aiAvailable, models, model, setModel, llmOn, setLlmOn,
           <h1>Weather Questions</h1>
           <div class="sub">${dsInfo}</div>
         </div>
-      </div>
-      <div class="controls">
-        <span class="status">
-          <span class=${'dot' + (ready ? ' on' : '')} aria-hidden="true"></span>
-          <span role="status" aria-live="polite">${statusText}</span>
-        </span>
-        <label class="toggle">
-          <input type="checkbox" checked=${llmOn} disabled=${!ready}
-                 onChange=${e => setLlmOn(e.target.checked)}/>
-          <span>Explain with AI</span>
-        </label>
-        <label class="sr-only" for="model">AI model</label>
-        <select id="model" disabled=${!ready} value=${model}
-                onChange=${e => setModel(e.target.value)}>
-          ${ready
-            ? models.map(n => html`<option key=${n} value=${n}>${n.length > 32 ? n.slice(0, 32) + '…' : n}</option>`)
-            : html`<option value="">plain template</option>`}
-        </select>
-        <label class="sr-only" for="detector">Anomaly detector</label>
-        <select id="detector" title="Anomaly detector (for 'any unusual readings?')"
-                value=${detector} onChange=${e => setDetector(e.target.value)}>
-          ${detectors.map(n => html`<option key=${n} value=${n}>${n.replace(/_/g, ' ')}</option>`)}
-        </select>
       </div>
     </div></header>`;
 }
@@ -181,7 +159,6 @@ function App() {
   const [convo, setConvo] = useState([]);      // recent {question, computed} turns for follow-ups
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
-  const [llmOn, setLlmOn] = useState(false);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState('');
   const [aiAvailable, setAiAvailable] = useState(null);  // null while the status check is pending
@@ -217,6 +194,9 @@ function App() {
     setQ('');
     setMessages(m => [...m, { type: 'user', text }, { type: 'thinking' }]);
     setBusy(true);
+    // No manual toggle: explain with the local model whenever one is available, else the exact
+    // computed figure is shown as-is (see BotMessage).
+    const llmOn = aiAvailable === true && models.length > 0;
     let data;
     try {
       const r = await fetch('/api/ask', {
@@ -237,9 +217,7 @@ function App() {
   }
 
   return html`
-    <${Header} dsInfo=${dsInfo} aiAvailable=${aiAvailable} models=${models} model=${model}
-               setModel=${setModel} llmOn=${llmOn} setLlmOn=${setLlmOn}
-               detectors=${detectors} detector=${detector} setDetector=${setDetector}/>
+    <${Header} dsInfo=${dsInfo}/>
     <${TrustBar}/>
     <${Chips} suggestions=${suggestions} onPick=${ask}/>
     <${Chat} messages=${messages} chatRef=${chatRef}/>

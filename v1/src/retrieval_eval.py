@@ -8,7 +8,7 @@ set (query → the sensor doc(s) that are genuinely relevant), run the retriever
 ranked output to the labels, and report the metrics in a table.
 
 This lets us quantify — not just assert — retrieval quality, and compare retrievers
-(TF-IDF baseline vs. LSA) on the same ground truth. See `docs/RETRIEVAL_EVALUATION.md`.
+(TF-IDF baseline vs. LSA) on the same ground truth. See `docs/archive/RETRIEVAL_EVALUATION.md`.
 """
 
 from __future__ import annotations

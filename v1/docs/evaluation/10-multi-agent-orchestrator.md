@@ -16,9 +16,9 @@ number is produced by `query_engine`/`analysis` via `agent.execute_step` (`facts
 
 ## Method
 
-Corpus: `src/orchestrator_eval.py::MULTIPART_CASES` — three multi-part questions, each hand-labelled
-(before running code) with the sensor/scope markers a *complete* answer must mention. `score()` counts
-how many produce a combined answer containing **every** expected marker. This measures **coverage**
+Corpus: `src/eval_corpora.py::MULTIPART_CASES` — three multi-part questions, each hand-labelled
+(before running code) with the sensor/scope markers a *complete* answer must mention.
+`score_orchestrator()` counts how many produce a combined answer containing **every** expected marker. This measures **coverage**
 (are both parts addressed, with the right sensors/scope) — deliberately *not* the numbers, which the
 query engine verifies exactly. Run twice: LLM **off** (deterministic baseline) vs **on** (Ollama
 `llama3.2:3b`).
@@ -87,11 +87,11 @@ orchestrator on : {'n': 3, 'complete': 3}
 ```bash
 cd code/v1
 python3.12 - <<'PY'
-from src import preprocess, orchestrator, orchestrator_eval as oe
+from src import preprocess, orchestrator, eval_corpora as ec
 raw = preprocess.clean(preprocess.load_data("data/jena_climate_2009_2016.csv"))
 df = preprocess.align(raw, freq="1h")
-print("off:", oe.score(orchestrator.Orchestrator(df, use_llm=False)))
-print("on :", oe.score(orchestrator.Orchestrator(df, use_llm=True)))
+print("off:", ec.score_orchestrator(orchestrator.Orchestrator(df, use_llm=False)))
+print("on :", ec.score_orchestrator(orchestrator.Orchestrator(df, use_llm=True)))
 PY
 # interactive:
 python3.12 apps/chat.py --orchestrate "coldest temperature ever and the windiest reading"

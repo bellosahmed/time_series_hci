@@ -193,13 +193,13 @@ python apps/web/app.py            # website (prints the URL)
 ## Remaining work
 
 1. **HCI user study** — the grade-gating item (SUS, task accuracy vs spreadsheet, trust); start
-   ethics approval in parallel. See `report/HCI_USER_STUDY.md` + `docs/ASSESSMENT_AND_RECOMMENDATIONS.md`.
+   ethics approval in parallel. See `report/HCI_USER_STUDY.md` + `docs/archive/ASSESSMENT_AND_RECOMMENDATIONS.md`.
 2. **Write-up** — methodology, results, limitations.
 3. Cheap credibility: GitHub Actions CI (pytest + ruff + verify), coverage number, `git tag v1.0`.
 4. Optional: Matrix Profile (`stumpy`), LOF / One-Class SVM, a multi-sensor deep model.
 
 **Done (2026-07-05):** agentic multi-step tool-use (`agent.py`), embedding-RAG option, larger-model
-auto-pick, `resolve_threshold` fix, mypy — see `docs/AGENTIC_AND_POLISH.md`. Retrieval evaluation
+auto-pick, `resolve_threshold` fix, mypy — see `docs/archive/AGENTIC_AND_POLISH.md`. Retrieval evaluation
 (`retrieval_eval.py`: P@k/R@k/MRR/MAP/NDCG) + four retrievers (TF-IDF/BM25/LSA/**dense** MiniLM) +
-Matrix Profile detector, from COP509 IR material — see `docs/RETRIEVAL_EVALUATION.md`. Key result:
+Matrix Profile detector, from COP509 IR material — see `docs/archive/RETRIEVAL_EVALUATION.md`. Key result:
 dense embeddings measurably beat keyword retrieval on paraphrases (MRR 0.267 → 0.500).

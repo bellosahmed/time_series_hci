@@ -105,3 +105,54 @@ events.
 - The z-score detector missing the 2015 July heatwave specifically is worth investigating further
   if this becomes a headline claim in the dissertation — it's the kind of honest negative result
   worth a sentence of discussion rather than burying.
+
+## Network-level comparison (all 14 sensors, 10 methods, injected cross-sectional faults)
+
+Everything above is the single-sensor comparison. The dissertation's Chapter 4 §4.4 also reports a
+second, separate comparison run over the full 14-sensor vector rather than one sensor's history, on
+the grounds (Chapter 3 §3.6) that a real network fault does not necessarily make any one sensor
+individually extreme. That comparison's source, traced here for the first time in writing: 100
+injected faults per fault type (spike, drift, stuck-sensor, global-freeze), scored by average
+precision, computed in `notebooks/05_deep_training_techniques.ipynb`, cell 48 (`ap_all_methods`),
+with the stuck-sensor "rematch" including a dedicated flatline/variance-collapse detector added in
+cell 56.
+
+**Real evidence (`notebooks/05_deep_training_techniques.ipynb`, cell 48 output)**:
+
+| Method | Family | Spike (4σ) | Drift (4σ, 24h) | Stuck (24h) |
+| --- | --- | --- | --- | --- |
+| Mahalanobis | classical | 0.931 | 0.880 | 0.642 |
+| LOF | classical | 0.894 | 0.702 | 0.112 |
+| Transformer | deep | 0.835 | 0.853 | 0.346 |
+| PCA | classical | 0.544 | 0.539 | 0.087 |
+| OC-SVM | classical | 0.507 | 0.419 | 0.052 |
+| CNN | deep | 0.506 | 0.373 | 0.048 |
+| GRU | deep | 0.151 | 0.211 | 0.043 |
+| LSTM | deep | 0.093 | 0.248 | 0.044 |
+| RNN | deep | 0.054 | 0.334 | 0.056 |
+| IsoForest | classical | 0.003 | 0.048 | 0.039 |
+
+On the stuck-sensor fault specifically, a dedicated flatline/variance-collapse detector (cell 56,
+not in the table above since it isn't a general-purpose method) reaches 0.791, ahead of every method
+in the table for that one fault type — the evidence behind the portfolio design in `anomaly.py`
+(§3.6 of the dissertation), which unions the Mahalanobis and flatline detectors rather than shipping
+whichever single method scores highest on average.
+
+**Honest caveat on provenance, matching Chapter 3 §3.10's own disclosure**: `Mahalanobis`, `LOF`,
+`OC-SVM`, and `IsoForest` are the same classical detectors implemented in `src/anomaly.py` and
+covered by the pytest suite; `PCA`, `CNN`, `GRU`, `LSTM`, `RNN`, and `Transformer` were trained and
+evaluated in this notebook specifically for the comparison and are not wired into `src/deep.py` or
+exercised by any test — the figures are real (reproducible by re-running the notebook cells above)
+but, unlike the single-sensor comparison earlier in this document, not re-checkable from the
+automated test suite alone.
+
+**Partial mitigation**: the two tables above are persisted as durable CSV artifacts
+(`docs/evaluation/results/network_level_ap_by_fault_type.csv` and
+`network_level_ap_rematch_with_flatline.csv`) rather than living only in the notebook's cell
+outputs, and `python3.12 verify_network_level_results.py` (repo root) checks those CSVs against
+every figure this dissertation cites — 12/12 checks passing as of 25 August 2026, including a
+real inconsistency this check caught and fixed: Chapter 4 §4.4 originally described the CNN and
+One-Class SVM detectors as "around 0.51 to 0.54," but their actual values (0.506, 0.507) round to
+0.51 only — the 0.54 figure belonged to PCA, a method not part of this comparison. That script
+does not retrain the models or re-run this notebook; it guards specifically against the persisted
+numbers drifting out of sync with the dissertation, which is the more likely failure mode.

@@ -3,6 +3,7 @@ is not a protected correlation/compare, and always yields >=1 SubTask covering t
 import pandas as pd
 
 from src import agent
+from src import eval_corpora as ec
 from src import orchestrator as orch
 from src.agent import Fact
 
@@ -117,3 +118,48 @@ def test_run_attaches_critic_flags():
     o.dispatch = lambda subs: [orch.RoleResult("statistician", "???", [], "", "")]
     ans = o.run("???")
     assert ans.flags and "Critic notes" in ans.text
+
+
+# --- Multi-part scorer (src/eval_corpora.py) -----------------------------------------------
+# Counts questions whose combined answer contains every expected fact. Uses a stub so it
+# runs without Ollama.
+
+class _ScorerStub:
+    def run(self, q):
+        class A:  # minimal duck-typed OrchestratedAnswer
+            text = "max temperature 30.00; min humidity 20.00"
+            computed = "max temperature 30.00; min humidity 20.00"
+        return A()
+
+
+def test_score_counts_complete_answers():
+    cases = [("max temp and min humidity", ("30.00", "20.00")),
+             ("something missing", ("999.99",))]
+    out = ec.score_orchestrator(_ScorerStub(), cases)
+    assert out["n"] == 2 and out["complete"] == 1
+
+
+# --- decompose/critique offline safety (src/llm.py, orchestrator's LLM calls) --------------
+# Offline-safe: with Ollama down they return the neutral default.
+
+def test_decompose_returns_none_when_unavailable(monkeypatch):
+    monkeypatch.setattr(orch.llm, "is_available", lambda *a, **k: False)
+    assert orch.llm.decompose("max temp 2015 and min humidity 2013",
+                              ["statistician", "correlator", "anomaly"],
+                              ["T (degC)", "rh (%)"]) is None
+
+
+def test_critique_returns_empty_when_unavailable(monkeypatch):
+    monkeypatch.setattr(orch.llm, "is_available", lambda *a, **k: False)
+    assert orch.llm.critique("q", [("statistician", "max T was 30.0")]) == []
+
+
+def test_decompose_parses_pairs(monkeypatch):
+    monkeypatch.setattr(orch.llm, "is_available", lambda *a, **k: True)
+    monkeypatch.setattr(orch.llm, "_generate_json", lambda *a, **k: {
+        "subtasks": [{"role": "statistician", "question": "max temperature in 2015"},
+                     {"role": "statistician", "question": "min humidity in 2013"}]})
+    out = orch.llm.decompose("max temp 2015 and min humidity 2013",
+                             ["statistician", "correlator", "anomaly"], ["T (degC)", "rh (%)"])
+    assert out == [("statistician", "max temperature in 2015"),
+                   ("statistician", "min humidity in 2013")]

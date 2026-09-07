@@ -1289,7 +1289,7 @@ class Interface:
         # behaviour dropped every sensor after the first with no signal to the user, even though
         # `_understand` had correctly resolved all of them). Reuses the exact same query_engine /
         # analysis calls the single-sensor branches below call, once per named sensor, so the two
-        # paths cannot silently disagree on a number. See docs/MULTI_SENSOR_ANSWERS_PLAN.md.
+        # paths cannot silently disagree on a number. See docs/archive/MULTI_SENSOR_ANSWERS_PLAN.md.
         if len(sensors) > 1 and (thr is not None
                                   or intent in ("max", "min", "mean", "spread", "summary", "trend")):
             return self._answer_multi_sensor(question, intent, sensors, data, raw_data, where, thr, ctx)
@@ -1418,7 +1418,7 @@ class Interface:
                 sensors = (sensors + ["T (degC)", "rho (g/m**3)"])[:2]
             # Correlation is inherently pairwise. Naming a third+ sensor used to be silently
             # dropped with no signal to the user; now the first two are used (as before) but the
-            # answer says so explicitly. See docs/MULTI_SENSOR_ANSWERS_PLAN.md.
+            # answer says so explicitly. See docs/archive/MULTI_SENSOR_ANSWERS_PLAN.md.
             extra_note = (f" Correlation compares two sensors at a time; using {sensors[0]} and "
                           f"{sensors[1]} (also named: {', '.join(sensors[2:])})."
                           if len(sensors) > 2 else "")
@@ -1541,7 +1541,7 @@ class Interface:
         """Answer a single-statistic question for every named sensor, instead of silently keeping
         only the first. Calls the exact same query_engine / analysis functions the single-sensor
         branches in `_answer` call, once per sensor, so the two paths cannot silently disagree on a
-        number (see docs/MULTI_SENSOR_ANSWERS_PLAN.md). `thr` takes priority over `intent`, matching
+        number (see docs/archive/MULTI_SENSOR_ANSWERS_PLAN.md). `thr` takes priority over `intent`, matching
         the precedence used in `_answer` (a threshold clause overrides whatever `intent` was routed).
         """
         lines: list[str] = []

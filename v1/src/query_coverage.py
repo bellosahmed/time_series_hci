@@ -18,6 +18,8 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 
+from . import llm
+
 # All 14 real Jena Climate sensor columns -- used as the allowed-sensors list for the LLM
 # independent-judge cross-check below (§3 mitigation for self-authored ground truth).
 ALL_SENSOR_COLUMNS = [
@@ -265,7 +267,7 @@ def score_blind_labels(cases: list[Case], filled_csv_path: str) -> dict:
     }
 
 
-def score_against_llm_judge(cases: list[Case], model: str = "llama3.2:3b") -> dict:
+def score_against_llm_judge(cases: list[Case], model: str = llm.DEFAULT_MODEL) -> dict:
     """Compare the hand-authored ground truth against an INDEPENDENT LLM's cold judgment of the
     same questions -- a fully-automatable partial substitute for human inter-rater agreement. The
     LLM never sees the hand-authored label; it judges each question from scratch, using only the

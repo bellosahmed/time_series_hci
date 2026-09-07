@@ -11,9 +11,10 @@ so the LLM widens understanding without ever routing or computing a number itsel
 
 ## Method
 
-Corpus: `src/understanding_eval.py::MALFORMED_CASES` — 8 deliberately messy queries (heavy typos,
+Corpus: `src/eval_corpora.py::MALFORMED_CASES` — 8 deliberately messy queries (heavy typos,
 paraphrase, scrambled order), each hand-labelled with the obviously-correct `(intent, sensors,
-has_scope)` before running any code. `score()` runs each through the real `Interface.ask` and counts:
+has_scope)` before running any code. `score_understanding()` runs each through the real
+`Interface.ask` and counts:
 *answered* (produced a value), *correct* (routed intent matches and expected sensors ⊆ routed
 sensors), *declined* (asked to rephrase — the right outcome for a genuinely ambiguous query, not a
 failure). Run twice: LLM **off** (deterministic baseline) vs LLM **on** (Ollama `llama3.2:3b`).
@@ -61,10 +62,10 @@ Per-question (LLM on), showing the accepted rewrite:
 ```bash
 cd code/v1
 python3.12 - <<'PY'
-from src import preprocess, interface, understanding_eval as ue
+from src import preprocess, interface, eval_corpora as ec
 raw = preprocess.clean(preprocess.load_data("data/jena_climate_2009_2016.csv"))
 df = preprocess.align(raw, freq="1h")
-print("off:", ue.score(interface.Interface(df, raw=raw, use_llm=False)))
-print("on :", ue.score(interface.Interface(df, raw=raw, use_llm=True)))
+print("off:", ec.score_understanding(interface.Interface(df, raw=raw, use_llm=False)))
+print("on :", ec.score_understanding(interface.Interface(df, raw=raw, use_llm=True)))
 PY
 ```

@@ -27,7 +27,7 @@ ever running a retriever against it, e.g. `("atmospheric pressure in millibars",
 
 **A harder, held-out generalisation test.** Because the sensor-description text was itself
 enriched with colloquial synonyms after an earlier evaluation pass found gaps (the retrieval
-system's own history — see `docs/RETRIEVAL_EVALUATION.md`), a fair test needs queries the
+system's own history — see `docs/archive/RETRIEVAL_EVALUATION.md`), a fair test needs queries the
 enrichment *couldn't* have been tuned to. `retrieval_eval` includes a held-out paraphrase set
 whose every descriptive word was verified **absent** from the knowledge base, specifically to
 test whether a retriever generalises or has just memorised the exact vocabulary it was tuned on.
@@ -57,7 +57,7 @@ returned — R@3 = 1.000 shows every single relevant document was actually found
 
 ## Honest caveats (a real, previously-documented finding, still true)
 
-`docs/RETRIEVAL_EVALUATION.md` documents a genuine before/after finding from when this system was
+`docs/archive/RETRIEVAL_EVALUATION.md` documents a genuine before/after finding from when this system was
 first evaluated: with the *original* one-line sensor descriptions, keyword-based retrievers
 (TF-IDF, BM25, LSA) tied a dense sentence-transformer encoder on standard queries but fell well
 behind it on paraphrased queries (e.g. "how muggy does it get" instead of "relative humidity") —
@@ -69,3 +69,21 @@ to MRR 0.250 (they have no word to match at all) while the dense encoder still g
 seen; a dense retriever is what still helps on words it's never seen. Neither retriever is simply
 "the best one" — which one wins depends entirely on how far outside the KB's vocabulary a real
 user's phrasing falls.
+
+**Recall@3 on this same held-out set** (added 25 August 2026, reproduced live against
+`retrieval_eval.HELDOUT_GROUND_TRUTH`, `k=3`, since Chapter 3 §3.8 of the dissertation cites this
+figure and it wasn't previously recorded here): keyword methods (TF-IDF/BM25/LSA, all identical on
+this set) reach `r_at_k=0.333`; the dense retriever, constructed via `rag_system.dense_retriever()`
+(sentence-transformers, `all-MiniLM-L6-v2` — **not** `EmbeddingRetriever()` with no `embed_fn`,
+which defaults to an Ollama embedding model and silently falls back to TF-IDF if that model isn't
+pulled locally, a mistake worth flagging since it looks identical to a keyword-only result until you
+check `.semantic`), reaches `r_at_k=0.667`. Reproduce with:
+
+```bash
+python3.12 -c "
+from src import retrieval_eval, rag_system
+gt = retrieval_eval.HELDOUT_GROUND_TRUTH
+print('TF-IDF', retrieval_eval.evaluate_retriever(rag_system.Retriever(), gt, k=3))
+print('Dense ', retrieval_eval.evaluate_retriever(rag_system.dense_retriever(), gt, k=3))
+"
+```

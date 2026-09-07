@@ -112,7 +112,7 @@ _Full workings + reproduce commands: `docs/evaluation/09-understanding-agent.md`
 `10-multi-agent-orchestrator.md`, `11-cosma-batch-harness.md`. Model = local Ollama `llama3.2:3b`._
 
 ### Finding 1 — Understanding/Clarifier agent (malformed-query recovery)
-- Corpus: 8 malformed/paraphrased/scrambled queries (`understanding_eval.MALFORMED_CASES`).
+- Corpus: 8 malformed/paraphrased/scrambled queries (`eval_corpora.MALFORMED_CASES`).
 - LLM **off**: 5 answered / 4 correct / 3 declined. LLM **on**: 8 answered / **5 correct** / 0 declined.
 - **Trade-off (honest):** coverage up (turned all 3 declines into answers, +1 correct) but the 3B model
   produced **3 plausible-but-wrong routable rewrites** (e.g. "umidty tocber 2012" → a weather report,
@@ -122,7 +122,7 @@ _Full workings + reproduce commands: `docs/evaluation/09-understanding-agent.md`
   offline the agent is skipped and behaviour is identical to the deterministic baseline.
 
 ### Finding 2 — Multi-agent orchestrator (decompose → dispatch → critique → combine)
-- Corpus: 3 genuinely multi-part questions (`orchestrator_eval.MULTIPART_CASES`); metric = coverage
+- Corpus: 3 genuinely multi-part questions (`eval_corpora.MULTIPART_CASES`); metric = coverage
   (both parts addressed with the right sensor/scope), numbers verified exactly elsewhere.
 - Coverage **off 2/3 → on 3/3** (the win is a true two-way LLM decomposition where the offline compound
   splitter surfaces only one sensor). Strict superset of the single-agent path (offline == `agent.py`,

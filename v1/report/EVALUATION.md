@@ -116,7 +116,7 @@ knowledge base** with everyday synonyms (a cheap ~14-string edit, made after thi
 gap) closed it for everyone — paraphrase MRR rose to **1.000 for TF-IDF/BM25/LSA** and 0.867 for dense.
 So on a small curated KB, **document quality dominates the retriever**: better descriptions beat a neural
 model, and cheap TF-IDF becomes the sensible default. Full before/after + per-query evidence:
-`docs/RETRIEVAL_EVALUATION.md`.
+`docs/archive/RETRIEVAL_EVALUATION.md`.
 
 **Held-out generalisation (not teaching to the test).** Because enrichment adds the words the paraphrase
 set probes, we also test a **held-out set** (n=6) whose every descriptive word is *verified absent* from

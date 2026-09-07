@@ -63,7 +63,7 @@
   <text x="172" y="515" class="sub" font-weight="600">Forecasting</text>
   <text x="172" y="533" class="small">STL deseasonalise, then ARIMA</text>
   <rect x="560" y="507" width="150" height="24" rx="12" fill="#dd8b1f"/>
-  <text x="635" y="523" text-anchor="middle" class="badge">BACKTESTED &#183; MASE 0.83</text>
+  <text x="635" y="523" text-anchor="middle" class="badge">BACKTESTED &#183; MASE 0.865</text>
 
   <line x1="440" y1="558" x2="440" y2="592" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
 

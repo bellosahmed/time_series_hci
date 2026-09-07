@@ -39,7 +39,7 @@ ST_MODEL = "all-MiniLM-L6-v2"     # the module's recommended local dense encoder
 # Each doc pairs the technical definition with everyday synonyms and "how it feels" language, so
 # retrieval (especially the dense encoder) can match colloquial/paraphrase queries. Enriched after
 # the retrieval evaluation showed the original one-line docs missed queries like "muggy" / "breezy"
-# (see docs/RETRIEVAL_EVALUATION.md); the effect is re-measured on the same query sets.
+# (see docs/archive/RETRIEVAL_EVALUATION.md); the effect is re-measured on the same query sets.
 SENSOR_DOCS: dict[str, str] = {
     "T (degC)": "T (degC) is the air temperature in degrees Celsius — how hot or cold it is outside. "
                 "Covers heat, warmth, chill and freezing conditions: scorching, hot, warm, mild, cool, "
